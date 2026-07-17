@@ -1,5 +1,6 @@
 package io.github.stardragonstudios.sol.lexer;
 
+import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 import org.junit.jupiter.api.Test;
@@ -311,12 +312,12 @@ final class LexerTest {
     @Test
     void rejectsUnterminatedStringLiterals() {
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("\"unterminated")
         );
 
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("\"first line\nsecond line\"")
         );
     }
@@ -324,7 +325,7 @@ final class LexerTest {
     @Test
     void rejectsInvalidStringEscapeSequences() {
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("\"invalid\\x\"")
         );
     }
@@ -332,22 +333,22 @@ final class LexerTest {
     @Test
     void rejectsInvalidCharacterLiterals() {
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("''")
         );
 
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("'ab'")
         );
 
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("'a")
         );
 
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("'\\x'")
         );
     }
@@ -492,12 +493,12 @@ final class LexerTest {
     @Test
     void rejectsStandaloneBitwiseSymbols() {
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("&")
         );
 
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("|")
         );
     }
@@ -624,12 +625,12 @@ final class LexerTest {
     @Test
     void rejectsUnterminatedBlockComments() {
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("/* unterminated")
         );
 
         assertThrows(
-            IllegalArgumentException.class,
+            LexicalException.class,
             () -> Lexer.scan("/* first\nsecond")
         );
     }
@@ -777,6 +778,125 @@ final class LexerTest {
                 new SourcePosition(4, 1, 5)
             ),
             tokens.get(1).span()
+        );
+    }
+
+    @Test
+    void reportsUnexpectedCharacterDiagnostic() {
+        var exception = assertThrows(
+            LexicalException.class,
+            () -> Lexer.scan("&")
+        );
+
+        var diagnostic = exception.diagnostic();
+
+        assertEquals("SOL-L001", diagnostic.code());
+        assertEquals(
+            DiagnosticSeverity.ERROR,
+            diagnostic.severity()
+        );
+        assertEquals(
+            "Unexpected character '&'.",
+            diagnostic.message()
+        );
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(1, 1, 2)
+            ),
+            diagnostic.span()
+        );
+    }
+
+    @Test
+    void reportsUnterminatedStringDiagnostic() {
+        var exception = assertThrows(
+            LexicalException.class,
+            () -> Lexer.scan("\"hello")
+        );
+
+        var diagnostic = exception.diagnostic();
+
+        assertEquals("SOL-L002", diagnostic.code());
+        assertEquals(
+            "Unterminated string literal.",
+            diagnostic.message()
+        );
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(6, 1, 7)
+            ),
+            diagnostic.span()
+        );
+    }
+
+    @Test
+    void reportsInvalidEscapeDiagnostic() {
+        var exception = assertThrows(
+            LexicalException.class,
+            () -> Lexer.scan("\"\\q\"")
+        );
+
+        var diagnostic = exception.diagnostic();
+
+        assertEquals("SOL-L003", diagnostic.code());
+        assertEquals(
+            "Invalid escape sequence '\\q'.",
+            diagnostic.message()
+        );
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(1, 1, 2),
+                new SourcePosition(3, 1, 4)
+            ),
+            diagnostic.span()
+        );
+    }
+
+    @Test
+    void reportsInvalidCharacterLiteralDiagnostic() {
+        var exception = assertThrows(
+            LexicalException.class,
+            () -> Lexer.scan("'ab'")
+        );
+
+        var diagnostic = exception.diagnostic();
+
+        assertEquals("SOL-L004", diagnostic.code());
+        assertEquals(
+            "Invalid character literal.",
+            diagnostic.message()
+        );
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(4, 1, 5)
+            ),
+            diagnostic.span()
+        );
+    }
+
+    @Test
+    void reportsUnterminatedBlockCommentDiagnostic() {
+        var exception = assertThrows(
+            LexicalException.class,
+            () -> Lexer.scan("/* hello")
+        );
+
+        var diagnostic = exception.diagnostic();
+
+        assertEquals("SOL-L005", diagnostic.code());
+        assertEquals(
+            "Unterminated block comment.",
+            diagnostic.message()
+        );
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(8, 1, 9)
+            ),
+            diagnostic.span()
         );
     }
 
