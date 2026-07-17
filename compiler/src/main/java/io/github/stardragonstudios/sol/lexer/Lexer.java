@@ -22,7 +22,10 @@ public final class Lexer {
         Map.entry("end", TokenKind.END),
         Map.entry("inject", TokenKind.INJECT),
         Map.entry("true", TokenKind.TRUE),
-        Map.entry("false", TokenKind.FALSE)
+        Map.entry("false", TokenKind.FALSE),
+        Map.entry("only", TokenKind.ONLY),
+        Map.entry("namespace", TokenKind.NAMESPACE),
+        Map.entry("as", TokenKind.AS)
     );
 
     private final String source;

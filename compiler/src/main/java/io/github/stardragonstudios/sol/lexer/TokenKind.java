@@ -26,6 +26,9 @@ public enum TokenKind {
     INJECT,
     TRUE,
     FALSE,
+    ONLY,
+    NAMESPACE,
+    AS,
 
     // Punctuation
     AT,
@@ -33,6 +36,7 @@ public enum TokenKind {
     RIGHT_PAREN,
     COMMA,
     COLON,
+    DOUBLE_COLON,
     DOT,
     ARROW,
 

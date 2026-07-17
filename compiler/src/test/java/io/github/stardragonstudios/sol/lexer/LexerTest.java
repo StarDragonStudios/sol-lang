@@ -35,7 +35,7 @@ final class LexerTest {
     @Test
     void recognizesAllInitialKeywords() {
         var tokens = Lexer.scan(
-            "fn let const if else while return then do end inject true false"
+            "fn let const if else while return then do end inject true false only namespace as"
         );
 
         assertEquals(
@@ -53,6 +53,9 @@ final class LexerTest {
                 TokenKind.INJECT,
                 TokenKind.TRUE,
                 TokenKind.FALSE,
+                TokenKind.ONLY,
+                TokenKind.NAMESPACE,
+                TokenKind.AS,
                 TokenKind.EOF
             ),
             kindsOf(tokens)
@@ -628,6 +631,152 @@ final class LexerTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> Lexer.scan("/* first\nsecond")
+        );
+    }
+
+    @Test
+    void scansModuleKeywords() {
+        var tokens = Lexer.scan(
+            "only namespace as"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.ONLY,
+                TokenKind.NAMESPACE,
+                TokenKind.AS,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of(
+                "only",
+                "namespace",
+                "as",
+                ""
+            ),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void scansModuleInjectionSyntax() {
+        var tokens = Lexer.scan(
+            "inject namespace std.console as io"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.INJECT,
+                TokenKind.NAMESPACE,
+                TokenKind.IDENTIFIER,
+                TokenKind.DOT,
+                TokenKind.IDENTIFIER,
+                TokenKind.AS,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of(
+                "inject",
+                "namespace",
+                "std",
+                ".",
+                "console",
+                "as",
+                "io",
+                ""
+            ),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void scansSelectiveModuleInjection() {
+        var tokens = Lexer.scan(
+            "inject std.console only print, print_line"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.INJECT,
+                TokenKind.IDENTIFIER,
+                TokenKind.DOT,
+                TokenKind.IDENTIFIER,
+                TokenKind.ONLY,
+                TokenKind.IDENTIFIER,
+                TokenKind.COMMA,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+    }
+
+    @Test
+    void scansNamespaceResolutionOperator() {
+        var tokens = Lexer.scan(
+            "io::print_line"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.DOUBLE_COLON,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of(
+                "io",
+                "::",
+                "print_line",
+                ""
+            ),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void distinguishesColonFromDoubleColon() {
+        var tokens = Lexer.scan(
+            "value:int io::print"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.COLON,
+                TokenKind.IDENTIFIER,
+                TokenKind.IDENTIFIER,
+                TokenKind.DOUBLE_COLON,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+    }
+
+    @Test
+    void preservesDoubleColonSpan() {
+        var tokens = Lexer.scan(
+            "io::print"
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(2, 1, 3),
+                new SourcePosition(4, 1, 5)
+            ),
+            tokens.get(1).span()
         );
     }
 
