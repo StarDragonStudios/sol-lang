@@ -519,7 +519,117 @@ final class LexerTest {
         );
     }
 
+    @Test
+    void ignoresSingleLineCommentsAndPreservesNewlines() {
+        var tokens = Lexer.scan(
+            "let // comment\nvalue"
+        );
 
+        assertEquals(
+            List.of(
+                TokenKind.LET,
+                TokenKind.NEWLINE,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of(
+                "let",
+                "\n",
+                "value",
+                ""
+            ),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void ignoresBlockComments() {
+        var tokens = Lexer.scan(
+            "left /* comment */ right"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("left", "right", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void recognizesCommentsAdjacentToTokens() {
+        var tokens = Lexer.scan(
+            "left/* comment */right"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("left", "right", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void tracksPositionsAcrossMultilineBlockComments() {
+        var tokens = Lexer.scan(
+            "a/* one\n two\r\n*/b"
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(16, 3, 3),
+                new SourcePosition(17, 3, 4)
+            ),
+            tokens.get(1).span()
+        );
+    }
+
+    @Test
+    void keepsSlashAsAnArithmeticOperator() {
+        var tokens = Lexer.scan("a / b");
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.SLASH,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+    }
+
+    @Test
+    void rejectsUnterminatedBlockComments() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("/* unterminated")
+        );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("/* first\nsecond")
+        );
+    }
 
     private static List<TokenKind> kindsOf(List<Token> tokens) {
         return tokens.stream()
