@@ -3,6 +3,9 @@ package io.github.stardragonstudios.sol.lexer;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 
+import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
+import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +30,12 @@ public final class Lexer {
         Map.entry("namespace", TokenKind.NAMESPACE),
         Map.entry("as", TokenKind.AS)
     );
+
+    private static final String UNEXPECTED_CHARACTER_CODE = "SOL-L001";
+    private static final String UNTERMINATED_STRING_CODE = "SOL-L002";
+    private static final String INVALID_ESCAPE_CODE = "SOL-L003";
+    private static final String INVALID_CHARACTER_LITERAL_CODE = "SOL-L004";
+    private static final String UNTERMINATED_BLOCK_COMMENT_CODE = "SOL-L005";
 
     private final String source;
 
@@ -191,10 +200,14 @@ public final class Lexer {
                 tokens
             );
 
-            default -> throw new IllegalArgumentException(
-                "Unexpected character '%s' at %d:%d."
-                    .formatted(current, line, column)
-            );
+            default -> {
+                var unexpected = advanceCharacter();
+
+                throw unexpectedCharacter(
+                    unexpected,
+                    start
+                );
+            }
         }
     }
 
@@ -255,8 +268,9 @@ public final class Lexer {
             advanceCharacter();
         }
 
-        throw commentError(
-            "Unterminated block comment",
+        throw lexicalError(
+            UNTERMINATED_BLOCK_COMMENT_CODE,
+            "Unterminated block comment.",
             start
         );
     }
@@ -276,85 +290,106 @@ public final class Lexer {
         column = 1;
     }
 
-    private static IllegalArgumentException commentError(String message, SourcePosition start) {
-        return new IllegalArgumentException(
-            "%s at %d:%d."
-                .formatted(
-                    message,
-                    start.line(),
-                    start.column()
-                )
-        );
-    }
-
     private void scanStringLiteral(SourcePosition start, List<Token> tokens) {
         var startOffset = offset;
 
-        // Opening quote.
+        // Consume opening quote.
         advanceCharacter();
 
         while (!isAtEnd()) {
-            var current = peek();
-
-            if (current == '"') {
+            if (peek() == '"') {
                 advanceCharacter();
 
-                tokens.add(new Token(
+                addToken(
                     TokenKind.STRING_LITERAL,
-                    source.substring(startOffset, offset),
-                    new SourceSpan(start, currentPosition())
-                ));
-
+                    startOffset,
+                    start,
+                    tokens
+                );
                 return;
             }
 
-            if (current == '\n' || current == '\r') throw literalError("Unterminated string literal", start);
+            if (peek() == '\n' || peek() == '\r') {
+                throw lexicalError(
+                    UNTERMINATED_STRING_CODE,
+                    "Unterminated string literal.",
+                    start
+                );
+            }
 
-            if (current == '\\') {
-                scanEscapeSequence("string", start);
+            if (peek() == '\\') {
+                scanEscapeSequence();
                 continue;
             }
 
             advanceCharacter();
         }
 
-        throw literalError("Unterminated string literal", start);
+        throw lexicalError(
+            UNTERMINATED_STRING_CODE,
+            "Unterminated string literal.",
+            start
+        );
     }
 
     private void scanCharacterLiteral(SourcePosition start, List<Token> tokens) {
         var startOffset = offset;
 
-        // Opening quote.
+        // Consume opening quote.
         advanceCharacter();
 
-        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw literalError("Unterminated character literal", start);
+        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw invalidCharacterLiteral(start);
 
-        if (peek() == '\'') throw literalError("Character literal cannot be empty", start);
+        if (peek() == '\'') {
+            advanceCharacter();
 
-        if (peek() == '\\') scanEscapeSequence("character", start);
+            throw invalidCharacterLiteral(start);
+        }
+
+        if (peek() == '\\') scanEscapeSequence();
         else advanceCharacter();
 
-        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw literalError("Unterminated character literal", start);
+        if (!isAtEnd() && peek() == '\'') {
+            advanceCharacter();
 
-        if (peek() != '\'') throw literalError("Character literal must contain exactly one character", start);
+            addToken(
+                TokenKind.CHAR_LITERAL,
+                startOffset,
+                start,
+                tokens
+            );
+            return;
+        }
 
-        // Closing quote.
-        advanceCharacter();
+        consumeInvalidCharacterLiteralTail();
 
-        tokens.add(new Token(TokenKind.CHAR_LITERAL, source.substring(startOffset, offset), new SourceSpan(start, currentPosition())));
+        throw invalidCharacterLiteral(start);
     }
 
-    private void scanEscapeSequence(String literalKind, SourcePosition literalStart) {
-        // Backslash.
+    private void scanEscapeSequence() {
+        var escapeStart = currentPosition();
+
+        // Consume '\'.
         advanceCharacter();
 
-        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw literalError("Unterminated " + literalKind + " literal", literalStart);
+        if (isAtEnd()) {
+            throw lexicalError(
+                INVALID_ESCAPE_CODE,
+                "Incomplete escape sequence.",
+                escapeStart
+            );
+        }
 
-        var escaped = peek();
+        var escapedCharacter = advanceCharacter();
 
-        if (!isValidEscapeCharacter(escaped)) throw new IllegalArgumentException("Invalid escape sequence '\\%s' at %d:%d.".formatted(escaped, line, column));
-
-        advanceCharacter();
+        if (!isValidEscapeCharacter(escapedCharacter)) {
+            throw lexicalError(
+                INVALID_ESCAPE_CODE,
+                "Invalid escape sequence '\\%s'."
+                    .formatted(escapedCharacter),
+                escapeStart
+            );
+        }
     }
 
     private static boolean isValidEscapeCharacter(char character) {
@@ -362,10 +397,6 @@ public final class Lexer {
             case 'n', 'r', 't', '\\', '"', '\'' -> true;
             default -> false;
         };
-    }
-
-    private static IllegalArgumentException literalError(String message, SourcePosition start) {
-        return new IllegalArgumentException("%s at %d:%d.".formatted(message, start.line(), start.column()));
     }
 
     private void scanNumber(SourcePosition start, List<Token> tokens) {
@@ -434,10 +465,7 @@ public final class Lexer {
 
         var kind = singleCharacterKind;
 
-        if (
-            !isAtEnd()
-                && peek() == expectedSecondCharacter
-        ) {
+        if (!isAtEnd() && peek() == expectedSecondCharacter) {
             advanceCharacter();
             kind = twoCharacterKind;
         }
@@ -449,16 +477,7 @@ public final class Lexer {
         var startOffset = offset;
         var firstCharacter = advanceCharacter();
 
-        if (isAtEnd() || peek() != expectedSecondCharacter) {
-            throw new IllegalArgumentException(
-                "Unexpected character '%s' at %d:%d."
-                    .formatted(
-                        firstCharacter,
-                        start.line(),
-                        start.column()
-                    )
-            );
-        }
+        if (isAtEnd() || peek() != expectedSecondCharacter) throw unexpectedCharacter(firstCharacter, start);
 
         advanceCharacter();
 
@@ -515,5 +534,56 @@ public final class Lexer {
 
     private static boolean isDigit(char character) {
         return character >= '0' && character <= '9';
+    }
+
+    private LexicalException lexicalError(String code, String message, SourcePosition start) {
+        return lexicalError(
+            code,
+            message,
+            new SourceSpan(start, currentPosition())
+        );
+    }
+
+    private static LexicalException lexicalError(String code, String message, SourceSpan span) {
+        return new LexicalException(
+            new Diagnostic(
+                code,
+                DiagnosticSeverity.ERROR,
+                message,
+                span
+            )
+        );
+    }
+
+    private LexicalException unexpectedCharacter(char character, SourcePosition start) {
+        return lexicalError(
+            UNEXPECTED_CHARACTER_CODE,
+            "Unexpected character '%s'."
+                .formatted(character),
+            start
+        );
+    }
+
+    private void consumeInvalidCharacterLiteralTail() {
+        while (
+            !isAtEnd()
+                && peek() != '\n'
+                && peek() != '\r'
+                && peek() != '\''
+        ) {
+            advanceCharacter();
+        }
+
+        if (!isAtEnd() && peek() == '\'') {
+            advanceCharacter();
+        }
+    }
+
+    private LexicalException invalidCharacterLiteral(SourcePosition start) {
+        return lexicalError(
+            INVALID_CHARACTER_LITERAL_CODE,
+            "Invalid character literal.",
+            start
+        );
     }
 }
