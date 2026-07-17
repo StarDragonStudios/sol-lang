@@ -140,6 +140,87 @@ final class LexerTest {
         );
     }
 
+    @Test
+    void scansIntegerLiterals() {
+        var tokens = Lexer.scan("0 42 123456");
+
+        assertEquals(
+            List.of(
+                TokenKind.INTEGER_LITERAL,
+                TokenKind.INTEGER_LITERAL,
+                TokenKind.INTEGER_LITERAL,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("0", "42", "123456", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void scansFloatingPointLiterals() {
+        var tokens = Lexer.scan("0.0 3.14 10.5");
+
+        assertEquals(
+            List.of(
+                TokenKind.FLOAT_LITERAL,
+                TokenKind.FLOAT_LITERAL,
+                TokenKind.FLOAT_LITERAL,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("0.0", "3.14", "10.5", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void allowsDigitsInsideIdentifiersAfterTheirFirstCharacter() {
+        var tokens = Lexer.scan("value42 42value");
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.INTEGER_LITERAL,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("value42", "42", "value", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void preservesNumericLiteralSpans() {
+        var tokens = Lexer.scan("42\n3.14");
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(2, 1, 3)
+            ),
+            tokens.get(0).span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(3, 2, 1),
+                new SourcePosition(7, 2, 5)
+            ),
+            tokens.get(2).span()
+        );
+    }
+
     private static List<TokenKind> kindsOf(List<Token> tokens) {
         return tokens.stream()
             .map(Token::kind)
