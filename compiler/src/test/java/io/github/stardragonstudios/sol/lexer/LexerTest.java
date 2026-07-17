@@ -35,7 +35,7 @@ final class LexerTest {
     @Test
     void recognizesAllInitialKeywords() {
         var tokens = Lexer.scan(
-            "fn let const if else while return then do end inject true false and or not"
+            "fn let const if else while return then do end inject true false"
         );
 
         assertEquals(
@@ -53,9 +53,6 @@ final class LexerTest {
                 TokenKind.INJECT,
                 TokenKind.TRUE,
                 TokenKind.FALSE,
-                TokenKind.AND,
-                TokenKind.OR,
-                TokenKind.NOT,
                 TokenKind.EOF
             ),
             kindsOf(tokens)
@@ -351,6 +348,178 @@ final class LexerTest {
             () -> Lexer.scan("'\\x'")
         );
     }
+
+    @Test
+    void scansPunctuationAndArithmeticOperators() {
+        var tokens = Lexer.scan(
+            "@ ( ) , : . -> = + - * / % ! && ||"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.AT,
+                TokenKind.LEFT_PAREN,
+                TokenKind.RIGHT_PAREN,
+                TokenKind.COMMA,
+                TokenKind.COLON,
+                TokenKind.DOT,
+                TokenKind.ARROW,
+                TokenKind.ASSIGN,
+                TokenKind.PLUS,
+                TokenKind.MINUS,
+                TokenKind.STAR,
+                TokenKind.SLASH,
+                TokenKind.PERCENT,
+                TokenKind.BANG,
+                TokenKind.AND_AND,
+                TokenKind.OR_OR,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of(
+                "@",
+                "(",
+                ")",
+                ",",
+                ":",
+                ".",
+                "->",
+                "=",
+                "+",
+                "-",
+                "*",
+                "/",
+                "%",
+                "!",
+                "&&",
+                "||",
+                ""
+            ),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void scansComparisonOperators() {
+        var tokens = Lexer.scan(
+            "== != < <= > >="
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.EQUAL_EQUAL,
+                TokenKind.NOT_EQUAL,
+                TokenKind.LESS,
+                TokenKind.LESS_EQUAL,
+                TokenKind.GREATER,
+                TokenKind.GREATER_EQUAL,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+    }
+
+    @Test
+    void prefersLongestOperatorsWithoutWhitespace() {
+        var tokens = Lexer.scan(
+            "!a&&b||c!=d==e<=f>=g"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.BANG,
+                TokenKind.IDENTIFIER,
+                TokenKind.AND_AND,
+                TokenKind.IDENTIFIER,
+                TokenKind.OR_OR,
+                TokenKind.IDENTIFIER,
+                TokenKind.NOT_EQUAL,
+                TokenKind.IDENTIFIER,
+                TokenKind.EQUAL_EQUAL,
+                TokenKind.IDENTIFIER,
+                TokenKind.LESS_EQUAL,
+                TokenKind.IDENTIFIER,
+                TokenKind.GREATER_EQUAL,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+    }
+
+    @Test
+    void scansAnnotationsAndFunctionSignatures() {
+        var tokens = Lexer.scan(
+            "@init\nfn iniciar() -> int"
+        );
+
+        assertEquals(
+            List.of(
+                TokenKind.AT,
+                TokenKind.IDENTIFIER,
+                TokenKind.NEWLINE,
+                TokenKind.FN,
+                TokenKind.IDENTIFIER,
+                TokenKind.LEFT_PAREN,
+                TokenKind.RIGHT_PAREN,
+                TokenKind.ARROW,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+    }
+
+    @Test
+    void preservesOperatorSpans() {
+        var tokens = Lexer.scan("a!=b");
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(1, 1, 2),
+                new SourcePosition(3, 1, 4)
+            ),
+            tokens.get(1).span()
+        );
+    }
+
+    @Test
+    void rejectsStandaloneBitwiseSymbols() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("&")
+        );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("|")
+        );
+    }
+
+    @Test
+    void treatsFormerLogicalKeywordsAsIdentifiers() {
+        var tokens = Lexer.scan("and or not");
+
+        assertEquals(
+            List.of(
+                TokenKind.IDENTIFIER,
+                TokenKind.IDENTIFIER,
+                TokenKind.IDENTIFIER,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("and", "or", "not", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+
 
     private static List<TokenKind> kindsOf(List<Token> tokens) {
         return tokens.stream()

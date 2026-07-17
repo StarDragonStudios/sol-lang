@@ -22,10 +22,7 @@ public final class Lexer {
         Map.entry("end", TokenKind.END),
         Map.entry("inject", TokenKind.INJECT),
         Map.entry("true", TokenKind.TRUE),
-        Map.entry("false", TokenKind.FALSE),
-        Map.entry("and", TokenKind.AND),
-        Map.entry("or", TokenKind.OR),
-        Map.entry("not", TokenKind.NOT)
+        Map.entry("false", TokenKind.FALSE)
     );
 
     private final String source;
@@ -75,8 +72,124 @@ public final class Lexer {
             case ' ', '\t', '\f' -> advanceCharacter();
             case '\n' -> scanNewline(start, tokens);
             case '\r' -> scanCarriageReturn(start, tokens);
+
             case '"' -> scanStringLiteral(start, tokens);
             case '\'' -> scanCharacterLiteral(start, tokens);
+
+            case '@' -> scanSingleCharacterToken(
+                start,
+                TokenKind.AT,
+                tokens
+            );
+
+            case '(' -> scanSingleCharacterToken(
+                start,
+                TokenKind.LEFT_PAREN,
+                tokens
+            );
+
+            case ')' -> scanSingleCharacterToken(
+                start,
+                TokenKind.RIGHT_PAREN,
+                tokens
+            );
+
+            case ',' -> scanSingleCharacterToken(
+                start,
+                TokenKind.COMMA,
+                tokens
+            );
+
+            case ':' -> scanSingleCharacterToken(
+                start,
+                TokenKind.COLON,
+                tokens
+            );
+
+            case '.' -> scanSingleCharacterToken(
+                start,
+                TokenKind.DOT,
+                tokens
+            );
+
+            case '+' -> scanSingleCharacterToken(
+                start,
+                TokenKind.PLUS,
+                tokens
+            );
+
+            case '*' -> scanSingleCharacterToken(
+                start,
+                TokenKind.STAR,
+                tokens
+            );
+
+            case '/' -> scanSingleCharacterToken(
+                start,
+                TokenKind.SLASH,
+                tokens
+            );
+
+            case '%' -> scanSingleCharacterToken(
+                start,
+                TokenKind.PERCENT,
+                tokens
+            );
+
+            case '-' -> scanOneOrTwoCharacterToken(
+                start,
+                '>',
+                TokenKind.MINUS,
+                TokenKind.ARROW,
+                tokens
+            );
+
+            case '=' -> scanOneOrTwoCharacterToken(
+                start,
+                '=',
+                TokenKind.ASSIGN,
+                TokenKind.EQUAL_EQUAL,
+                tokens
+            );
+
+            case '<' -> scanOneOrTwoCharacterToken(
+                start,
+                '=',
+                TokenKind.LESS,
+                TokenKind.LESS_EQUAL,
+                tokens
+            );
+
+            case '>' -> scanOneOrTwoCharacterToken(
+                start,
+                '=',
+                TokenKind.GREATER,
+                TokenKind.GREATER_EQUAL,
+                tokens
+            );
+
+            case '!' -> scanOneOrTwoCharacterToken(
+                start,
+                '=',
+                TokenKind.BANG,
+                TokenKind.NOT_EQUAL,
+                tokens
+            );
+
+            case '&' -> scanRequiredTwoCharacterToken(
+                start,
+                '&',
+                TokenKind.AND_AND,
+                tokens
+            );
+
+            case '|' -> scanRequiredTwoCharacterToken(
+                start,
+                '|',
+                TokenKind.OR_OR,
+                tokens
+            );
+
             default -> throw new IllegalArgumentException(
                 "Unexpected character '%s' at %d:%d."
                     .formatted(current, line, column)
@@ -214,6 +327,60 @@ public final class Lexer {
         column = 1;
 
         tokens.add(new Token(TokenKind.NEWLINE, source.substring(startOffset, offset), new SourceSpan(start, currentPosition())));
+    }
+
+    private void scanSingleCharacterToken(SourcePosition start, TokenKind kind, List<Token> tokens) {
+        var startOffset = offset;
+
+        advanceCharacter();
+
+        addToken(kind, startOffset, start, tokens);
+    }
+
+    private void scanOneOrTwoCharacterToken(SourcePosition start, char expectedSecondCharacter, TokenKind singleCharacterKind, TokenKind twoCharacterKind, List<Token> tokens) {
+        var startOffset = offset;
+
+        advanceCharacter();
+
+        var kind = singleCharacterKind;
+
+        if (
+            !isAtEnd()
+                && peek() == expectedSecondCharacter
+        ) {
+            advanceCharacter();
+            kind = twoCharacterKind;
+        }
+
+        addToken(kind, startOffset, start, tokens);
+    }
+
+    private void scanRequiredTwoCharacterToken(SourcePosition start, char expectedSecondCharacter, TokenKind kind, List<Token> tokens) {
+        var startOffset = offset;
+        var firstCharacter = advanceCharacter();
+
+        if (isAtEnd() || peek() != expectedSecondCharacter) {
+            throw new IllegalArgumentException(
+                "Unexpected character '%s' at %d:%d."
+                    .formatted(
+                        firstCharacter,
+                        start.line(),
+                        start.column()
+                    )
+            );
+        }
+
+        advanceCharacter();
+
+        addToken(kind, startOffset, start, tokens);
+    }
+
+    private void addToken(TokenKind kind, int startOffset, SourcePosition start, List<Token> tokens) {
+        tokens.add(new Token(
+            kind,
+            source.substring(startOffset, offset),
+            new SourceSpan(start, currentPosition())
+        ));
     }
 
     private boolean isAtEnd() {
