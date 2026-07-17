@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 final class LexerTest {
     @Test
@@ -218,6 +219,136 @@ final class LexerTest {
                 new SourcePosition(7, 2, 5)
             ),
             tokens.get(2).span()
+        );
+    }
+
+    @Test
+    void scansStringAndCharacterLiterals() {
+        var tokens = Lexer.scan("\"Hola\" 'a'");
+
+        assertEquals(
+            List.of(
+                TokenKind.STRING_LITERAL,
+                TokenKind.CHAR_LITERAL,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of("\"Hola\"", "'a'", ""),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void scansSupportedStringEscapeSequences() {
+        var source = "\"a\\n\\r\\t\\\\\\\"\\'\"";
+        var tokens = Lexer.scan(source);
+
+        assertEquals(
+            List.of(
+                TokenKind.STRING_LITERAL,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(source, tokens.getFirst().lexeme());
+    }
+
+    @Test
+    void scansSupportedCharacterEscapeSequences() {
+        var source = "'\\n' '\\r' '\\t' '\\'' '\\\\'";
+        var tokens = Lexer.scan(source);
+
+        assertEquals(
+            List.of(
+                TokenKind.CHAR_LITERAL,
+                TokenKind.CHAR_LITERAL,
+                TokenKind.CHAR_LITERAL,
+                TokenKind.CHAR_LITERAL,
+                TokenKind.CHAR_LITERAL,
+                TokenKind.EOF
+            ),
+            kindsOf(tokens)
+        );
+
+        assertEquals(
+            List.of(
+                "'\\n'",
+                "'\\r'",
+                "'\\t'",
+                "'\\''",
+                "'\\\\'",
+                ""
+            ),
+            lexemesOf(tokens)
+        );
+    }
+
+    @Test
+    void preservesLiteralSpans() {
+        var tokens = Lexer.scan("\"hi\"\n'a'");
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(4, 1, 5)
+            ),
+            tokens.get(0).span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(5, 2, 1),
+                new SourcePosition(8, 2, 4)
+            ),
+            tokens.get(2).span()
+        );
+    }
+
+    @Test
+    void rejectsUnterminatedStringLiterals() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("\"unterminated")
+        );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("\"first line\nsecond line\"")
+        );
+    }
+
+    @Test
+    void rejectsInvalidStringEscapeSequences() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("\"invalid\\x\"")
+        );
+    }
+
+    @Test
+    void rejectsInvalidCharacterLiterals() {
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("''")
+        );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("'ab'")
+        );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("'a")
+        );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Lexer.scan("'\\x'")
         );
     }
 

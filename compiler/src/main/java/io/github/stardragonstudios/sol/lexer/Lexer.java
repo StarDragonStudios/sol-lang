@@ -8,8 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static java.lang.Character.isDigit;
-
 public final class Lexer {
     private static final Map<String, TokenKind> KEYWORDS = Map.ofEntries(
         Map.entry("fn", TokenKind.FN),
@@ -47,9 +45,7 @@ public final class Lexer {
     public List<Token> scan() {
         var tokens = new ArrayList<Token>();
 
-        while (!isAtEnd()) {
-            scanNextToken(tokens);
-        }
+        while (!isAtEnd()) scanNextToken(tokens);
 
         var position = currentPosition();
         tokens.add(new Token(
@@ -79,6 +75,8 @@ public final class Lexer {
             case ' ', '\t', '\f' -> advanceCharacter();
             case '\n' -> scanNewline(start, tokens);
             case '\r' -> scanCarriageReturn(start, tokens);
+            case '"' -> scanStringLiteral(start, tokens);
+            case '\'' -> scanCharacterLiteral(start, tokens);
             default -> throw new IllegalArgumentException(
                 "Unexpected character '%s' at %d:%d."
                     .formatted(current, line, column)
@@ -86,56 +84,114 @@ public final class Lexer {
         }
     }
 
-    private void scanNumber(SourcePosition start, List<Token> tokens) {
+    private void scanStringLiteral(SourcePosition start, List<Token> tokens) {
         var startOffset = offset;
 
-        while (!isAtEnd() && isDigit(peek())) {
+        // Opening quote.
+        advanceCharacter();
+
+        while (!isAtEnd()) {
+            var current = peek();
+
+            if (current == '"') {
+                advanceCharacter();
+
+                tokens.add(new Token(
+                    TokenKind.STRING_LITERAL,
+                    source.substring(startOffset, offset),
+                    new SourceSpan(start, currentPosition())
+                ));
+
+                return;
+            }
+
+            if (current == '\n' || current == '\r') throw literalError("Unterminated string literal", start);
+
+            if (current == '\\') {
+                scanEscapeSequence("string", start);
+                continue;
+            }
+
             advanceCharacter();
         }
 
+        throw literalError("Unterminated string literal", start);
+    }
+
+    private void scanCharacterLiteral(SourcePosition start, List<Token> tokens) {
+        var startOffset = offset;
+
+        // Opening quote.
+        advanceCharacter();
+
+        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw literalError("Unterminated character literal", start);
+
+        if (peek() == '\'') throw literalError("Character literal cannot be empty", start);
+
+        if (peek() == '\\') scanEscapeSequence("character", start);
+        else advanceCharacter();
+
+        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw literalError("Unterminated character literal", start);
+
+        if (peek() != '\'') throw literalError("Character literal must contain exactly one character", start);
+
+        // Closing quote.
+        advanceCharacter();
+
+        tokens.add(new Token(TokenKind.CHAR_LITERAL, source.substring(startOffset, offset), new SourceSpan(start, currentPosition())));
+    }
+
+    private void scanEscapeSequence(String literalKind, SourcePosition literalStart) {
+        // Backslash.
+        advanceCharacter();
+
+        if (isAtEnd() || peek() == '\n' || peek() == '\r') throw literalError("Unterminated " + literalKind + " literal", literalStart);
+
+        var escaped = peek();
+
+        if (!isValidEscapeCharacter(escaped)) throw new IllegalArgumentException("Invalid escape sequence '\\%s' at %d:%d.".formatted(escaped, line, column));
+
+        advanceCharacter();
+    }
+
+    private static boolean isValidEscapeCharacter(char character) {
+        return switch (character) {
+            case 'n', 'r', 't', '\\', '"', '\'' -> true;
+            default -> false;
+        };
+    }
+
+    private static IllegalArgumentException literalError(String message, SourcePosition start) {
+        return new IllegalArgumentException("%s at %d:%d.".formatted(message, start.line(), start.column()));
+    }
+
+    private void scanNumber(SourcePosition start, List<Token> tokens) {
+        var startOffset = offset;
+
+        while (!isAtEnd() && isDigit(peek())) advanceCharacter();
+
         var kind = TokenKind.INTEGER_LITERAL;
 
-        if (
-            !isAtEnd()
-                && peek() == '.'
-                && hasNextCharacter()
-                && isDigit(peekNext())
-        ) {
+        if (!isAtEnd() && peek() == '.' && hasNextCharacter() && isDigit(peekNext())) {
             kind = TokenKind.FLOAT_LITERAL;
 
-            advanceCharacter();
-
-            while (!isAtEnd() && isDigit(peek())) {
-                advanceCharacter();
-            }
+            do advanceCharacter(); while (!isAtEnd() && isDigit(peek()));
         }
 
         var lexeme = source.substring(startOffset, offset);
 
-        tokens.add(new Token(
-            kind,
-            lexeme,
-            new SourceSpan(start, currentPosition())
-        ));
+        tokens.add(new Token(kind, lexeme, new SourceSpan(start, currentPosition())));
     }
 
     private void scanIdentifier(SourcePosition start, List<Token> tokens) {
         var startOffset = offset;
 
-        advanceCharacter();
-
-        while (!isAtEnd() && isIdentifierPart(peek())) {
-            advanceCharacter();
-        }
+        do advanceCharacter(); while (!isAtEnd() && isIdentifierPart(peek()));
 
         var lexeme = source.substring(startOffset, offset);
         var kind = KEYWORDS.getOrDefault(lexeme, TokenKind.IDENTIFIER);
 
-        tokens.add(new Token(
-            kind,
-            lexeme,
-            new SourceSpan(start, currentPosition())
-        ));
+        tokens.add(new Token(kind, lexeme, new SourceSpan(start, currentPosition())));
     }
 
     private void scanNewline(SourcePosition start, List<Token> tokens) {
@@ -144,11 +200,7 @@ public final class Lexer {
         line++;
         column = 1;
 
-        tokens.add(new Token(
-            TokenKind.NEWLINE,
-            lexeme,
-            new SourceSpan(start, currentPosition())
-        ));
+        tokens.add(new Token(TokenKind.NEWLINE, lexeme, new SourceSpan(start, currentPosition())));
     }
 
     private void scanCarriageReturn(SourcePosition start, List<Token> tokens) {
@@ -156,18 +208,12 @@ public final class Lexer {
 
         advanceCharacter();
 
-        if (!isAtEnd() && peek() == '\n') {
-            advanceCharacter();
-        }
+        if (!isAtEnd() && peek() == '\n') advanceCharacter();
 
         line++;
         column = 1;
 
-        tokens.add(new Token(
-            TokenKind.NEWLINE,
-            source.substring(startOffset, offset),
-            new SourceSpan(start, currentPosition())
-        ));
+        tokens.add(new Token(TokenKind.NEWLINE, source.substring(startOffset, offset), new SourceSpan(start, currentPosition())));
     }
 
     private boolean isAtEnd() {
