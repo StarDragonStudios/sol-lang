@@ -6,13 +6,18 @@ import io.github.stardragonstudios.sol.lexer.Token;
 import io.github.stardragonstudios.sol.lexer.TokenKind;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 import io.github.stardragonstudios.sol.syntax.CompilationUnit;
+import io.github.stardragonstudios.sol.syntax.Block;
+import io.github.stardragonstudios.sol.syntax.Declaration;
+import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
+import io.github.stardragonstudios.sol.syntax.TypeReference;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 public final class Parser {
-    private static final String UNEXPECTED_TOP_LEVEL_TOKEN_CODE =
-        "SOL-P001";
+    private static final String UNEXPECTED_TOP_LEVEL_TOKEN_CODE = "SOL-P001";
+    private static final String EXPECTED_TOKEN_CODE = "SOL-P002";
 
     private final List<Token> tokens;
     private int current;
@@ -26,14 +31,17 @@ public final class Parser {
     }
 
     private CompilationUnit parseCompilationUnit() {
+        var declarations = new ArrayList<Declaration>();
+
         skipNewlines();
 
-        if (!isAtEnd()) {
-            throw unexpectedTopLevelToken(peek());
+        while (!isAtEnd()) {
+            declarations.add(parseTopLevelDeclaration());
+            skipNewlines();
         }
 
         return new CompilationUnit(
-            List.of(),
+            declarations,
             completeSourceSpan()
         );
     }
@@ -45,9 +53,7 @@ public final class Parser {
     }
 
     private boolean match(TokenKind kind) {
-        if (!check(kind)) {
-            return false;
-        }
+        if (!check(kind)) return false;
 
         advance();
         return true;
@@ -60,9 +66,7 @@ public final class Parser {
     private Token advance() {
         var token = peek();
 
-        if (!isAtEnd()) {
-            current++;
-        }
+        if (!isAtEnd()) current++;
 
         return token;
     }
@@ -79,15 +83,10 @@ public final class Parser {
         var firstToken = tokens.getFirst();
         var eofToken = tokens.getLast();
 
-        return new SourceSpan(
-            firstToken.span().start(),
-            eofToken.span().end()
-        );
+        return new SourceSpan(firstToken.span().start(), eofToken.span().end());
     }
 
-    private static ParsingException unexpectedTopLevelToken(
-        Token token
-    ) {
+    private static ParsingException unexpectedTopLevelToken(Token token) {
         return new ParsingException(
             new Diagnostic(
                 UNEXPECTED_TOP_LEVEL_TOKEN_CODE,
@@ -99,37 +98,128 @@ public final class Parser {
         );
     }
 
-    private static List<Token> copyAndValidateTokens(
-        List<Token> tokens
-    ) {
-        Objects.requireNonNull(
-            tokens,
-            "Parser token stream must not be null."
-        );
+    private static List<Token> copyAndValidateTokens(List<Token> tokens) {
+        Objects.requireNonNull(tokens, "Parser token stream must not be null.");
 
-        if (tokens.isEmpty()) {
-            throw new IllegalArgumentException(
-                "Parser token stream must not be empty."
-            );
-        }
+        if (tokens.isEmpty()) throw new IllegalArgumentException("Parser token stream must not be empty.");
 
         var copy = List.copyOf(tokens);
         var lastIndex = copy.size() - 1;
 
-        if (copy.get(lastIndex).kind() != TokenKind.EOF) {
-            throw new IllegalArgumentException(
-                "Parser token stream must terminate with EOF."
-            );
-        }
+        if (copy.get(lastIndex).kind() != TokenKind.EOF) throw new IllegalArgumentException("Parser token stream must terminate with EOF.");
 
-        for (var index = 0; index < lastIndex; index++) {
-            if (copy.get(index).kind() == TokenKind.EOF) {
-                throw new IllegalArgumentException(
-                    "Parser token stream must not contain EOF before its end."
-                );
-            }
-        }
+        for (var index = 0; index < lastIndex; index++) if (copy.get(index).kind() == TokenKind.EOF) throw new IllegalArgumentException("Parser token stream must not contain EOF before its end.");
 
         return copy;
+    }
+
+    private Declaration parseTopLevelDeclaration() {
+        return switch (peek().kind()) {
+            case FN -> parseFunctionDeclaration();
+            default -> throw unexpectedTopLevelToken(peek());
+        };
+    }
+
+    private FunctionDeclaration parseFunctionDeclaration() {
+        var functionToken = consume(
+            TokenKind.FN,
+            "'fn'"
+        );
+
+        var nameToken = consume(
+            TokenKind.IDENTIFIER,
+            "a function name after 'fn'"
+        );
+
+        consume(
+            TokenKind.LEFT_PAREN,
+            "'(' after the function name"
+        );
+
+        consume(
+            TokenKind.RIGHT_PAREN,
+            "')' after the function parameter list"
+        );
+
+        consume(
+            TokenKind.ARROW,
+            "'->' before the function return type"
+        );
+
+        var returnTypeToken = consume(
+            TokenKind.IDENTIFIER,
+            "a return type after '->'"
+        );
+
+        var headerNewline = consume(
+            TokenKind.NEWLINE,
+            "a newline after the function declaration header"
+        );
+
+        while (match(TokenKind.NEWLINE)) {
+            // Empty lines are allowed inside the function body.
+        }
+
+        var endToken = consume(
+            TokenKind.END,
+            "'end' to close the function declaration"
+        );
+
+        var returnType = new TypeReference(
+            returnTypeToken.lexeme(),
+            returnTypeToken.span()
+        );
+
+        var body = new Block(
+            List.of(),
+            new SourceSpan(
+                headerNewline.span().end(),
+                endToken.span().end()
+            )
+        );
+
+        return new FunctionDeclaration(
+            nameToken.lexeme(),
+            returnType,
+            body,
+            new SourceSpan(
+                functionToken.span().start(),
+                endToken.span().end()
+            )
+        );
+    }
+
+    private Token consume(TokenKind kind, String expectation) {
+        if (check(kind)) {
+            return advance();
+        }
+
+        throw expectedToken(
+            expectation,
+            peek()
+        );
+    }
+
+    private static ParsingException expectedToken(String expectation, Token actual) {
+        return new ParsingException(
+            new Diagnostic(
+                EXPECTED_TOKEN_CODE,
+                DiagnosticSeverity.ERROR,
+                "Expected %s, but found %s."
+                    .formatted(
+                        expectation,
+                        describeToken(actual)
+                    ),
+                actual.span()
+            )
+        );
+    }
+
+    private static String describeToken(Token token) {
+        return switch (token.kind()) {
+            case EOF -> "end of file";
+            case NEWLINE -> "newline";
+            default -> "'%s'".formatted(token.lexeme());
+        };
     }
 }
