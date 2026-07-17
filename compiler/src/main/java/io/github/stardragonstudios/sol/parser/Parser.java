@@ -5,11 +5,7 @@ import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.lexer.Token;
 import io.github.stardragonstudios.sol.lexer.TokenKind;
 import io.github.stardragonstudios.sol.source.SourceSpan;
-import io.github.stardragonstudios.sol.syntax.CompilationUnit;
-import io.github.stardragonstudios.sol.syntax.Block;
-import io.github.stardragonstudios.sol.syntax.Declaration;
-import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
-import io.github.stardragonstudios.sol.syntax.TypeReference;
+import io.github.stardragonstudios.sol.syntax.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -136,6 +132,8 @@ public final class Parser {
             "'(' after the function name"
         );
 
+        var parameters = parseParameterList();
+
         consume(
             TokenKind.RIGHT_PAREN,
             "')' after the function parameter list"
@@ -180,6 +178,7 @@ public final class Parser {
 
         return new FunctionDeclaration(
             nameToken.lexeme(),
+            parameters,
             returnType,
             body,
             new SourceSpan(
@@ -221,5 +220,61 @@ public final class Parser {
             case NEWLINE -> "newline";
             default -> "'%s'".formatted(token.lexeme());
         };
+    }
+
+    private List<Parameter> parseParameterList() {
+        var parameters = new ArrayList<Parameter>();
+
+        if (check(TokenKind.RIGHT_PAREN)) {
+            return parameters;
+        }
+
+        while (true) {
+            parameters.add(parseParameter());
+
+            if (!match(TokenKind.COMMA)) {
+                break;
+            }
+
+            if (check(TokenKind.RIGHT_PAREN)) {
+                throw expectedToken(
+                    "a parameter after ','",
+                    peek()
+                );
+            }
+        }
+
+        return parameters;
+    }
+
+    private Parameter parseParameter() {
+        var nameToken = consume(
+            TokenKind.IDENTIFIER,
+            "a parameter name"
+        );
+
+        consume(
+            TokenKind.COLON,
+            "':' after the parameter name"
+        );
+
+        var typeToken = consume(
+            TokenKind.IDENTIFIER,
+            "a parameter type after ':'"
+        );
+
+        var type = new TypeReference(
+            typeToken.lexeme(),
+            typeToken.span()
+        );
+
+        return new Parameter(
+            nameToken.lexeme(),
+            type,
+            new SourceSpan(
+                nameToken.span().start(),
+                typeToken.span().end()
+            )
+        );
     }
 }

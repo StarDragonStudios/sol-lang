@@ -179,6 +179,7 @@ class ParserTest {
         );
 
         assertEquals("initialize", function.name());
+        assertTrue(function.parameters().isEmpty());
         assertEquals("void", function.returnType().name());
         assertTrue(function.body().statements().isEmpty());
 
@@ -341,6 +342,206 @@ class ParserTest {
                 new SourcePosition(24, 2, 1)
             ),
             exception.diagnostic().span()
+        );
+    }
+
+    @Test
+    void parsesSingleFunctionParameter() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn print_value(value: int) -> void\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(1, function.parameters().size());
+
+        var parameter = function.parameters().getFirst();
+
+        assertEquals("value", parameter.name());
+        assertEquals("int", parameter.type().name());
+    }
+
+    @Test
+    void parsesMultipleFunctionParametersAndSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn add(left: int, right: int) -> int\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(2, function.parameters().size());
+
+        var left = function.parameters().get(0);
+        var right = function.parameters().get(1);
+
+        assertEquals("left", left.name());
+        assertEquals("int", left.type().name());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(7, 1, 8),
+                new SourcePosition(16, 1, 17)
+            ),
+            left.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(13, 1, 14),
+                new SourcePosition(16, 1, 17)
+            ),
+            left.type().span()
+        );
+
+        assertEquals("right", right.name());
+        assertEquals("int", right.type().name());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(18, 1, 19),
+                new SourcePosition(28, 1, 29)
+            ),
+            right.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 1, 26),
+                new SourcePosition(28, 1, 29)
+            ),
+            right.type().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(40, 2, 4)
+            ),
+            function.span()
+        );
+    }
+
+    @Test
+    void reportsMissingParameterName() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn print(: int) -> void\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a parameter name, but found ':'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingParameterColon() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn print(value int) -> void\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected ':' after the parameter name, "
+                + "but found 'int'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingParameterType() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn print(value:) -> void\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a parameter type after ':', "
+                + "but found ')'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsTrailingParameterComma() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn add(left: int,) -> int\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a parameter after ',', "
+                + "but found ')'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingParameterComma() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn add(left: int right: int) -> int\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected ')' after the function parameter list, "
+                + "but found 'right'.",
+            exception.diagnostic().message()
         );
     }
 }
