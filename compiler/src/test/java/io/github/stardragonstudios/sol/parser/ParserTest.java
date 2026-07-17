@@ -6,11 +6,14 @@ import io.github.stardragonstudios.sol.lexer.Token;
 import io.github.stardragonstudios.sol.lexer.TokenKind;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
+import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -157,6 +160,187 @@ class ParserTest {
                     )
                 )
             )
+        );
+    }
+
+    @Test
+    void parsesBasicFunctionDeclaration() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn initialize() -> void\nend"
+            )
+        );
+
+        assertEquals(1, unit.declarations().size());
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals("initialize", function.name());
+        assertEquals("void", function.returnType().name());
+        assertTrue(function.body().statements().isEmpty());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(19, 1, 20),
+                new SourcePosition(23, 1, 24)
+            ),
+            function.returnType().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(24, 2, 1),
+                new SourcePosition(27, 2, 4)
+            ),
+            function.body().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(27, 2, 4)
+            ),
+            function.span()
+        );
+    }
+
+    @Test
+    void acceptsBlankLinesInsideFunctionBody() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn calculate() -> int\n\n\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertTrue(function.body().statements().isEmpty());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(22, 2, 1),
+                new SourcePosition(27, 4, 4)
+            ),
+            function.body().span()
+        );
+    }
+
+    @Test
+    void parsesMultipleFunctionDeclarations() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn first() -> void
+                end
+
+                fn second() -> int
+                end
+                """
+            )
+        );
+
+        assertEquals(2, unit.declarations().size());
+
+        var first = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().get(0)
+        );
+
+        var second = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().get(1)
+        );
+
+        assertEquals("first", first.name());
+        assertEquals("second", second.name());
+    }
+
+    @Test
+    void reportsMissingFunctionName() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan("fn () -> void\nend")
+            )
+        );
+
+        var diagnostic = exception.diagnostic();
+
+        assertEquals("SOL-P002", diagnostic.code());
+        assertEquals(
+            DiagnosticSeverity.ERROR,
+            diagnostic.severity()
+        );
+        assertEquals(
+            "Expected a function name after 'fn', but found '('.",
+            diagnostic.message()
+        );
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(3, 1, 4),
+                new SourcePosition(4, 1, 5)
+            ),
+            diagnostic.span()
+        );
+    }
+
+    @Test
+    void reportsMissingHeaderNewline() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn initialize() -> void end"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline after the function declaration header, "
+                + "but found 'end'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingFunctionEnd() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn initialize() -> void\n"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected 'end' to close the function declaration, "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(24, 2, 1),
+                new SourcePosition(24, 2, 1)
+            ),
+            exception.diagnostic().span()
         );
     }
 }
