@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static java.lang.Character.isDigit;
+
 public final class Lexer {
     private static final Map<String, TokenKind> KEYWORDS = Map.ofEntries(
         Map.entry("fn", TokenKind.FN),
@@ -68,6 +70,11 @@ public final class Lexer {
             return;
         }
 
+        if (isDigit(current)) {
+            scanNumber(start, tokens);
+            return;
+        }
+
         switch (current) {
             case ' ', '\t', '\f' -> advanceCharacter();
             case '\n' -> scanNewline(start, tokens);
@@ -77,6 +84,39 @@ public final class Lexer {
                     .formatted(current, line, column)
             );
         }
+    }
+
+    private void scanNumber(SourcePosition start, List<Token> tokens) {
+        var startOffset = offset;
+
+        while (!isAtEnd() && isDigit(peek())) {
+            advanceCharacter();
+        }
+
+        var kind = TokenKind.INTEGER_LITERAL;
+
+        if (
+            !isAtEnd()
+                && peek() == '.'
+                && hasNextCharacter()
+                && isDigit(peekNext())
+        ) {
+            kind = TokenKind.FLOAT_LITERAL;
+
+            advanceCharacter();
+
+            while (!isAtEnd() && isDigit(peek())) {
+                advanceCharacter();
+            }
+        }
+
+        var lexeme = source.substring(startOffset, offset);
+
+        tokens.add(new Token(
+            kind,
+            lexeme,
+            new SourceSpan(start, currentPosition())
+        ));
     }
 
     private void scanIdentifier(SourcePosition start, List<Token> tokens) {
@@ -154,12 +194,23 @@ public final class Lexer {
     }
 
     private static boolean isIdentifierPart(char character) {
-        return isIdentifierStart(character)
-            || (character >= '0' && character <= '9');
+        return isIdentifierStart(character) || isDigit(character);
     }
 
     private static boolean isAsciiLetter(char character) {
         return (character >= 'a' && character <= 'z')
             || (character >= 'A' && character <= 'Z');
+    }
+
+    private boolean hasNextCharacter() {
+        return offset + 1 < source.length();
+    }
+
+    private char peekNext() {
+        return source.charAt(offset + 1);
+    }
+
+    private static boolean isDigit(char character) {
+        return character >= '0' && character <= '9';
     }
 }
