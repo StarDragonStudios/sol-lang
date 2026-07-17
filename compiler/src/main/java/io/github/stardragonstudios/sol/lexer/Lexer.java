@@ -124,11 +124,7 @@ public final class Lexer {
                 tokens
             );
 
-            case '/' -> scanSingleCharacterToken(
-                start,
-                TokenKind.SLASH,
-                tokens
-            );
+            case '/' -> scanSlashOrComment(start, tokens);
 
             case '%' -> scanSingleCharacterToken(
                 start,
@@ -195,6 +191,95 @@ public final class Lexer {
                     .formatted(current, line, column)
             );
         }
+    }
+
+    private void scanSlashOrComment(SourcePosition start, List<Token> tokens) {
+        var startOffset = offset;
+
+        // Consume the first slash.
+        advanceCharacter();
+
+        if (isAtEnd()) {
+            addToken(
+                TokenKind.SLASH,
+                startOffset,
+                start,
+                tokens
+            );
+            return;
+        }
+
+        if (peek() == '/') {
+            scanLineComment();
+            return;
+        }
+
+        if (peek() == '*') {
+            scanBlockComment(start);
+            return;
+        }
+
+        addToken(
+            TokenKind.SLASH,
+            startOffset,
+            start,
+            tokens
+        );
+    }
+
+    private void scanLineComment() {
+        do advanceCharacter(); while (!isAtEnd() && peek() != '\n' && peek() != '\r');
+    }
+
+    private void scanBlockComment(SourcePosition start) {
+        // Consume the opening asterisk.
+        advanceCharacter();
+
+        while (!isAtEnd()) {
+            if (peek() == '*' && hasNextCharacter() && peekNext() == '/') {
+                advanceCharacter();
+                advanceCharacter();
+                return;
+            }
+
+            if (peek() == '\n' || peek() == '\r') {
+                skipCommentLineBreak();
+                continue;
+            }
+
+            advanceCharacter();
+        }
+
+        throw commentError(
+            "Unterminated block comment",
+            start
+        );
+    }
+
+    private void skipCommentLineBreak() {
+        if (peek() == '\r') {
+            advanceCharacter();
+
+            if (!isAtEnd() && peek() == '\n') {
+                advanceCharacter();
+            }
+        } else {
+            advanceCharacter();
+        }
+
+        line++;
+        column = 1;
+    }
+
+    private static IllegalArgumentException commentError(String message, SourcePosition start) {
+        return new IllegalArgumentException(
+            "%s at %d:%d."
+                .formatted(
+                    message,
+                    start.line(),
+                    start.column()
+                )
+        );
     }
 
     private void scanStringLiteral(SourcePosition start, List<Token> tokens) {
