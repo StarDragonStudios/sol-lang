@@ -26,9 +26,6 @@ public enum TokenKind {
     INJECT,
     TRUE,
     FALSE,
-    AND,
-    OR,
-    NOT,
 
     // Punctuation
     AT,
@@ -46,6 +43,9 @@ public enum TokenKind {
     STAR,
     SLASH,
     PERCENT,
+    BANG,
+    AND_AND,
+    OR_OR,
     EQUAL_EQUAL,
     NOT_EQUAL,
     LESS,
