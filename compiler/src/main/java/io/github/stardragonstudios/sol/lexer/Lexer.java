@@ -103,9 +103,11 @@ public final class Lexer {
                 tokens
             );
 
-            case ':' -> scanSingleCharacterToken(
+            case ':' -> scanOneOrTwoCharacterToken(
                 start,
+                ':',
                 TokenKind.COLON,
+                TokenKind.DOUBLE_COLON,
                 tokens
             );
 
