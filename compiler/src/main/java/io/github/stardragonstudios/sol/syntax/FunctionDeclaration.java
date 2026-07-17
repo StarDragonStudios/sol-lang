@@ -2,13 +2,19 @@ package io.github.stardragonstudios.sol.syntax;
 
 import io.github.stardragonstudios.sol.source.SourceSpan;
 
+import java.util.List;
 import java.util.Objects;
 
-public record FunctionDeclaration(String name, TypeReference returnType, Block body, SourceSpan span) implements Declaration {
+public record FunctionDeclaration(String name, List<Parameter> parameters, TypeReference returnType, Block body, SourceSpan span) implements Declaration {
     public FunctionDeclaration {
         Objects.requireNonNull(
             name,
             "Function name must not be null."
+        );
+
+        Objects.requireNonNull(
+            parameters,
+            "Function parameters must not be null."
         );
 
         Objects.requireNonNull(
@@ -31,5 +37,7 @@ public record FunctionDeclaration(String name, TypeReference returnType, Block b
                 "Function name must not be blank."
             );
         }
+
+        parameters = List.copyOf(parameters);
     }
 }
