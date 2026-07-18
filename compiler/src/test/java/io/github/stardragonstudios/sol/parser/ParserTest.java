@@ -1441,4 +1441,384 @@ class ParserTest {
             exception.diagnostic().message()
         );
     }
+
+    @Test
+    void parsesFunctionCallWithoutArguments() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn initialize()\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var callee = assertInstanceOf(
+            NameExpression.class,
+            call.callee()
+        );
+
+        assertEquals("initialize", callee.name());
+        assertTrue(call.arguments().isEmpty());
+    }
+
+    @Test
+    void parsesCallArgumentsAndSourceSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn add(1, 2 + 3)\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var callee = assertInstanceOf(
+            NameExpression.class,
+            call.callee()
+        );
+
+        assertEquals("add", callee.name());
+        assertEquals(2, call.arguments().size());
+
+        var firstArgument = assertInstanceOf(
+            LiteralExpression.class,
+            call.arguments().get(0)
+        );
+
+        var secondArgument = assertInstanceOf(
+            BinaryExpression.class,
+            call.arguments().get(1)
+        );
+
+        assertEquals("1", firstArgument.lexeme());
+        assertEquals(
+            BinaryOperator.ADD,
+            secondArgument.operator()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(38, 2, 21)
+            ),
+            call.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(29, 2, 12),
+                new SourcePosition(30, 2, 13)
+            ),
+            firstArgument.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(32, 2, 15),
+                new SourcePosition(37, 2, 20)
+            ),
+            secondArgument.span()
+        );
+    }
+
+    @Test
+    void parsesNestedFunctionCalls() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn outer(inner(42))\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var outerCall = assertInstanceOf(
+            CallExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var outerName = assertInstanceOf(
+            NameExpression.class,
+            outerCall.callee()
+        );
+
+        var innerCall = assertInstanceOf(
+            CallExpression.class,
+            outerCall.arguments().getFirst()
+        );
+
+        var innerName = assertInstanceOf(
+            NameExpression.class,
+            innerCall.callee()
+        );
+
+        var argument = assertInstanceOf(
+            LiteralExpression.class,
+            innerCall.arguments().getFirst()
+        );
+
+        assertEquals("outer", outerName.name());
+        assertEquals("inner", innerName.name());
+        assertEquals("42", argument.lexeme());
+    }
+
+    @Test
+    void parsesRepeatedPostfixCalls() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn factory()()\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var outerCall = assertInstanceOf(
+            CallExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var innerCall = assertInstanceOf(
+            CallExpression.class,
+            outerCall.callee()
+        );
+
+        var callee = assertInstanceOf(
+            NameExpression.class,
+            innerCall.callee()
+        );
+
+        assertEquals("factory", callee.name());
+        assertTrue(innerCall.arguments().isEmpty());
+        assertTrue(outerCall.arguments().isEmpty());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(34, 2, 17)
+            ),
+            innerCall.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(36, 2, 19)
+            ),
+            outerCall.span()
+        );
+    }
+
+    @Test
+    void parsesCallOnParenthesizedExpression() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn (factory)()\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var parenthesized = assertInstanceOf(
+            ParenthesizedExpression.class,
+            call.callee()
+        );
+
+        var name = assertInstanceOf(
+            NameExpression.class,
+            parenthesized.expression()
+        );
+
+        assertEquals("factory", name.name());
+        assertTrue(call.arguments().isEmpty());
+    }
+
+    @Test
+    void callsHaveHigherPrecedenceThanUnaryAndBinaryOperators() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn -calculate(1) * 2\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var multiplication = assertInstanceOf(
+            BinaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var unary = assertInstanceOf(
+            UnaryExpression.class,
+            multiplication.left()
+        );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            unary.operand()
+        );
+
+        assertEquals(
+            BinaryOperator.MULTIPLY,
+            multiplication.operator()
+        );
+
+        assertEquals(
+            UnaryOperator.NEGATE,
+            unary.operator()
+        );
+
+        assertEquals(1, call.arguments().size());
+    }
+
+    @Test
+    void rejectsTrailingCallArgumentComma() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn add(1,)\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an argument after ',', "
+                + "but found ')'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingCallArgumentComma() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn add(1 2)\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected ')' after the function call arguments, "
+                + "but found '2'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingCallClosingParenthesis() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn add(1\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected ')' after the function call arguments, "
+                + "but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingCallArgument() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn add(, 1)\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found ','.",
+            exception.diagnostic().message()
+        );
+    }
 }
