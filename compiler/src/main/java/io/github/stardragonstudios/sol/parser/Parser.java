@@ -7,6 +7,8 @@ import io.github.stardragonstudios.sol.lexer.TokenKind;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 import io.github.stardragonstudios.sol.syntax.*;
 
+import java.util.Optional;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -154,9 +156,7 @@ public final class Parser {
             "a newline after the function declaration header"
         );
 
-        while (match(TokenKind.NEWLINE)) {
-            // Empty lines are allowed inside the function body.
-        }
+        var statements = parseFunctionBodyStatements();
 
         var endToken = consume(
             TokenKind.END,
@@ -169,7 +169,7 @@ public final class Parser {
         );
 
         var body = new Block(
-            List.of(),
+            statements,
             new SourceSpan(
                 headerNewline.span().end(),
                 endToken.span().end()
@@ -245,6 +245,99 @@ public final class Parser {
         }
 
         return parameters;
+    }
+
+    private List<Statement> parseFunctionBodyStatements() {
+        var statements = new ArrayList<Statement>();
+
+        skipNewlines();
+
+        while (
+            !check(TokenKind.END)
+                && !isAtEnd()
+        ) {
+            statements.add(parseStatement());
+
+            if (match(TokenKind.NEWLINE)) {
+                skipNewlines();
+            } else if (!check(TokenKind.END)) {
+                throw expectedToken(
+                    "a newline or 'end' after the statement",
+                    peek()
+                );
+            }
+        }
+
+        return statements;
+    }
+
+    private Statement parseStatement() {
+        return switch (peek().kind()) {
+            case RETURN -> parseReturnStatement();
+
+            default -> throw expectedToken(
+                "a statement",
+                peek()
+            );
+        };
+    }
+
+    private ReturnStatement parseReturnStatement() {
+        var returnToken = consume(
+            TokenKind.RETURN,
+            "'return'"
+        );
+
+        Optional<Expression> expression;
+
+        if (
+            check(TokenKind.NEWLINE)
+                || check(TokenKind.END)
+        ) {
+            expression = Optional.empty();
+        } else {
+            expression = Optional.of(
+                parseLiteralExpression()
+            );
+        }
+
+        var endPosition = expression
+            .map(Expression::span)
+            .map(SourceSpan::end)
+            .orElse(returnToken.span().end());
+
+        return new ReturnStatement(
+            expression,
+            new SourceSpan(
+                returnToken.span().start(),
+                endPosition
+            )
+        );
+    }
+
+    private LiteralExpression parseLiteralExpression() {
+        var token = peek();
+
+        var kind = switch (token.kind()) {
+            case INTEGER_LITERAL -> LiteralKind.INTEGER;
+            case FLOAT_LITERAL -> LiteralKind.FLOAT;
+            case TRUE, FALSE -> LiteralKind.BOOLEAN;
+            case CHAR_LITERAL -> LiteralKind.CHARACTER;
+            case STRING_LITERAL -> LiteralKind.STRING;
+
+            default -> throw expectedToken(
+                "a literal expression",
+                token
+            );
+        };
+
+        advance();
+
+        return new LiteralExpression(
+            kind,
+            token.lexeme(),
+            token.span()
+        );
     }
 
     private Parameter parseParameter() {
