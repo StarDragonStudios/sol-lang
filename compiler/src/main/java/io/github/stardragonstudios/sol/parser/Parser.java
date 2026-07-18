@@ -275,11 +275,88 @@ public final class Parser {
         return switch (peek().kind()) {
             case RETURN -> parseReturnStatement();
 
+            case CONST, LET, AT -> parseVariableDeclarationStatement();
+
             default -> throw expectedToken(
                 "a statement",
                 peek()
             );
         };
+    }
+
+    private VariableDeclarationStatement parseVariableDeclarationStatement() {
+        var startToken = peek();
+
+        var kind = switch (peek().kind()) {
+            case CONST -> {
+                advance();
+                yield VariableDeclarationKind.CONST;
+            }
+
+            case LET -> {
+                advance();
+                yield VariableDeclarationKind.LET;
+            }
+
+            case AT -> {
+                advance();
+
+                consumeIdentifierLexeme(
+                    "mut",
+                    "'mut' after '@'"
+                );
+
+                consume(
+                    TokenKind.LET,
+                    "'let' after '@mut'"
+                );
+
+                yield VariableDeclarationKind.MUTABLE_LET;
+            }
+
+            default -> throw expectedToken(
+                "a variable declaration",
+                peek()
+            );
+        };
+
+        var nameToken = consume(
+            TokenKind.IDENTIFIER,
+            "a variable name"
+        );
+
+        consume(
+            TokenKind.COLON,
+            "':' after the variable name"
+        );
+
+        var typeToken = consume(
+            TokenKind.IDENTIFIER,
+            "a variable type after ':'"
+        );
+
+        consume(
+            TokenKind.ASSIGN,
+            "'=' after the variable type"
+        );
+
+        var initializer = parseExpression();
+
+        var type = new TypeReference(
+            typeToken.lexeme(),
+            typeToken.span()
+        );
+
+        return new VariableDeclarationStatement(
+            kind,
+            nameToken.lexeme(),
+            type,
+            initializer,
+            new SourceSpan(
+                startToken.span().start(),
+                initializer.span().end()
+            )
+        );
     }
 
     private ReturnStatement parseReturnStatement() {
@@ -700,5 +777,21 @@ public final class Parser {
                 right.span().end()
             )
         );
+    }
+
+    private Token consumeIdentifierLexeme(String expectedLexeme, String expectation) {
+        var token = consume(
+            TokenKind.IDENTIFIER,
+            expectation
+        );
+
+        if (!token.lexeme().equals(expectedLexeme)) {
+            throw expectedToken(
+                expectation,
+                token
+            );
+        }
+
+        return token;
     }
 }

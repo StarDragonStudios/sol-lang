@@ -1821,4 +1821,371 @@ class ParserTest {
             exception.diagnostic().message()
         );
     }
+
+    @Test
+    void parsesEveryVariableDeclarationKind() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn values() -> void
+                    const answer: int = 42
+                    let enabled: boolean = true
+                    @mut let counter: int = 0
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            3,
+            function.body().statements().size()
+        );
+
+        var constant = assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(0)
+        );
+
+        var variable = assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(1)
+        );
+
+        var mutableVariable = assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(2)
+        );
+
+        assertEquals(
+            VariableDeclarationKind.CONST,
+            constant.kind()
+        );
+
+        assertEquals(
+            VariableDeclarationKind.LET,
+            variable.kind()
+        );
+
+        assertEquals(
+            VariableDeclarationKind.MUTABLE_LET,
+            mutableVariable.kind()
+        );
+
+        assertEquals("answer", constant.name());
+        assertEquals("enabled", variable.name());
+        assertEquals("counter", mutableVariable.name());
+    }
+
+    @Test
+    void parsesCompleteExpressionAsVariableInitializer() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    let result: int = calculate(1 + 2)
+                    return result
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var declaration = assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            declaration.initializer()
+        );
+
+        var callee = assertInstanceOf(
+            NameExpression.class,
+            call.callee()
+        );
+
+        var argument = assertInstanceOf(
+            BinaryExpression.class,
+            call.arguments().getFirst()
+        );
+
+        assertEquals("result", declaration.name());
+        assertEquals("int", declaration.type().name());
+        assertEquals("calculate", callee.name());
+        assertEquals(
+            BinaryOperator.ADD,
+            argument.operator()
+        );
+    }
+
+    @Test
+    void preservesMutableVariableDeclarationSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    @mut let result: int = 1 + 2
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var declaration = assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var initializer = assertInstanceOf(
+            BinaryExpression.class,
+            declaration.initializer()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(39, 2, 22),
+                new SourcePosition(42, 2, 25)
+            ),
+            declaration.type().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(45, 2, 28),
+                new SourcePosition(50, 2, 33)
+            ),
+            initializer.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(22, 2, 5),
+                new SourcePosition(50, 2, 33)
+            ),
+            declaration.span()
+        );
+    }
+
+    @Test
+    void parsesVariableDeclarationsAlongsideReturnStatements() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn calculate() -> int
+                    const base: int = 40
+                    let increment: int = 2
+                    @mut let result: int = base + increment
+
+                    return result
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            4,
+            function.body().statements().size()
+        );
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(0)
+        );
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(1)
+        );
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(2)
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().get(3)
+        );
+    }
+
+    @Test
+    void rejectsUnsupportedVariableModifier() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        @other let value: int = 1
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected 'mut' after '@', "
+                + "but found 'other'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingLetAfterMutableModifier() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        @mut value: int = 1
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected 'let' after '@mut', "
+                + "but found 'value'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingVariableName() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        let : int = 1
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected a variable name, but found ':'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingVariableColon() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        let value int = 1
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected ':' after the variable name, "
+                + "but found 'int'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingVariableType() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        let value: = 1
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected a variable type after ':', "
+                + "but found '='.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingVariableAssignmentOperator() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        let value: int 1
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected '=' after the variable type, "
+                + "but found '1'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingVariableInitializer() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        let value: int =
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found newline.",
+            exception.diagnostic().message()
+        );
+    }
 }
