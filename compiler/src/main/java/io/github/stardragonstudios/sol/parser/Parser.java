@@ -290,16 +290,8 @@ public final class Parser {
 
         Optional<Expression> expression;
 
-        if (
-            check(TokenKind.NEWLINE)
-                || check(TokenKind.END)
-        ) {
-            expression = Optional.empty();
-        } else {
-            expression = Optional.of(
-                parseLiteralExpression()
-            );
-        }
+        if (check(TokenKind.NEWLINE) || check(TokenKind.END)) expression = Optional.empty();
+        else expression = Optional.of(parseExpression());
 
         var endPosition = expression
             .map(Expression::span)
@@ -367,6 +359,101 @@ public final class Parser {
             new SourceSpan(
                 nameToken.span().start(),
                 typeToken.span().end()
+            )
+        );
+    }
+
+    private Expression parseExpression() {
+        return parseUnaryExpression();
+    }
+
+    private Expression parseUnaryExpression() {
+        if (
+            check(TokenKind.BANG)
+                || check(TokenKind.MINUS)
+                || check(TokenKind.PLUS)
+        ) {
+            var operatorToken = advance();
+
+            var operator = switch (operatorToken.kind()) {
+                case BANG -> UnaryOperator.LOGICAL_NOT;
+                case MINUS -> UnaryOperator.NEGATE;
+                case PLUS -> UnaryOperator.POSITIVE;
+
+                default -> throw new IllegalStateException(
+                    "Unexpected unary operator token: "
+                        + operatorToken.kind()
+                );
+            };
+
+            var operand = parseUnaryExpression();
+
+            return new UnaryExpression(
+                operator,
+                operand,
+                new SourceSpan(
+                    operatorToken.span().start(),
+                    operand.span().end()
+                )
+            );
+        }
+
+        return parsePrimaryExpression();
+    }
+
+    private Expression parsePrimaryExpression() {
+        return switch (peek().kind()) {
+            case INTEGER_LITERAL,
+                 FLOAT_LITERAL,
+                 TRUE,
+                 FALSE,
+                 CHAR_LITERAL,
+                 STRING_LITERAL ->
+                parseLiteralExpression();
+
+            case IDENTIFIER -> parseNameExpression();
+
+            case LEFT_PAREN ->
+                parseParenthesizedExpression();
+
+            default -> throw expectedToken(
+                "an expression",
+                peek()
+            );
+        };
+    }
+
+    private NameExpression parseNameExpression() {
+        var token = consume(
+            TokenKind.IDENTIFIER,
+            "an identifier"
+        );
+
+        return new NameExpression(
+            token.lexeme(),
+            token.span()
+        );
+    }
+
+    private ParenthesizedExpression
+    parseParenthesizedExpression() {
+        var leftParenthesis = consume(
+            TokenKind.LEFT_PAREN,
+            "'('"
+        );
+
+        var expression = parseExpression();
+
+        var rightParenthesis = consume(
+            TokenKind.RIGHT_PAREN,
+            "')' after the parenthesized expression"
+        );
+
+        return new ParenthesizedExpression(
+            expression,
+            new SourceSpan(
+                leftParenthesis.span().start(),
+                rightParenthesis.span().end()
             )
         );
     }

@@ -10,7 +10,10 @@ import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
 import io.github.stardragonstudios.sol.syntax.LiteralExpression;
 import io.github.stardragonstudios.sol.syntax.LiteralKind;
 import io.github.stardragonstudios.sol.syntax.ReturnStatement;
-import io.github.stardragonstudios.sol.syntax.ReturnStatement;
+import io.github.stardragonstudios.sol.syntax.NameExpression;
+import io.github.stardragonstudios.sol.syntax.ParenthesizedExpression;
+import io.github.stardragonstudios.sol.syntax.UnaryExpression;
+import io.github.stardragonstudios.sol.syntax.UnaryOperator;
 
 import org.junit.jupiter.api.Test;
 
@@ -747,25 +750,36 @@ class ParserTest {
     }
 
     @Test
-    void reportsUnsupportedReturnExpression() {
-        var exception = assertThrows(
-            ParsingException.class,
-            () -> Parser.parse(
-                Lexer.scan(
-                    "fn value() -> int\nreturn value\nend"
-                )
+    void parsesNameExpressionInReturnStatement() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn value\nend"
             )
         );
 
-        assertEquals(
-            "SOL-P002",
-            exception.diagnostic().code()
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
         );
 
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var expression = assertInstanceOf(
+            NameExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        assertEquals("value", expression.name());
+
         assertEquals(
-            "Expected a literal expression, "
-                + "but found 'value'.",
-            exception.diagnostic().message()
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(30, 2, 13)
+            ),
+            expression.span()
         );
     }
 
@@ -810,6 +824,267 @@ class ParserTest {
 
         assertEquals(
             "Expected a statement, but found '42'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void parsesParenthesizedExpressionAndSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn (42)\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var parenthesized = assertInstanceOf(
+            ParenthesizedExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var literal = assertInstanceOf(
+            LiteralExpression.class,
+            parenthesized.expression()
+        );
+
+        assertEquals("42", literal.lexeme());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(26, 2, 9),
+                new SourcePosition(28, 2, 11)
+            ),
+            literal.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(29, 2, 12)
+            ),
+            parenthesized.span()
+        );
+    }
+
+    @Test
+    void parsesEveryUnaryOperator() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn values() -> void
+                    return !enabled
+                    return -42
+                    return +3.14
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var expectedOperators = List.of(
+            UnaryOperator.LOGICAL_NOT,
+            UnaryOperator.NEGATE,
+            UnaryOperator.POSITIVE
+        );
+
+        for (
+            var index = 0;
+            index < expectedOperators.size();
+            index++
+        ) {
+            var statement = assertInstanceOf(
+                ReturnStatement.class,
+                function.body().statements().get(index)
+            );
+
+            var expression = assertInstanceOf(
+                UnaryExpression.class,
+                statement.expression().orElseThrow()
+            );
+
+            assertEquals(
+                expectedOperators.get(index),
+                expression.operator()
+            );
+        }
+    }
+
+    @Test
+    void parsesRecursiveUnaryExpressionsRightToLeft() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> boolean\nreturn !!enabled\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var outer = assertInstanceOf(
+            UnaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var inner = assertInstanceOf(
+            UnaryExpression.class,
+            outer.operand()
+        );
+
+        var name = assertInstanceOf(
+            NameExpression.class,
+            inner.operand()
+        );
+
+        assertEquals(
+            UnaryOperator.LOGICAL_NOT,
+            outer.operator()
+        );
+        assertEquals(
+            UnaryOperator.LOGICAL_NOT,
+            inner.operator()
+        );
+        assertEquals("enabled", name.name());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(29, 2, 8),
+                new SourcePosition(38, 2, 17)
+            ),
+            outer.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(30, 2, 9),
+                new SourcePosition(38, 2, 17)
+            ),
+            inner.span()
+        );
+    }
+
+    @Test
+    void parsesUnaryParenthesizedExpression() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn -(value)\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var unary = assertInstanceOf(
+            UnaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var parenthesized = assertInstanceOf(
+            ParenthesizedExpression.class,
+            unary.operand()
+        );
+
+        var name = assertInstanceOf(
+            NameExpression.class,
+            parenthesized.expression()
+        );
+
+        assertEquals(UnaryOperator.NEGATE, unary.operator());
+        assertEquals("value", name.name());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(33, 2, 16)
+            ),
+            unary.span()
+        );
+    }
+
+    @Test
+    void reportsMissingUnaryOperand() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> boolean\nreturn !\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsEmptyParenthesizedExpression() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn ()\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected an expression, but found ')'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingClosingParenthesis() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn (42\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected ')' after the parenthesized expression, "
+                + "but found newline.",
             exception.diagnostic().message()
         );
     }
