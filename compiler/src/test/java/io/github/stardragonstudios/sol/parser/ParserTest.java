@@ -7,6 +7,10 @@ import io.github.stardragonstudios.sol.lexer.TokenKind;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
+import io.github.stardragonstudios.sol.syntax.LiteralExpression;
+import io.github.stardragonstudios.sol.syntax.LiteralKind;
+import io.github.stardragonstudios.sol.syntax.ReturnStatement;
+import io.github.stardragonstudios.sol.syntax.ReturnStatement;
 
 import org.junit.jupiter.api.Test;
 
@@ -541,6 +545,271 @@ class ParserTest {
         assertEquals(
             "Expected ')' after the function parameter list, "
                 + "but found 'right'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void parsesReturnStatementWithLiteralAndSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn answer() -> int\n    return 42\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(1, function.body().statements().size());
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var expression = assertInstanceOf(
+            LiteralExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        assertEquals(
+            LiteralKind.INTEGER,
+            expression.kind()
+        );
+        assertEquals("42", expression.lexeme());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(30, 2, 12),
+                new SourcePosition(32, 2, 14)
+            ),
+            expression.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(23, 2, 5),
+                new SourcePosition(32, 2, 14)
+            ),
+            statement.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(19, 2, 1),
+                new SourcePosition(36, 3, 4)
+            ),
+            function.body().span()
+        );
+    }
+
+    @Test
+    void parsesBareReturnStatement() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn finish() -> void\n    return\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertTrue(statement.expression().isEmpty());
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(24, 2, 5),
+                new SourcePosition(30, 2, 11)
+            ),
+            statement.span()
+        );
+    }
+
+    @Test
+    void parsesEverySupportedLiteralKind() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn values() -> void
+                    return 42
+                    return 3.14
+                    return true
+                    return 'a'
+                    return "hello"
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(5, function.body().statements().size());
+
+        var expectedKinds = List.of(
+            LiteralKind.INTEGER,
+            LiteralKind.FLOAT,
+            LiteralKind.BOOLEAN,
+            LiteralKind.CHARACTER,
+            LiteralKind.STRING
+        );
+
+        var expectedLexemes = List.of(
+            "42",
+            "3.14",
+            "true",
+            "'a'",
+            "\"hello\""
+        );
+
+        for (
+            var index = 0;
+            index < expectedKinds.size();
+            index++
+        ) {
+            var statement = assertInstanceOf(
+                ReturnStatement.class,
+                function.body().statements().get(index)
+            );
+
+            var expression = assertInstanceOf(
+                LiteralExpression.class,
+                statement.expression().orElseThrow()
+            );
+
+            assertEquals(
+                expectedKinds.get(index),
+                expression.kind()
+            );
+
+            assertEquals(
+                expectedLexemes.get(index),
+                expression.lexeme()
+            );
+        }
+    }
+
+    @Test
+    void acceptsBlankLinesBetweenReturnStatements() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn values() -> int
+
+                    return 1
+
+
+                    return 2
+
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(2, function.body().statements().size());
+    }
+
+    @Test
+    void acceptsBareReturnImmediatelyBeforeEnd() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn finish() -> void\nreturn end"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertTrue(statement.expression().isEmpty());
+    }
+
+    @Test
+    void reportsUnsupportedReturnExpression() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn value\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a literal expression, "
+                + "but found 'value'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsTokensAfterReturnLiteral() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn 42 43\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline or 'end' after the statement, "
+                + "but found '43'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsUnsupportedFunctionBodyStatement() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\n42\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a statement, but found '42'.",
             exception.diagnostic().message()
         );
     }
