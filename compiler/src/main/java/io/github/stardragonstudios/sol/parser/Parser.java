@@ -465,7 +465,67 @@ public final class Parser {
             );
         }
 
-        return parsePrimaryExpression();
+        return parsePostfixExpression();
+    }
+
+    private Expression parsePostfixExpression() {
+        var expression = parsePrimaryExpression();
+
+        while (check(TokenKind.LEFT_PAREN)) {
+            expression = parseCallExpression(expression);
+        }
+
+        return expression;
+    }
+
+    private CallExpression parseCallExpression(
+        Expression callee
+    ) {
+        consume(
+            TokenKind.LEFT_PAREN,
+            "'(' after the called expression"
+        );
+
+        var arguments = parseCallArgumentList();
+
+        var rightParenthesis = consume(
+            TokenKind.RIGHT_PAREN,
+            "')' after the function call arguments"
+        );
+
+        return new CallExpression(
+            callee,
+            arguments,
+            new SourceSpan(
+                callee.span().start(),
+                rightParenthesis.span().end()
+            )
+        );
+    }
+
+    private List<Expression> parseCallArgumentList() {
+        var arguments = new ArrayList<Expression>();
+
+        if (check(TokenKind.RIGHT_PAREN)) {
+            return arguments;
+        }
+
+        while (true) {
+            arguments.add(parseExpression());
+
+            if (!match(TokenKind.COMMA)) {
+                break;
+            }
+
+            if (check(TokenKind.RIGHT_PAREN)) {
+                throw expectedToken(
+                    "an argument after ','",
+                    peek()
+                );
+            }
+        }
+
+        return arguments;
     }
 
     private Expression parsePrimaryExpression() {
