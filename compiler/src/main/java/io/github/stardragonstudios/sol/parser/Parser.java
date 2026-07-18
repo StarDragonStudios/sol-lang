@@ -364,7 +364,74 @@ public final class Parser {
     }
 
     private Expression parseExpression() {
-        return parseUnaryExpression();
+        return parseLogicalOrExpression();
+    }
+
+    private Expression parseLogicalOrExpression() {
+        var expression = parseLogicalAndExpression();
+
+        while (check(TokenKind.OR_OR)) {
+            advance();
+
+            var right = parseLogicalAndExpression();
+
+            expression = createBinaryExpression(
+                expression,
+                BinaryOperator.LOGICAL_OR,
+                right
+            );
+        }
+
+        return expression;
+    }
+
+    private Expression parseLogicalAndExpression() {
+        var expression = parseEqualityExpression();
+
+        while (check(TokenKind.AND_AND)) {
+            advance();
+
+            var right = parseEqualityExpression();
+
+            expression = createBinaryExpression(
+                expression,
+                BinaryOperator.LOGICAL_AND,
+                right
+            );
+        }
+
+        return expression;
+    }
+
+    private Expression parseEqualityExpression() {
+        var expression = parseRelationalExpression();
+
+        while (
+            check(TokenKind.EQUAL_EQUAL)
+                || check(TokenKind.NOT_EQUAL)
+        ) {
+            var operatorToken = advance();
+
+            var operator = switch (operatorToken.kind()) {
+                case EQUAL_EQUAL -> BinaryOperator.EQUAL;
+                case NOT_EQUAL -> BinaryOperator.NOT_EQUAL;
+
+                default -> throw new IllegalStateException(
+                    "Unexpected equality operator token: "
+                        + operatorToken.kind()
+                );
+            };
+
+            var right = parseRelationalExpression();
+
+            expression = createBinaryExpression(
+                expression,
+                operator,
+                right
+            );
+        }
+
+        return expression;
     }
 
     private Expression parseUnaryExpression() {
@@ -454,6 +521,123 @@ public final class Parser {
             new SourceSpan(
                 leftParenthesis.span().start(),
                 rightParenthesis.span().end()
+            )
+        );
+    }
+
+    private Expression parseRelationalExpression() {
+        var expression = parseAdditiveExpression();
+
+        while (
+            check(TokenKind.LESS)
+                || check(TokenKind.LESS_EQUAL)
+                || check(TokenKind.GREATER)
+                || check(TokenKind.GREATER_EQUAL)
+        ) {
+            var operatorToken = advance();
+
+            var operator = switch (operatorToken.kind()) {
+                case LESS -> BinaryOperator.LESS_THAN;
+
+                case LESS_EQUAL ->
+                    BinaryOperator.LESS_THAN_OR_EQUAL;
+
+                case GREATER ->
+                    BinaryOperator.GREATER_THAN;
+
+                case GREATER_EQUAL ->
+                    BinaryOperator.GREATER_THAN_OR_EQUAL;
+
+                default -> throw new IllegalStateException(
+                    "Unexpected relational operator token: "
+                        + operatorToken.kind()
+                );
+            };
+
+            var right = parseAdditiveExpression();
+
+            expression = createBinaryExpression(
+                expression,
+                operator,
+                right
+            );
+        }
+
+        return expression;
+    }
+
+    private Expression parseAdditiveExpression() {
+        var expression = parseMultiplicativeExpression();
+
+        while (
+            check(TokenKind.PLUS)
+                || check(TokenKind.MINUS)
+        ) {
+            var operatorToken = advance();
+
+            var operator = switch (operatorToken.kind()) {
+                case PLUS -> BinaryOperator.ADD;
+                case MINUS -> BinaryOperator.SUBTRACT;
+
+                default -> throw new IllegalStateException(
+                    "Unexpected additive operator token: "
+                        + operatorToken.kind()
+                );
+            };
+
+            var right = parseMultiplicativeExpression();
+
+            expression = createBinaryExpression(
+                expression,
+                operator,
+                right
+            );
+        }
+
+        return expression;
+    }
+
+    private Expression parseMultiplicativeExpression() {
+        var expression = parseUnaryExpression();
+
+        while (
+            check(TokenKind.STAR)
+                || check(TokenKind.SLASH)
+                || check(TokenKind.PERCENT)
+        ) {
+            var operatorToken = advance();
+
+            var operator = switch (operatorToken.kind()) {
+                case STAR -> BinaryOperator.MULTIPLY;
+                case SLASH -> BinaryOperator.DIVIDE;
+                case PERCENT -> BinaryOperator.REMAINDER;
+
+                default -> throw new IllegalStateException(
+                    "Unexpected multiplicative operator token: "
+                        + operatorToken.kind()
+                );
+            };
+
+            var right = parseUnaryExpression();
+
+            expression = createBinaryExpression(
+                expression,
+                operator,
+                right
+            );
+        }
+
+        return expression;
+    }
+
+    private static BinaryExpression createBinaryExpression(Expression left, BinaryOperator operator, Expression right) {
+        return new BinaryExpression(
+            left,
+            operator,
+            right,
+            new SourceSpan(
+                left.span().start(),
+                right.span().end()
             )
         );
     }
