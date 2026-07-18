@@ -6,14 +6,7 @@ import io.github.stardragonstudios.sol.lexer.Token;
 import io.github.stardragonstudios.sol.lexer.TokenKind;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
-import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
-import io.github.stardragonstudios.sol.syntax.LiteralExpression;
-import io.github.stardragonstudios.sol.syntax.LiteralKind;
-import io.github.stardragonstudios.sol.syntax.ReturnStatement;
-import io.github.stardragonstudios.sol.syntax.NameExpression;
-import io.github.stardragonstudios.sol.syntax.ParenthesizedExpression;
-import io.github.stardragonstudios.sol.syntax.UnaryExpression;
-import io.github.stardragonstudios.sol.syntax.UnaryOperator;
+import io.github.stardragonstudios.sol.syntax.*;
 
 import org.junit.jupiter.api.Test;
 
@@ -1085,6 +1078,366 @@ class ParserTest {
         assertEquals(
             "Expected ')' after the parenthesized expression, "
                 + "but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void respectsMultiplicativePrecedenceOverAddition() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn 2 + 3 * 4\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var addition = assertInstanceOf(
+            BinaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        assertEquals(
+            BinaryOperator.ADD,
+            addition.operator()
+        );
+
+        var left = assertInstanceOf(
+            LiteralExpression.class,
+            addition.left()
+        );
+
+        var multiplication = assertInstanceOf(
+            BinaryExpression.class,
+            addition.right()
+        );
+
+        assertEquals("2", left.lexeme());
+
+        assertEquals(
+            BinaryOperator.MULTIPLY,
+            multiplication.operator()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(25, 2, 8),
+                new SourcePosition(34, 2, 17)
+            ),
+            addition.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(29, 2, 12),
+                new SourcePosition(34, 2, 17)
+            ),
+            multiplication.span()
+        );
+    }
+
+    @Test
+    void associatesBinaryOperatorsFromLeftToRight() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn 10 - 3 - 2\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var outer = assertInstanceOf(
+            BinaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        var inner = assertInstanceOf(
+            BinaryExpression.class,
+            outer.left()
+        );
+
+        assertEquals(
+            BinaryOperator.SUBTRACT,
+            outer.operator()
+        );
+
+        assertEquals(
+            BinaryOperator.SUBTRACT,
+            inner.operator()
+        );
+
+        var finalOperand = assertInstanceOf(
+            LiteralExpression.class,
+            outer.right()
+        );
+
+        assertEquals("2", finalOperand.lexeme());
+    }
+
+    @Test
+    void parenthesesOverrideBinaryPrecedence() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn (2 + 3) * 4\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var multiplication = assertInstanceOf(
+            BinaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        assertEquals(
+            BinaryOperator.MULTIPLY,
+            multiplication.operator()
+        );
+
+        var parenthesized = assertInstanceOf(
+            ParenthesizedExpression.class,
+            multiplication.left()
+        );
+
+        var addition = assertInstanceOf(
+            BinaryExpression.class,
+            parenthesized.expression()
+        );
+
+        assertEquals(
+            BinaryOperator.ADD,
+            addition.operator()
+        );
+    }
+
+    @Test
+    void unaryExpressionsHaveHigherPrecedenceThanBinaryOperators() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\nreturn -value * 2\nend"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var multiplication = assertInstanceOf(
+            BinaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        assertEquals(
+            BinaryOperator.MULTIPLY,
+            multiplication.operator()
+        );
+
+        var unary = assertInstanceOf(
+            UnaryExpression.class,
+            multiplication.left()
+        );
+
+        assertEquals(
+            UnaryOperator.NEGATE,
+            unary.operator()
+        );
+    }
+
+    @Test
+    void respectsLogicalOperatorPrecedence() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn allowed() -> boolean
+                    return !enabled || ready && authorized
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var statement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var logicalOr = assertInstanceOf(
+            BinaryExpression.class,
+            statement.expression().orElseThrow()
+        );
+
+        assertEquals(
+            BinaryOperator.LOGICAL_OR,
+            logicalOr.operator()
+        );
+
+        var logicalNot = assertInstanceOf(
+            UnaryExpression.class,
+            logicalOr.left()
+        );
+
+        assertEquals(
+            UnaryOperator.LOGICAL_NOT,
+            logicalNot.operator()
+        );
+
+        var logicalAnd = assertInstanceOf(
+            BinaryExpression.class,
+            logicalOr.right()
+        );
+
+        assertEquals(
+            BinaryOperator.LOGICAL_AND,
+            logicalAnd.operator()
+        );
+    }
+
+    @Test
+    void parsesEverySupportedBinaryOperator() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn operators() -> void
+                    return 2 * 3
+                    return 6 / 2
+                    return 7 % 3
+                    return 2 + 3
+                    return 5 - 2
+                    return 1 < 2
+                    return 1 <= 2
+                    return 2 > 1
+                    return 2 >= 1
+                    return 1 == 1
+                    return 1 != 2
+                    return true && false
+                    return true || false
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var expectedOperators = List.of(
+            BinaryOperator.MULTIPLY,
+            BinaryOperator.DIVIDE,
+            BinaryOperator.REMAINDER,
+            BinaryOperator.ADD,
+            BinaryOperator.SUBTRACT,
+            BinaryOperator.LESS_THAN,
+            BinaryOperator.LESS_THAN_OR_EQUAL,
+            BinaryOperator.GREATER_THAN,
+            BinaryOperator.GREATER_THAN_OR_EQUAL,
+            BinaryOperator.EQUAL,
+            BinaryOperator.NOT_EQUAL,
+            BinaryOperator.LOGICAL_AND,
+            BinaryOperator.LOGICAL_OR
+        );
+
+        assertEquals(
+            expectedOperators.size(),
+            function.body().statements().size()
+        );
+
+        for (
+            var index = 0;
+            index < expectedOperators.size();
+            index++
+        ) {
+            var statement = assertInstanceOf(
+                ReturnStatement.class,
+                function.body().statements().get(index)
+            );
+
+            var expression = assertInstanceOf(
+                BinaryExpression.class,
+                statement.expression().orElseThrow()
+            );
+
+            assertEquals(
+                expectedOperators.get(index),
+                expression.operator()
+            );
+        }
+    }
+
+    @Test
+    void reportsMissingBinaryRightOperand() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> int\nreturn 1 +\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingBinaryLeftOperand() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "fn value() -> boolean\nreturn || true\nend"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found '||'.",
             exception.diagnostic().message()
         );
     }
