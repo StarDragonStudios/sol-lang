@@ -115,10 +115,178 @@ public final class Parser {
         return switch (peek().kind()) {
             case FN -> parseFunctionDeclaration();
 
+            case AT -> parseAnnotatedOrBodylessFunctionDeclaration();
+
             case INJECT -> parseInjectionDeclaration();
 
             default -> throw unexpectedTopLevelToken(peek());
         };
+    }
+
+    private FunctionDeclaration parseFunctionDeclaration() {
+        var functionToken = consume(
+            TokenKind.FN,
+            "'fn'"
+        );
+
+        return parseFunctionDeclarationAfterMarker(
+            List.of(),
+            functionToken,
+            false
+        );
+    }
+
+    private FunctionDeclaration
+    parseAnnotatedOrBodylessFunctionDeclaration() {
+        var declarationStartToken = peek();
+        var annotations = new ArrayList<Annotation>();
+
+        while (check(TokenKind.AT)) {
+            var atToken = advance();
+
+            if (match(TokenKind.FN)) {
+                return parseFunctionDeclarationAfterMarker(
+                    annotations,
+                    declarationStartToken,
+                    true
+                );
+            }
+
+            var nameToken = consume(
+                TokenKind.IDENTIFIER,
+                "an annotation name after '@'"
+            );
+
+            annotations.add(
+                new Annotation(
+                    nameToken.lexeme(),
+                    new SourceSpan(
+                        atToken.span().start(),
+                        nameToken.span().end()
+                    )
+                )
+            );
+
+            consume(
+                TokenKind.NEWLINE,
+                "a newline after the function annotation"
+            );
+        }
+
+        if (match(TokenKind.FN)) {
+            return parseFunctionDeclarationAfterMarker(
+                annotations,
+                declarationStartToken,
+                false
+            );
+        }
+
+        throw expectedToken(
+            "'fn' or '@fn' after the function annotations",
+            peek()
+        );
+    }
+
+    private FunctionDeclaration
+    parseFunctionDeclarationAfterMarker(
+        List<Annotation> annotations,
+        Token declarationStartToken,
+        boolean bodyless
+    ) {
+        var nameToken = consume(
+            TokenKind.IDENTIFIER,
+            bodyless
+                ? "a function name after '@fn'"
+                : "a function name after 'fn'"
+        );
+
+        consume(
+            TokenKind.LEFT_PAREN,
+            "'(' after the function name"
+        );
+
+        var parameters = parseParameterList();
+
+        consume(
+            TokenKind.RIGHT_PAREN,
+            "')' after the function parameter list"
+        );
+
+        consume(
+            TokenKind.ARROW,
+            "'->' before the function return type"
+        );
+
+        var returnTypeToken = consume(
+            TokenKind.IDENTIFIER,
+            "a return type after '->'"
+        );
+
+        var returnType = new TypeReference(
+            returnTypeToken.lexeme(),
+            returnTypeToken.span()
+        );
+
+        if (bodyless) {
+            requireBodylessFunctionTerminator();
+
+            return new FunctionDeclaration(
+                annotations,
+                nameToken.lexeme(),
+                parameters,
+                returnType,
+                Optional.empty(),
+                new SourceSpan(
+                    declarationStartToken.span().start(),
+                    returnTypeToken.span().end()
+                )
+            );
+        }
+
+        var headerNewline = consume(
+            TokenKind.NEWLINE,
+            "a newline after the function declaration header"
+        );
+
+        var statements = parseFunctionBodyStatements();
+
+        var endToken = consume(
+            TokenKind.END,
+            "'end' to close the function declaration"
+        );
+
+        var body = new Block(
+            statements,
+            new SourceSpan(
+                headerNewline.span().end(),
+                endToken.span().end()
+            )
+        );
+
+        return new FunctionDeclaration(
+            annotations,
+            nameToken.lexeme(),
+            parameters,
+            returnType,
+            Optional.of(body),
+            new SourceSpan(
+                declarationStartToken.span().start(),
+                endToken.span().end()
+            )
+        );
+    }
+
+    private void requireBodylessFunctionTerminator() {
+        if (
+            !check(TokenKind.NEWLINE)
+                && !isAtEnd()
+        ) {
+            throw expectedToken(
+                "a newline or end of file after "
+                    + "the bodyless function declaration",
+                peek()
+            );
+        }
     }
 
     private InjectionDeclaration parseInjectionDeclaration() {
@@ -246,76 +414,6 @@ public final class Parser {
                 peek()
             );
         }
-    }
-
-    private FunctionDeclaration parseFunctionDeclaration() {
-        var functionToken = consume(
-            TokenKind.FN,
-            "'fn'"
-        );
-
-        var nameToken = consume(
-            TokenKind.IDENTIFIER,
-            "a function name after 'fn'"
-        );
-
-        consume(
-            TokenKind.LEFT_PAREN,
-            "'(' after the function name"
-        );
-
-        var parameters = parseParameterList();
-
-        consume(
-            TokenKind.RIGHT_PAREN,
-            "')' after the function parameter list"
-        );
-
-        consume(
-            TokenKind.ARROW,
-            "'->' before the function return type"
-        );
-
-        var returnTypeToken = consume(
-            TokenKind.IDENTIFIER,
-            "a return type after '->'"
-        );
-
-        var headerNewline = consume(
-            TokenKind.NEWLINE,
-            "a newline after the function declaration header"
-        );
-
-        var statements = parseFunctionBodyStatements();
-
-        var endToken = consume(
-            TokenKind.END,
-            "'end' to close the function declaration"
-        );
-
-        var returnType = new TypeReference(
-            returnTypeToken.lexeme(),
-            returnTypeToken.span()
-        );
-
-        var body = new Block(
-            statements,
-            new SourceSpan(
-                headerNewline.span().end(),
-                endToken.span().end()
-            )
-        );
-
-        return new FunctionDeclaration(
-            nameToken.lexeme(),
-            parameters,
-            returnType,
-            body,
-            new SourceSpan(
-                functionToken.span().start(),
-                endToken.span().end()
-            )
-        );
     }
 
     private Token consume(TokenKind kind, String expectation) {
