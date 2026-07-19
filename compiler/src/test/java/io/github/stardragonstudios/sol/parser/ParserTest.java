@@ -2188,4 +2188,285 @@ class ParserTest {
             exception.diagnostic().message()
         );
     }
+
+    @Test
+    void parsesLiteralAssignmentStatement() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn update() -> void
+                    counter = 42
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var assignment = assertInstanceOf(
+            AssignmentStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertEquals(
+            "counter",
+            assignment.target().name()
+        );
+
+        var value = assertInstanceOf(
+            LiteralExpression.class,
+            assignment.value()
+        );
+
+        assertEquals(LiteralKind.INTEGER, value.kind());
+        assertEquals("42", value.lexeme());
+    }
+
+    @Test
+    void parsesCompleteExpressionAsAssignedValue() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn update() -> void
+                    counter = counter + 1 * 2
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var assignment = assertInstanceOf(
+            AssignmentStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var addition = assertInstanceOf(
+            BinaryExpression.class,
+            assignment.value()
+        );
+
+        var multiplication = assertInstanceOf(
+            BinaryExpression.class,
+            addition.right()
+        );
+
+        assertEquals(
+            BinaryOperator.ADD,
+            addition.operator()
+        );
+
+        assertEquals(
+            BinaryOperator.MULTIPLY,
+            multiplication.operator()
+        );
+    }
+
+    @Test
+    void parsesFunctionCallAsAssignedValue() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn update() -> void
+                    result = calculate(left, right)
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var assignment = assertInstanceOf(
+            AssignmentStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            assignment.value()
+        );
+
+        var callee = assertInstanceOf(
+            NameExpression.class,
+            call.callee()
+        );
+
+        assertEquals("result", assignment.target().name());
+        assertEquals("calculate", callee.name());
+        assertEquals(2, call.arguments().size());
+    }
+
+    @Test
+    void parsesAssignmentsAlongsideOtherStatements() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn calculate() -> int
+                    @mut let result: int = 0
+                    result = 40 + 2
+                    return result
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            3,
+            function.body().statements().size()
+        );
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            function.body().statements().get(0)
+        );
+
+        assertInstanceOf(
+            AssignmentStatement.class,
+            function.body().statements().get(1)
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            function.body().statements().get(2)
+        );
+    }
+
+    @Test
+    void preservesAssignmentSourceSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\n"
+                    + "counter = calculate(1 + 2)\n"
+                    + "end"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var assignment = assertInstanceOf(
+            AssignmentStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(18, 2, 1),
+                new SourcePosition(25, 2, 8)
+            ),
+            assignment.target().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(28, 2, 11),
+                new SourcePosition(44, 2, 27)
+            ),
+            assignment.value().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(18, 2, 1),
+                new SourcePosition(44, 2, 27)
+            ),
+            assignment.span()
+        );
+    }
+
+    @Test
+    void reportsMissingAssignmentOperator() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn update() -> void
+                        counter 42
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected '=' after the assignment target, "
+                + "but found '42'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingAssignedValue() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn update() -> void
+                        counter =
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsFunctionCallsUsedAsStatements() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn update() -> void
+                        update_value()
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected '=' after the assignment target, "
+                + "but found '('.",
+            exception.diagnostic().message()
+        );
+    }
 }

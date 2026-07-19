@@ -277,11 +277,41 @@ public final class Parser {
 
             case CONST, LET, AT -> parseVariableDeclarationStatement();
 
+            case IDENTIFIER -> parseAssignmentStatement();
+
             default -> throw expectedToken(
                 "a statement",
                 peek()
             );
         };
+    }
+
+    private AssignmentStatement parseAssignmentStatement() {
+        var targetToken = consume(
+            TokenKind.IDENTIFIER,
+            "an assignment target"
+        );
+
+        var target = new NameExpression(
+            targetToken.lexeme(),
+            targetToken.span()
+        );
+
+        consume(
+            TokenKind.ASSIGN,
+            "'=' after the assignment target"
+        );
+
+        var value = parseExpression();
+
+        return new AssignmentStatement(
+            target,
+            value,
+            new SourceSpan(
+                target.span().start(),
+                value.span().end()
+            )
+        );
     }
 
     private VariableDeclarationStatement parseVariableDeclarationStatement() {
