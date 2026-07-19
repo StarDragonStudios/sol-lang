@@ -248,27 +248,28 @@ public final class Parser {
     }
 
     private List<Statement> parseFunctionBodyStatements() {
+        return parseStatementsUntil("a newline or 'end' after the statement", TokenKind.END);
+    }
+
+    private List<Statement> parseStatementsUntil(String separatorExpectation, TokenKind... terminators) {
         var statements = new ArrayList<Statement>();
 
         skipNewlines();
 
-        while (
-            !check(TokenKind.END)
-                && !isAtEnd()
-        ) {
+        while (!checkAny(terminators) && !isAtEnd()) {
             statements.add(parseStatement());
 
-            if (match(TokenKind.NEWLINE)) {
-                skipNewlines();
-            } else if (!check(TokenKind.END)) {
-                throw expectedToken(
-                    "a newline or 'end' after the statement",
-                    peek()
-                );
-            }
+            if (match(TokenKind.NEWLINE)) skipNewlines();
+            else if (!checkAny(terminators)) throw expectedToken(separatorExpectation, peek());
         }
 
         return statements;
+    }
+
+    private boolean checkAny(TokenKind... kinds) {
+        for (var kind : kinds) if (check(kind)) return true;
+
+        return false;
     }
 
     private Statement parseStatement() {
@@ -279,11 +280,82 @@ public final class Parser {
 
             case IDENTIFIER -> parseAssignmentStatement();
 
-            default -> throw expectedToken(
-                "a statement",
-                peek()
-            );
+            case IF -> parseConditionalStatement();
+
+            default -> throw expectedToken("a statement", peek());
         };
+    }
+
+    private ConditionalStatement parseConditionalStatement() {
+        var ifToken = consume(
+            TokenKind.IF,
+            "'if'"
+        );
+
+        var condition = parseExpression();
+
+        consume(
+            TokenKind.THEN,
+            "'then' after the conditional condition"
+        );
+
+        var thenHeaderNewline = consume(
+            TokenKind.NEWLINE,
+            "a newline after 'then'"
+        );
+
+        var thenStatements = parseStatementsUntil(
+            "a newline, 'else', or 'end' after the statement",
+            TokenKind.ELSE,
+            TokenKind.END
+        );
+
+        var thenBlock = new Block(
+            thenStatements,
+            new SourceSpan(
+                thenHeaderNewline.span().end(),
+                peek().span().start()
+            )
+        );
+
+        Optional<Block> elseBlock = Optional.empty();
+
+        if (match(TokenKind.ELSE)) {
+            var elseHeaderNewline = consume(
+                TokenKind.NEWLINE,
+                "a newline after 'else'"
+            );
+
+            var elseStatements = parseStatementsUntil(
+                "a newline or 'end' after the statement",
+                TokenKind.END
+            );
+
+            elseBlock = Optional.of(
+                new Block(
+                    elseStatements,
+                    new SourceSpan(
+                        elseHeaderNewline.span().end(),
+                        peek().span().start()
+                    )
+                )
+            );
+        }
+
+        var endToken = consume(
+            TokenKind.END,
+            "'end' to close the conditional statement"
+        );
+
+        return new ConditionalStatement(
+            condition,
+            thenBlock,
+            elseBlock,
+            new SourceSpan(
+                ifToken.span().start(),
+                endToken.span().end()
+            )
+        );
     }
 
     private AssignmentStatement parseAssignmentStatement() {
