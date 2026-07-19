@@ -189,14 +189,9 @@ public final class Parser {
     }
 
     private Token consume(TokenKind kind, String expectation) {
-        if (check(kind)) {
-            return advance();
-        }
+        if (check(kind)) return advance();
 
-        throw expectedToken(
-            expectation,
-            peek()
-        );
+        throw expectedToken(expectation, peek());
     }
 
     private static ParsingException expectedToken(String expectation, Token actual) {
@@ -282,8 +277,56 @@ public final class Parser {
 
             case IF -> parseConditionalStatement();
 
+            case WHILE -> parseWhileStatement();
+
             default -> throw expectedToken("a statement", peek());
         };
+    }
+
+    private WhileStatement parseWhileStatement() {
+        var whileToken = consume(
+            TokenKind.WHILE,
+            "'while'"
+        );
+
+        var condition = parseExpression();
+
+        consume(
+            TokenKind.DO,
+            "'do' after the while condition"
+        );
+
+        var headerNewline = consume(
+            TokenKind.NEWLINE,
+            "a newline after 'do'"
+        );
+
+        var statements = parseStatementsUntil(
+            "a newline or 'end' after the statement",
+            TokenKind.END
+        );
+
+        var endToken = consume(
+            TokenKind.END,
+            "'end' to close the while statement"
+        );
+
+        var body = new Block(
+            statements,
+            new SourceSpan(
+                headerNewline.span().end(),
+                endToken.span().start()
+            )
+        );
+
+        return new WhileStatement(
+            condition,
+            body,
+            new SourceSpan(
+                whileToken.span().start(),
+                endToken.span().end()
+            )
+        );
     }
 
     private ConditionalStatement parseConditionalStatement() {
