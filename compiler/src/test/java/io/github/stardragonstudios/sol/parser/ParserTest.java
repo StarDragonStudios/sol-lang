@@ -11,6 +11,7 @@ import io.github.stardragonstudios.sol.syntax.*;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -3344,6 +3345,386 @@ class ParserTest {
         assertEquals(
             "Expected 'end' to close the while statement, "
                 + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void parsesDirectModuleInjection() {
+        var unit = Parser.parse(
+            Lexer.scan("inject std.console")
+        );
+
+        var injection = assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            InjectionKind.DIRECT,
+            injection.kind()
+        );
+
+        assertEquals(
+            List.of("std", "console"),
+            injection.modulePath().segments()
+        );
+
+        assertTrue(injection.selectedNames().isEmpty());
+        assertTrue(injection.alias().isEmpty());
+    }
+
+    @Test
+    void parsesSelectiveModuleInjection() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "inject std.file only "
+                    + "read_text, write_text"
+            )
+        );
+
+        var injection = assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            InjectionKind.DIRECT,
+            injection.kind()
+        );
+
+        assertEquals(
+            List.of("std", "file"),
+            injection.modulePath().segments()
+        );
+
+        assertEquals(
+            List.of("read_text", "write_text"),
+            injection.selectedNames()
+        );
+
+        assertTrue(injection.alias().isEmpty());
+    }
+
+    @Test
+    void parsesNamespaceInjection() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "inject namespace std.console"
+            )
+        );
+
+        var injection = assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            InjectionKind.NAMESPACE,
+            injection.kind()
+        );
+
+        assertEquals(
+            List.of("std", "console"),
+            injection.modulePath().segments()
+        );
+
+        assertTrue(injection.selectedNames().isEmpty());
+        assertTrue(injection.alias().isEmpty());
+    }
+
+    @Test
+    void parsesNamespaceInjectionAlias() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "inject namespace std.console as io"
+            )
+        );
+
+        var injection = assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            InjectionKind.NAMESPACE,
+            injection.kind()
+        );
+
+        assertEquals(
+            Optional.of("io"),
+            injection.alias()
+        );
+    }
+
+    @Test
+    void parsesSingleSegmentModulePath() {
+        var unit = Parser.parse(
+            Lexer.scan("inject console")
+        );
+
+        var injection = assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            List.of("console"),
+            injection.modulePath().segments()
+        );
+    }
+
+    @Test
+    void parsesInjectionsAlongsideFunctions() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                inject std.console
+                inject std.file only read_text, write_text
+                inject namespace std.console as io
+
+                fn start() -> void
+                    return
+                end
+                """
+            )
+        );
+
+        assertEquals(4, unit.declarations().size());
+
+        assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().get(0)
+        );
+
+        assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().get(1)
+        );
+
+        assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().get(2)
+        );
+
+        assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().get(3)
+        );
+    }
+
+    @Test
+    void preservesInjectionSourceSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "inject namespace std.console as io"
+            )
+        );
+
+        var injection = assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(17, 1, 18),
+                new SourcePosition(28, 1, 29)
+            ),
+            injection.modulePath().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(34, 1, 35)
+            ),
+            injection.span()
+        );
+    }
+
+    @Test
+    void reportsMissingInjectedModulePath() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan("inject")
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a module path after 'inject', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingModulePathSegment() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan("inject std.")
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a module path segment after '.', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingSelectedInjectionName() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "inject std.file only"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an injected name after 'only', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsTrailingSelectiveInjectionComma() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "inject std.file only read_text,"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an injected name after ',', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingNamespaceAlias() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "inject namespace std.console as"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a namespace alias after 'as', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsSelectiveNamespaceInjection() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "inject namespace std.console only print"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline or end of file "
+                + "after the namespace injection, "
+                + "but found 'only'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsAliasOnDirectInjection() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "inject std.console as io"
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline or end of file "
+                + "after the direct injection, "
+                + "but found 'as'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsInjectionInsideFunctionBody() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn start() -> void
+                        inject std.console
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a statement, "
+                + "but found 'inject'.",
             exception.diagnostic().message()
         );
     }

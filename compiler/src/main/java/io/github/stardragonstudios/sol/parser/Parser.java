@@ -114,8 +114,138 @@ public final class Parser {
     private Declaration parseTopLevelDeclaration() {
         return switch (peek().kind()) {
             case FN -> parseFunctionDeclaration();
+
+            case INJECT -> parseInjectionDeclaration();
+
             default -> throw unexpectedTopLevelToken(peek());
         };
+    }
+
+    private InjectionDeclaration parseInjectionDeclaration() {
+        var injectToken = consume(
+            TokenKind.INJECT,
+            "'inject'"
+        );
+
+        var kind = match(TokenKind.NAMESPACE)
+            ? InjectionKind.NAMESPACE
+            : InjectionKind.DIRECT;
+
+        var modulePath = parseModulePath(
+            kind == InjectionKind.NAMESPACE
+                ? "a module path after 'namespace'"
+                : "a module path after 'inject'"
+        );
+
+        var selectedNames = new ArrayList<String>();
+        Optional<String> alias = Optional.empty();
+
+        var endPosition = modulePath.span().end();
+
+        if (
+            kind == InjectionKind.DIRECT
+                && match(TokenKind.ONLY)
+        ) {
+            var selectedName = consume(
+                TokenKind.IDENTIFIER,
+                "an injected name after 'only'"
+            );
+
+            selectedNames.add(selectedName.lexeme());
+            endPosition = selectedName.span().end();
+
+            while (match(TokenKind.COMMA)) {
+                selectedName = consume(
+                    TokenKind.IDENTIFIER,
+                    "an injected name after ','"
+                );
+
+                selectedNames.add(selectedName.lexeme());
+                endPosition = selectedName.span().end();
+            }
+        }
+
+        if (
+            kind == InjectionKind.NAMESPACE
+                && match(TokenKind.AS)
+        ) {
+            var aliasToken = consume(
+                TokenKind.IDENTIFIER,
+                "a namespace alias after 'as'"
+            );
+
+            alias = Optional.of(aliasToken.lexeme());
+            endPosition = aliasToken.span().end();
+        }
+
+        if (kind == InjectionKind.DIRECT) {
+            requireInjectionTerminator(
+                "a newline or end of file "
+                    + "after the direct injection"
+            );
+        } else {
+            requireInjectionTerminator(
+                "a newline or end of file "
+                    + "after the namespace injection"
+            );
+        }
+
+        return new InjectionDeclaration(
+            kind,
+            modulePath,
+            selectedNames,
+            alias,
+            new SourceSpan(
+                injectToken.span().start(),
+                endPosition
+            )
+        );
+    }
+
+    private ModulePath parseModulePath(
+        String initialExpectation
+    ) {
+        var segments = new ArrayList<String>();
+
+        var firstSegment = consume(
+            TokenKind.IDENTIFIER,
+            initialExpectation
+        );
+
+        segments.add(firstSegment.lexeme());
+
+        var lastSegment = firstSegment;
+
+        while (match(TokenKind.DOT)) {
+            lastSegment = consume(
+                TokenKind.IDENTIFIER,
+                "a module path segment after '.'"
+            );
+
+            segments.add(lastSegment.lexeme());
+        }
+
+        return new ModulePath(
+            segments,
+            new SourceSpan(
+                firstSegment.span().start(),
+                lastSegment.span().end()
+            )
+        );
+    }
+
+    private void requireInjectionTerminator(
+        String expectation
+    ) {
+        if (
+            !check(TokenKind.NEWLINE)
+                && !isAtEnd()
+        ) {
+            throw expectedToken(
+                expectation,
+                peek()
+            );
+        }
     }
 
     private FunctionDeclaration parseFunctionDeclaration() {
