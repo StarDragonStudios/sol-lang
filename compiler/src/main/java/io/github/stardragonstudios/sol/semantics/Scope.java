@@ -8,34 +8,19 @@ import java.util.Optional;
 public final class Scope {
     private final ScopeKind kind;
     private final Optional<Scope> parent;
+    private final LinkedHashMap<String, Symbol> symbols = new LinkedHashMap<>();
 
-    private final LinkedHashMap<String, Symbol>
-        symbols = new LinkedHashMap<>();
+    private boolean frozen;
 
     public Scope(ScopeKind kind) {
-        this.kind = Objects.requireNonNull(
-            kind,
-            "Scope kind must not be null."
-        );
+        this.kind = Objects.requireNonNull(kind, "Scope kind must not be null.");
 
         parent = Optional.empty();
     }
 
-    public Scope(
-        ScopeKind kind,
-        Scope parent
-    ) {
-        this.kind = Objects.requireNonNull(
-            kind,
-            "Scope kind must not be null."
-        );
-
-        this.parent = Optional.of(
-            Objects.requireNonNull(
-                parent,
-                "Parent scope must not be null."
-            )
-        );
+    public Scope(ScopeKind kind, Scope parent) {
+        this.kind = Objects.requireNonNull(kind, "Scope kind must not be null.");
+        this.parent = Optional.of(Objects.requireNonNull(parent, "Parent scope must not be null."));
     }
 
     public ScopeKind kind() {
@@ -46,43 +31,36 @@ public final class Scope {
         return parent;
     }
 
+    public boolean isFrozen() {
+        return frozen;
+    }
+
+    void freeze() {
+        frozen = true;
+    }
+
     public boolean declare(Symbol symbol) {
-        Objects.requireNonNull(
-            symbol,
-            "Declared symbol must not be null."
-        );
+        Objects.requireNonNull(symbol, "Declared symbol must not be null.");
 
-        if (symbols.containsKey(symbol.name())) {
-            return false;
-        }
+        if (frozen) throw new IllegalStateException("Cannot declare symbols in a frozen scope.");
+        if (symbols.containsKey(symbol.name())) return false;
 
-        symbols.put(
-            symbol.name(),
-            symbol
-        );
+        symbols.put(symbol.name(), symbol);
 
         return true;
     }
 
     public List<Symbol> declaredSymbols() {
-        return List.copyOf(
-            symbols.values()
-        );
+        return List.copyOf(symbols.values());
     }
 
-    public Optional<Symbol> lookupLocal(
-        String name
-    ) {
+    public Optional<Symbol> lookupLocal(String name) {
         validateLookupName(name);
 
-        return Optional.ofNullable(
-            symbols.get(name)
-        );
+        return Optional.ofNullable(symbols.get(name));
     }
 
-    public Optional<Symbol> lookup(
-        String name
-    ) {
+    public Optional<Symbol> lookup(String name) {
         validateLookupName(name);
 
         var localSymbol =
@@ -97,18 +75,9 @@ public final class Scope {
         );
     }
 
-    private static void validateLookupName(
-        String name
-    ) {
-        Objects.requireNonNull(
-            name,
-            "Symbol lookup name must not be null."
-        );
+    private static void validateLookupName(String name) {
+        Objects.requireNonNull(name, "Symbol lookup name must not be null.");
 
-        if (name.isBlank()) {
-            throw new IllegalArgumentException(
-                "Symbol lookup name must not be blank."
-            );
-        }
+        if (name.isBlank()) throw new IllegalArgumentException("Symbol lookup name must not be blank.");
     }
 }

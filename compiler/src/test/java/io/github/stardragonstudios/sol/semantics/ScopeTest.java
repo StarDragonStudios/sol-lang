@@ -1,5 +1,8 @@
 package io.github.stardragonstudios.sol.semantics;
 
+import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
+import io.github.stardragonstudios.sol.lexer.Lexer;
+import io.github.stardragonstudios.sol.parser.Parser;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 import io.github.stardragonstudios.sol.syntax.*;
@@ -9,11 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class ScopeTest {
     private static final SourceSpan SPAN =
@@ -341,6 +340,36 @@ class ScopeTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> scope.lookupLocal(" ")
+        );
+    }
+
+    @Test
+    void preventsDeclarationsAfterFreezing() {
+        var scope = new Scope(
+            ScopeKind.MODULE
+        );
+
+        var original =
+            functionSymbol("original");
+
+        var later =
+            functionSymbol("later");
+
+        assertTrue(scope.declare(original));
+        assertFalse(scope.isFrozen());
+
+        scope.freeze();
+
+        assertTrue(scope.isFrozen());
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> scope.declare(later)
+        );
+
+        assertEquals(
+            List.of(original),
+            scope.declaredSymbols()
         );
     }
 }
