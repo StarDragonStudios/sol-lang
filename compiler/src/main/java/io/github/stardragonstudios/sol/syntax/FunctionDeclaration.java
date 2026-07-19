@@ -4,9 +4,15 @@ import io.github.stardragonstudios.sol.source.SourceSpan;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
-public record FunctionDeclaration(String name, List<Parameter> parameters, TypeReference returnType, Block body, SourceSpan span) implements Declaration {
+public record FunctionDeclaration(List<Annotation> annotations, String name, List<Parameter> parameters, TypeReference returnType, Optional<Block> body, SourceSpan span) implements Declaration {
     public FunctionDeclaration {
+        Objects.requireNonNull(
+            annotations,
+            "Function annotations must not be null."
+        );
+
         Objects.requireNonNull(
             name,
             "Function name must not be null."
@@ -38,6 +44,7 @@ public record FunctionDeclaration(String name, List<Parameter> parameters, TypeR
             );
         }
 
+        annotations = List.copyOf(annotations);
         parameters = List.copyOf(parameters);
     }
 }

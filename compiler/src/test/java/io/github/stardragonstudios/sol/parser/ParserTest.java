@@ -182,7 +182,7 @@ class ParserTest {
         assertEquals("initialize", function.name());
         assertTrue(function.parameters().isEmpty());
         assertEquals("void", function.returnType().name());
-        assertTrue(function.body().statements().isEmpty());
+        assertTrue(function.body().orElseThrow().statements().isEmpty());
 
         assertEquals(
             new SourceSpan(
@@ -197,7 +197,7 @@ class ParserTest {
                 new SourcePosition(24, 2, 1),
                 new SourcePosition(27, 2, 4)
             ),
-            function.body().span()
+            function.body().orElseThrow().span()
         );
 
         assertEquals(
@@ -222,14 +222,14 @@ class ParserTest {
             unit.declarations().getFirst()
         );
 
-        assertTrue(function.body().statements().isEmpty());
+        assertTrue(function.body().orElseThrow().statements().isEmpty());
 
         assertEquals(
             new SourceSpan(
                 new SourcePosition(22, 2, 1),
                 new SourcePosition(27, 4, 4)
             ),
-            function.body().span()
+            function.body().orElseThrow().span()
         );
     }
 
@@ -559,11 +559,11 @@ class ParserTest {
             unit.declarations().getFirst()
         );
 
-        assertEquals(1, function.body().statements().size());
+        assertEquals(1, function.body().orElseThrow().statements().size());
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var expression = assertInstanceOf(
@@ -598,7 +598,7 @@ class ParserTest {
                 new SourcePosition(19, 2, 1),
                 new SourcePosition(36, 3, 4)
             ),
-            function.body().span()
+            function.body().orElseThrow().span()
         );
     }
 
@@ -617,7 +617,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertTrue(statement.expression().isEmpty());
@@ -652,7 +652,7 @@ class ParserTest {
             unit.declarations().getFirst()
         );
 
-        assertEquals(5, function.body().statements().size());
+        assertEquals(5, function.body().orElseThrow().statements().size());
 
         var expectedKinds = List.of(
             LiteralKind.INTEGER,
@@ -677,7 +677,7 @@ class ParserTest {
         ) {
             var statement = assertInstanceOf(
                 ReturnStatement.class,
-                function.body().statements().get(index)
+                function.body().orElseThrow().statements().get(index)
             );
 
             var expression = assertInstanceOf(
@@ -719,7 +719,7 @@ class ParserTest {
             unit.declarations().getFirst()
         );
 
-        assertEquals(2, function.body().statements().size());
+        assertEquals(2, function.body().orElseThrow().statements().size());
     }
 
     @Test
@@ -737,7 +737,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertTrue(statement.expression().isEmpty());
@@ -758,7 +758,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var expression = assertInstanceOf(
@@ -837,7 +837,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var parenthesized = assertInstanceOf(
@@ -901,7 +901,7 @@ class ParserTest {
         ) {
             var statement = assertInstanceOf(
                 ReturnStatement.class,
-                function.body().statements().get(index)
+                function.body().orElseThrow().statements().get(index)
             );
 
             var expression = assertInstanceOf(
@@ -931,7 +931,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var outer = assertInstanceOf(
@@ -991,7 +991,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var unary = assertInstanceOf(
@@ -1098,7 +1098,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var addition = assertInstanceOf(
@@ -1160,7 +1160,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var outer = assertInstanceOf(
@@ -1206,7 +1206,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var multiplication = assertInstanceOf(
@@ -1250,7 +1250,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var multiplication = assertInstanceOf(
@@ -1293,7 +1293,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var logicalOr = assertInstanceOf(
@@ -1374,7 +1374,7 @@ class ParserTest {
 
         assertEquals(
             expectedOperators.size(),
-            function.body().statements().size()
+            function.body().orElseThrow().statements().size()
         );
 
         for (
@@ -1384,7 +1384,7 @@ class ParserTest {
         ) {
             var statement = assertInstanceOf(
                 ReturnStatement.class,
-                function.body().statements().get(index)
+                function.body().orElseThrow().statements().get(index)
             );
 
             var expression = assertInstanceOf(
@@ -1458,7 +1458,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var call = assertInstanceOf(
@@ -1490,7 +1490,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var call = assertInstanceOf(
@@ -1562,7 +1562,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var outerCall = assertInstanceOf(
@@ -1610,7 +1610,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var outerCall = assertInstanceOf(
@@ -1664,7 +1664,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var call = assertInstanceOf(
@@ -1701,7 +1701,7 @@ class ParserTest {
 
         var statement = assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var multiplication = assertInstanceOf(
@@ -1844,22 +1844,22 @@ class ParserTest {
 
         assertEquals(
             3,
-            function.body().statements().size()
+            function.body().orElseThrow().statements().size()
         );
 
         var constant = assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(0)
+            function.body().orElseThrow().statements().get(0)
         );
 
         var variable = assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(1)
+            function.body().orElseThrow().statements().get(1)
         );
 
         var mutableVariable = assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(2)
+            function.body().orElseThrow().statements().get(2)
         );
 
         assertEquals(
@@ -1902,7 +1902,7 @@ class ParserTest {
 
         var declaration = assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var call = assertInstanceOf(
@@ -1948,7 +1948,7 @@ class ParserTest {
 
         var declaration = assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var initializer = assertInstanceOf(
@@ -2004,27 +2004,27 @@ class ParserTest {
 
         assertEquals(
             4,
-            function.body().statements().size()
+            function.body().orElseThrow().statements().size()
         );
 
         assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(0)
+            function.body().orElseThrow().statements().get(0)
         );
 
         assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(1)
+            function.body().orElseThrow().statements().get(1)
         );
 
         assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(2)
+            function.body().orElseThrow().statements().get(2)
         );
 
         assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().get(3)
+            function.body().orElseThrow().statements().get(3)
         );
     }
 
@@ -2209,7 +2209,7 @@ class ParserTest {
 
         var assignment = assertInstanceOf(
             AssignmentStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertEquals(
@@ -2245,7 +2245,7 @@ class ParserTest {
 
         var assignment = assertInstanceOf(
             AssignmentStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var addition = assertInstanceOf(
@@ -2288,7 +2288,7 @@ class ParserTest {
 
         var assignment = assertInstanceOf(
             AssignmentStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var call = assertInstanceOf(
@@ -2327,22 +2327,22 @@ class ParserTest {
 
         assertEquals(
             3,
-            function.body().statements().size()
+            function.body().orElseThrow().statements().size()
         );
 
         assertInstanceOf(
             VariableDeclarationStatement.class,
-            function.body().statements().get(0)
+            function.body().orElseThrow().statements().get(0)
         );
 
         assertInstanceOf(
             AssignmentStatement.class,
-            function.body().statements().get(1)
+            function.body().orElseThrow().statements().get(1)
         );
 
         assertInstanceOf(
             ReturnStatement.class,
-            function.body().statements().get(2)
+            function.body().orElseThrow().statements().get(2)
         );
     }
 
@@ -2363,7 +2363,7 @@ class ParserTest {
 
         var assignment = assertInstanceOf(
             AssignmentStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertEquals(
@@ -2492,7 +2492,7 @@ class ParserTest {
 
         var conditional = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var condition = assertInstanceOf(
@@ -2536,7 +2536,7 @@ class ParserTest {
 
         var conditional = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var elseBlock = conditional
@@ -2585,7 +2585,7 @@ class ParserTest {
 
         var conditional = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var logicalAnd = assertInstanceOf(
@@ -2637,7 +2637,7 @@ class ParserTest {
 
         var conditional = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().get(1)
+            function.body().orElseThrow().statements().get(1)
         );
 
         var elseBlock = conditional
@@ -2698,7 +2698,7 @@ class ParserTest {
 
         var conditional = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertTrue(
@@ -2739,7 +2739,7 @@ class ParserTest {
 
         var outer = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var inner = assertInstanceOf(
@@ -2772,7 +2772,7 @@ class ParserTest {
 
         var conditional = assertInstanceOf(
             ConditionalStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var elseBlock = conditional
@@ -2972,7 +2972,7 @@ class ParserTest {
 
         var whileStatement = assertInstanceOf(
             WhileStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var condition = assertInstanceOf(
@@ -3013,7 +3013,7 @@ class ParserTest {
 
         var whileStatement = assertInstanceOf(
             WhileStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var logicalAnd = assertInstanceOf(
@@ -3080,7 +3080,7 @@ class ParserTest {
 
         var whileStatement = assertInstanceOf(
             WhileStatement.class,
-            function.body().statements().get(1)
+            function.body().orElseThrow().statements().get(1)
         );
 
         var statements =
@@ -3134,7 +3134,7 @@ class ParserTest {
 
         var whileStatement = assertInstanceOf(
             WhileStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertTrue(
@@ -3165,7 +3165,7 @@ class ParserTest {
 
         var outer = assertInstanceOf(
             WhileStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         var inner = assertInstanceOf(
@@ -3211,7 +3211,7 @@ class ParserTest {
 
         var whileStatement = assertInstanceOf(
             WhileStatement.class,
-            function.body().statements().getFirst()
+            function.body().orElseThrow().statements().getFirst()
         );
 
         assertEquals(
@@ -3725,6 +3725,368 @@ class ParserTest {
         assertEquals(
             "Expected a statement, "
                 + "but found 'inject'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void parsesUnannotatedFunctionDefinition() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn start() -> void
+                    return
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertTrue(function.annotations().isEmpty());
+        assertTrue(function.body().isPresent());
+    }
+
+    @Test
+    void parsesAnnotatedFunctionDefinition() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                @init
+                fn start() -> void
+                    return
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            1,
+            function.annotations().size()
+        );
+
+        assertEquals(
+            "init",
+            function.annotations().getFirst().name()
+        );
+
+        assertTrue(function.body().isPresent());
+    }
+
+    @Test
+    void preservesFunctionAnnotationOrder() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                @first
+                @second
+                fn process() -> void
+                    return
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            List.of("first", "second"),
+            function.annotations()
+                .stream()
+                .map(Annotation::name)
+                .toList()
+        );
+    }
+
+    @Test
+    void parsesBodylessFunctionDeclaration() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "@fn print_line(value: string) -> void"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals("print_line", function.name());
+        assertEquals(1, function.parameters().size());
+
+        assertEquals(
+            "string",
+            function.parameters()
+                .getFirst()
+                .type()
+                .name()
+        );
+
+        assertEquals(
+            "void",
+            function.returnType().name()
+        );
+
+        assertTrue(function.annotations().isEmpty());
+        assertTrue(function.body().isEmpty());
+    }
+
+    @Test
+    void parsesAnnotatedBodylessFunctionDeclaration() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                @platform
+                @unsafe
+                @fn native_write(value: string) -> void
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            List.of("platform", "unsafe"),
+            function.annotations()
+                .stream()
+                .map(Annotation::name)
+                .toList()
+        );
+
+        assertTrue(function.body().isEmpty());
+    }
+
+    @Test
+    void parsesAnnotationsBodylessFunctionsAndInjections() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                inject std.console
+
+                @init
+                fn start() -> void
+                    return
+                end
+
+                @fn print_line(value: string) -> void
+                """
+            )
+        );
+
+        assertEquals(3, unit.declarations().size());
+
+        assertInstanceOf(
+            InjectionDeclaration.class,
+            unit.declarations().get(0)
+        );
+
+        var definition = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().get(1)
+        );
+
+        var bodyless = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().get(2)
+        );
+
+        assertTrue(definition.body().isPresent());
+        assertTrue(bodyless.body().isEmpty());
+    }
+
+    @Test
+    void preservesAnnotatedFunctionSourceSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "@init\n"
+                    + "fn start() -> void\n"
+                    + "return\n"
+                    + "end"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var annotation =
+            function.annotations().getFirst();
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(5, 1, 6)
+            ),
+            annotation.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(35, 4, 4)
+            ),
+            function.span()
+        );
+    }
+
+    @Test
+    void preservesBodylessFunctionSourceSpan() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "@external\n"
+                    + "@fn write(value: string) -> void"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(9, 1, 10)
+            ),
+            function.annotations().getFirst().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(0, 1, 1),
+                new SourcePosition(42, 2, 33)
+            ),
+            function.span()
+        );
+    }
+
+    @Test
+    void reportsMissingFunctionAnnotationName() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan("@")
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an annotation name after '@', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingNewlineAfterFunctionAnnotation() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "@init fn start() -> void"
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected a newline after the function annotation, "
+                + "but found 'fn'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsBlankLineAfterFunctionAnnotation() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    @init
+
+                    fn start() -> void
+                        return
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected 'fn' or '@fn' after "
+                + "the function annotations, "
+                + "but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsDetachedFunctionAnnotation() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan("@init\n")
+            )
+        );
+
+        assertEquals(
+            "Expected 'fn' or '@fn' after "
+                + "the function annotations, "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingBodylessFunctionName() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan("@fn")
+            )
+        );
+
+        assertEquals(
+            "Expected a function name after '@fn', "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void rejectsTokensAfterBodylessFunctionDeclaration() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    "@fn print_line() -> void end"
+                )
+            )
+        );
+
+        assertEquals(
+            "Expected a newline or end of file after "
+                + "the bodyless function declaration, "
+                + "but found 'end'.",
             exception.diagnostic().message()
         );
     }
