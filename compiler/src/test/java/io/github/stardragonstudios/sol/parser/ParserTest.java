@@ -2949,4 +2949,402 @@ class ParserTest {
             exception.diagnostic().message()
         );
     }
+
+    @Test
+    void parsesWhileStatement() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn count() -> void
+                    while running do
+                        counter = counter + 1
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var whileStatement = assertInstanceOf(
+            WhileStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var condition = assertInstanceOf(
+            NameExpression.class,
+            whileStatement.condition()
+        );
+
+        assertEquals("running", condition.name());
+        assertEquals(
+            1,
+            whileStatement.body().statements().size()
+        );
+
+        assertInstanceOf(
+            AssignmentStatement.class,
+            whileStatement.body().statements().getFirst()
+        );
+    }
+
+    @Test
+    void parsesCompleteWhileCondition() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn count() -> void
+                    while index < limit && !finished do
+                        index = index + 1
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var whileStatement = assertInstanceOf(
+            WhileStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var logicalAnd = assertInstanceOf(
+            BinaryExpression.class,
+            whileStatement.condition()
+        );
+
+        var comparison = assertInstanceOf(
+            BinaryExpression.class,
+            logicalAnd.left()
+        );
+
+        var negation = assertInstanceOf(
+            UnaryExpression.class,
+            logicalAnd.right()
+        );
+
+        assertEquals(
+            BinaryOperator.LOGICAL_AND,
+            logicalAnd.operator()
+        );
+
+        assertEquals(
+            BinaryOperator.LESS_THAN,
+            comparison.operator()
+        );
+
+        assertEquals(
+            UnaryOperator.LOGICAL_NOT,
+            negation.operator()
+        );
+    }
+
+    @Test
+    void parsesSupportedStatementsInsideWhileBody() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn search() -> boolean
+                    @mut let finished: boolean = false
+
+                    while !finished do
+                        const expected: int = 1
+                        let current: int = calculate()
+                        current = current + 1
+
+                        if current == expected then
+                            finished = true
+                        end
+
+                        return finished
+                    end
+
+                    return finished
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var whileStatement = assertInstanceOf(
+            WhileStatement.class,
+            function.body().statements().get(1)
+        );
+
+        var statements =
+            whileStatement.body().statements();
+
+        assertEquals(5, statements.size());
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            statements.get(0)
+        );
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            statements.get(1)
+        );
+
+        assertInstanceOf(
+            AssignmentStatement.class,
+            statements.get(2)
+        );
+
+        assertInstanceOf(
+            ConditionalStatement.class,
+            statements.get(3)
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            statements.get(4)
+        );
+    }
+
+    @Test
+    void parsesEmptyWhileBody() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn wait() -> void
+                    while running do
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var whileStatement = assertInstanceOf(
+            WhileStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertTrue(
+            whileStatement.body().statements().isEmpty()
+        );
+    }
+
+    @Test
+    void parsesNestedWhileStatements() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn count() -> void
+                    while outer do
+                        while inner do
+                            counter = counter + 1
+                        end
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var outer = assertInstanceOf(
+            WhileStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var inner = assertInstanceOf(
+            WhileStatement.class,
+            outer.body().statements().getFirst()
+        );
+
+        var outerCondition = assertInstanceOf(
+            NameExpression.class,
+            outer.condition()
+        );
+
+        var innerCondition = assertInstanceOf(
+            NameExpression.class,
+            inner.condition()
+        );
+
+        assertEquals("outer", outerCondition.name());
+        assertEquals("inner", innerCondition.name());
+
+        assertInstanceOf(
+            AssignmentStatement.class,
+            inner.body().statements().getFirst()
+        );
+    }
+
+    @Test
+    void preservesWhileSourceSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\n"
+                    + "while index < limit do\n"
+                    + "index = index + 1\n"
+                    + "end\n"
+                    + "end"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var whileStatement = assertInstanceOf(
+            WhileStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(24, 2, 7),
+                new SourcePosition(37, 2, 20)
+            ),
+            whileStatement.condition().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(41, 3, 1),
+                new SourcePosition(59, 4, 1)
+            ),
+            whileStatement.body().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(18, 2, 1),
+                new SourcePosition(62, 4, 4)
+            ),
+            whileStatement.span()
+        );
+    }
+
+    @Test
+    void reportsMissingWhileCondition() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn wait() -> void
+                        while do
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found 'do'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingWhileDo() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn wait() -> void
+                        while running
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected 'do' after the while condition, "
+                + "but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingNewlineAfterWhileDo() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn wait() -> void
+                        while running do return
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline after 'do', "
+                + "but found 'return'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingWhileEnd() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn wait() -> void
+                        while running do
+                            return
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected 'end' to close the while statement, "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
 }
