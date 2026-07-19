@@ -2,6 +2,8 @@ package io.github.stardragonstudios.sol.semantics;
 
 import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
 import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
+import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.*;
 
 import java.util.ArrayList;
@@ -13,6 +15,7 @@ import java.util.Optional;
 public final class SemanticAnalyzer {
     private static final String DUPLICATE_DECLARATION_CODE = "SOL-S001";
     private static final String UNRESOLVED_NAME_CODE = "SOL-S002";
+    private static final String UNKNOWN_TYPE_CODE = "SOL-S003";
 
     private SemanticAnalyzer() {}
 
@@ -35,6 +38,7 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<NameExpression, Symbol> resolvedNames = new IdentityHashMap<>();
         private final IdentityHashMap<AssignmentStatement, Symbol> assignmentTargets = new IdentityHashMap<>();
         private final IdentityHashMap<FunctionDeclaration, Boolean> duplicateFunctions = new IdentityHashMap<>();
+        private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
 
         private Binder(CompilationUnit unit) {
             this.unit = unit;
@@ -60,7 +64,8 @@ public final class SemanticAnalyzer {
                 parameterSymbols,
                 localVariableSymbols,
                 resolvedNames,
-                assignmentTargets
+                assignmentTargets,
+                resolvedTypes
             );
 
             return new SemanticAnalysisResult(
@@ -71,37 +76,17 @@ public final class SemanticAnalyzer {
 
         private void predeclareFunctions() {
             for (var declaration : unit.declarations()) {
-                if (
-                    declaration
-                        instanceof FunctionDeclaration function
-                ) {
-                    var symbol =
-                        new FunctionSymbol(function);
+                if (declaration instanceof FunctionDeclaration function) {
+                    var symbol = new FunctionSymbol(function);
+                    functionSymbols.put(function, symbol);
 
-                    functionSymbols.put(
-                        function,
-                        symbol
-                    );
-
-                    if (!moduleScope.declare(symbol)) {
-                        duplicateFunctions.put(
-                            function,
-                            true
-                        );
-                    }
+                    if (!moduleScope.declare(symbol)) duplicateFunctions.put(function, true);
                 }
             }
         }
 
         private void bindDeclarations() {
-            for (var declaration : unit.declarations()) {
-                if (
-                    declaration
-                        instanceof FunctionDeclaration function
-                ) {
-                    bindFunction(function);
-                }
-            }
+            for (var declaration : unit.declarations()) if (declaration instanceof FunctionDeclaration function) bindFunction(function);
         }
 
         private void bindFunction(FunctionDeclaration function) {
@@ -113,13 +98,19 @@ public final class SemanticAnalyzer {
 
             functionScopes.put(function, functionScope);
 
+            /*
+             * Parameter types occur before the return type
+             * in the source signature, so resolve them in
+             * source order before resolving the return type.
+             */
             for (var parameter : function.parameters()) {
+                resolveTypeReference(parameter.type());
                 var parameterSymbol = new ParameterSymbol(parameter);
-
                 parameterSymbols.put(parameter, parameterSymbol);
-
                 declareOrReport(functionScope, parameterSymbol);
             }
+
+            resolveTypeReference(function.returnType());
 
             function.body().ifPresent(body -> {
                 blockScopes.put(body, functionScope);
@@ -167,258 +158,141 @@ public final class SemanticAnalyzer {
 
         private void bindVariableDeclaration(VariableDeclarationStatement declaration, Scope scope) {
             /*
-             * Bind first, declare second.
-             *
-             * This ensures that a variable is not visible
-             * inside its own initializer.
+             * Resolve the declared type before inspecting
+             * the initializer, matching source order.
              */
-            bindExpression(
-                declaration.initializer(),
-                scope
-            );
+            resolveTypeReference(declaration.type());
 
-            var symbol =
-                new LocalVariableSymbol(declaration);
-
-            localVariableSymbols.put(
-                declaration,
-                symbol
-            );
-
-            declareOrReport(
-                scope,
-                symbol
-            );
+            /*
+             * Bind the initializer before declaring the
+             * variable. The variable is therefore not
+             * visible inside its own initializer.
+             */
+            bindExpression(declaration.initializer(), scope);
+            var symbol = new LocalVariableSymbol(declaration);
+            localVariableSymbols.put(declaration, symbol);
+            declareOrReport(scope, symbol);
         }
 
-        private void bindAssignment(
-            AssignmentStatement assignment,
-            Scope scope
-        ) {
-            var target = bindName(
-                assignment.target(),
-                scope
-            );
-
-            target.ifPresent(symbol ->
-                assignmentTargets.put(
-                    assignment,
-                    symbol
-                )
-            );
-
-            bindExpression(
-                assignment.value(),
-                scope
-            );
+        private void bindAssignment(AssignmentStatement assignment, Scope scope) {
+            var target = bindName(assignment.target(), scope);
+            target.ifPresent(symbol -> assignmentTargets.put(assignment, symbol));
+            bindExpression(assignment.value(), scope);
         }
 
-        private void bindConditional(
-            ConditionalStatement conditional,
-            Scope scope
-        ) {
-            bindExpression(
-                conditional.condition(),
-                scope
-            );
-
-            bindNestedBlock(
-                conditional.thenBlock(),
-                scope
-            );
-
-            conditional.elseBlock().ifPresent(
-                block -> bindNestedBlock(
-                    block,
-                    scope
-                )
-            );
+        private void bindConditional(ConditionalStatement conditional, Scope scope) {
+            bindExpression(conditional.condition(), scope);
+            bindNestedBlock(conditional.thenBlock(), scope);
+            conditional.elseBlock().ifPresent(block -> bindNestedBlock(block, scope));
         }
 
-        private void bindWhile(
-            WhileStatement whileStatement,
-            Scope scope
-        ) {
-            bindExpression(
-                whileStatement.condition(),
-                scope
-            );
-
-            bindNestedBlock(
-                whileStatement.body(),
-                scope
-            );
+        private void bindWhile(WhileStatement whileStatement, Scope scope) {
+            bindExpression(whileStatement.condition(), scope);
+            bindNestedBlock(whileStatement.body(), scope);
         }
 
-        private void bindNestedBlock(
-            Block block,
-            Scope parent
-        ) {
-            var blockScope = createChildScope(
-                ScopeKind.BLOCK,
-                parent
-            );
-
-            blockScopes.put(
-                block,
-                blockScope
-            );
-
-            bindBlock(
-                block,
-                blockScope
-            );
+        private void bindNestedBlock(Block block, Scope parent) {
+            var blockScope = createChildScope(ScopeKind.BLOCK, parent);
+            blockScopes.put(block, blockScope);
+            bindBlock(block, blockScope);
         }
 
-        private void bindExpression(
-            Expression expression,
-            Scope scope
-        ) {
-            if (expression instanceof LiteralExpression) {
-                return;
-            }
+        private void bindExpression(Expression expression, Scope scope) {
+            if (expression instanceof LiteralExpression) return;
 
-            if (
-                expression
-                    instanceof NameExpression name
-            ) {
-                bindName(
-                    name,
-                    scope
-                );
+            if (expression instanceof NameExpression name) {
+                bindName(name, scope);
 
                 return;
             }
 
-            if (
-                expression
-                    instanceof ParenthesizedExpression
-                    parenthesized
-            ) {
-                bindExpression(
-                    parenthesized.expression(),
-                    scope
-                );
+            if (expression instanceof ParenthesizedExpression parenthesized) {
+                bindExpression(parenthesized.expression(), scope);
 
                 return;
             }
 
-            if (
-                expression
-                    instanceof UnaryExpression unary
-            ) {
-                bindExpression(
-                    unary.operand(),
-                    scope
-                );
+            if (expression instanceof UnaryExpression unary) {
+                bindExpression(unary.operand(), scope);
 
                 return;
             }
 
-            if (
-                expression
-                    instanceof BinaryExpression binary
-            ) {
-                bindExpression(
-                    binary.left(),
-                    scope
-                );
-
-                bindExpression(
-                    binary.right(),
-                    scope
-                );
+            if (expression instanceof BinaryExpression binary) {
+                bindExpression(binary.left(), scope);
+                bindExpression(binary.right(), scope);
 
                 return;
             }
 
-            if (
-                expression
-                    instanceof CallExpression call
-            ) {
-                bindExpression(
-                    call.callee(),
-                    scope
-                );
+            if (expression instanceof CallExpression call) {
+                bindExpression(call.callee(), scope);
 
-                for (var argument : call.arguments()) {
-                    bindExpression(
-                        argument,
-                        scope
-                    );
-                }
+                for (var argument : call.arguments()) bindExpression(argument, scope);
 
                 return;
             }
 
-            throw new IllegalStateException(
-                "Unsupported expression type: "
-                    + expression.getClass().getName()
-            );
+            throw new IllegalStateException("Unsupported expression type: " + expression.getClass().getName());
         }
 
-        private Optional<Symbol> bindName(
-            NameExpression expression,
-            Scope scope
-        ) {
-            var symbol = scope.lookup(
-                expression.name()
-            );
+        private Optional<Symbol> bindName(NameExpression expression, Scope scope) {
+            var symbol = scope.lookup(expression.name());
 
             if (symbol.isPresent()) {
-                resolvedNames.put(
-                    expression,
-                    symbol.orElseThrow()
-                );
+                resolvedNames.put(expression, symbol.orElseThrow());
 
                 return symbol;
             }
 
-            diagnostics.add(
-                new Diagnostic(
-                    UNRESOLVED_NAME_CODE,
-                    DiagnosticSeverity.ERROR,
-                    "Unresolved name '%s'."
-                        .formatted(expression.name()),
-                    expression.span()
-                )
-            );
+            diagnostics.add(new Diagnostic(
+                UNRESOLVED_NAME_CODE,
+                DiagnosticSeverity.ERROR,
+                "Unresolved name '%s'.".formatted(expression.name()),
+                expression.span()
+            ));
 
             return Optional.empty();
         }
 
-        private void declareOrReport(
-            Scope scope,
-            Symbol symbol
-        ) {
-            if (!scope.declare(symbol)) {
-                reportDuplicate(symbol);
+        private TypeSymbol resolveTypeReference(TypeReference reference) {
+            var primitive = BuiltInTypes.lookup(reference.name());
+
+            if (primitive.isPresent()) {
+                var type = primitive.orElseThrow();
+
+                resolvedTypes.put(reference, type);
+
+                return type;
             }
+
+            resolvedTypes.put(reference, BuiltInTypes.ERROR);
+
+            diagnostics.add(new Diagnostic(
+                UNKNOWN_TYPE_CODE,
+                DiagnosticSeverity.ERROR,
+                "Unknown type '%s'.".formatted(reference.name()),
+                reference.span()
+            ));
+
+            return BuiltInTypes.ERROR;
         }
 
-        private void reportDuplicate(
-            Symbol symbol
-        ) {
-            diagnostics.add(
-                new Diagnostic(
-                    DUPLICATE_DECLARATION_CODE,
-                    DiagnosticSeverity.ERROR,
-                    "Duplicate declaration of '%s'."
-                        .formatted(symbol.name()),
-                    symbol.span()
-                )
-            );
+        private void declareOrReport(Scope scope, Symbol symbol) {
+            if (!scope.declare(symbol)) reportDuplicate(symbol);
         }
 
-        private Scope createChildScope(
-            ScopeKind kind,
-            Scope parent
-        ) {
-            var scope = new Scope(
-                kind,
-                parent
-            );
+        private void reportDuplicate(Symbol symbol) {
+            diagnostics.add(new Diagnostic(
+                DUPLICATE_DECLARATION_CODE,
+                DiagnosticSeverity.ERROR,
+                "Duplicate declaration of '%s'.".formatted(symbol.name()),
+                symbol.span()
+            ));
+        }
 
+        private Scope createChildScope(ScopeKind kind, Scope parent) {
+            var scope = new Scope(kind, parent);
             scopes.add(scope);
 
             return scope;
