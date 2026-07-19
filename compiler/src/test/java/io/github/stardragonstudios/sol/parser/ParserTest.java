@@ -2469,4 +2469,484 @@ class ParserTest {
             exception.diagnostic().message()
         );
     }
+
+    @Test
+    void parsesConditionalWithoutElseBranch() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    if enabled then
+                        return 1
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var conditional = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var condition = assertInstanceOf(
+            NameExpression.class,
+            conditional.condition()
+        );
+
+        assertEquals("enabled", condition.name());
+        assertTrue(conditional.elseBlock().isEmpty());
+        assertEquals(
+            1,
+            conditional.thenBlock().statements().size()
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            conditional.thenBlock().statements().getFirst()
+        );
+    }
+
+    @Test
+    void parsesConditionalWithElseBranch() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    if enabled then
+                        return 1
+                    else
+                        return 0
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var conditional = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var elseBlock = conditional
+            .elseBlock()
+            .orElseThrow();
+
+        assertEquals(
+            1,
+            conditional.thenBlock().statements().size()
+        );
+
+        assertEquals(
+            1,
+            elseBlock.statements().size()
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            conditional.thenBlock().statements().getFirst()
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            elseBlock.statements().getFirst()
+        );
+    }
+
+    @Test
+    void parsesCompleteConditionalExpression() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    if enabled && retries < limit then
+                        return calculate(value)
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var conditional = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var logicalAnd = assertInstanceOf(
+            BinaryExpression.class,
+            conditional.condition()
+        );
+
+        var comparison = assertInstanceOf(
+            BinaryExpression.class,
+            logicalAnd.right()
+        );
+
+        assertEquals(
+            BinaryOperator.LOGICAL_AND,
+            logicalAnd.operator()
+        );
+
+        assertEquals(
+            BinaryOperator.LESS_THAN,
+            comparison.operator()
+        );
+    }
+
+    @Test
+    void parsesSupportedStatementsInsideConditionalBranches() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn calculate() -> int
+                    @mut let result: int = 0
+
+                    if enabled then
+                        let increment: int = 2
+                        result = result + increment
+                        return result
+                    else
+                        const fallback: int = 0
+                        return fallback
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var conditional = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().get(1)
+        );
+
+        var elseBlock = conditional
+            .elseBlock()
+            .orElseThrow();
+
+        assertEquals(
+            3,
+            conditional.thenBlock().statements().size()
+        );
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            conditional.thenBlock().statements().get(0)
+        );
+
+        assertInstanceOf(
+            AssignmentStatement.class,
+            conditional.thenBlock().statements().get(1)
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            conditional.thenBlock().statements().get(2)
+        );
+
+        assertEquals(2, elseBlock.statements().size());
+
+        assertInstanceOf(
+            VariableDeclarationStatement.class,
+            elseBlock.statements().get(0)
+        );
+
+        assertInstanceOf(
+            ReturnStatement.class,
+            elseBlock.statements().get(1)
+        );
+    }
+
+    @Test
+    void parsesEmptyConditionalBranches() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> void
+                    if enabled then
+                    else
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var conditional = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        assertTrue(
+            conditional.thenBlock().statements().isEmpty()
+        );
+
+        assertTrue(
+            conditional
+                .elseBlock()
+                .orElseThrow()
+                .statements()
+                .isEmpty()
+        );
+    }
+
+    @Test
+    void associatesElseWithNearestConditional() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    if outer then
+                        if inner then
+                            return 1
+                        else
+                            return 0
+                        end
+                    end
+                end
+                """
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var outer = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var inner = assertInstanceOf(
+            ConditionalStatement.class,
+            outer.thenBlock().statements().getFirst()
+        );
+
+        assertTrue(outer.elseBlock().isEmpty());
+        assertTrue(inner.elseBlock().isPresent());
+    }
+
+    @Test
+    void preservesConditionalSourceSpans() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn value() -> int\n"
+                    + "if enabled then\n"
+                    + "return 1\n"
+                    + "else\n"
+                    + "return 0\n"
+                    + "end\n"
+                    + "end"
+            )
+        );
+
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
+        );
+
+        var conditional = assertInstanceOf(
+            ConditionalStatement.class,
+            function.body().statements().getFirst()
+        );
+
+        var elseBlock = conditional
+            .elseBlock()
+            .orElseThrow();
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(21, 2, 4),
+                new SourcePosition(28, 2, 11)
+            ),
+            conditional.condition().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(34, 3, 1),
+                new SourcePosition(43, 4, 1)
+            ),
+            conditional.thenBlock().span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(48, 5, 1),
+                new SourcePosition(57, 6, 1)
+            ),
+            elseBlock.span()
+        );
+
+        assertEquals(
+            new SourceSpan(
+                new SourcePosition(18, 2, 1),
+                new SourcePosition(60, 6, 4)
+            ),
+            conditional.span()
+        );
+    }
+
+    @Test
+    void reportsMissingConditionalCondition() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        if then
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected an expression, but found 'then'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingConditionalThen() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        if enabled
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected 'then' after the conditional condition, "
+                + "but found newline.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingNewlineAfterConditionalThen() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        if enabled then return 1
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline after 'then', "
+                + "but found 'return'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingNewlineAfterConditionalElse() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        if enabled then
+                        else return 0
+                        end
+                    end
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected a newline after 'else', "
+                + "but found 'return'.",
+            exception.diagnostic().message()
+        );
+    }
+
+    @Test
+    void reportsMissingConditionalEnd() {
+        var exception = assertThrows(
+            ParsingException.class,
+            () -> Parser.parse(
+                Lexer.scan(
+                    """
+                    fn value() -> int
+                        if enabled then
+                            return 1
+                    """
+                )
+            )
+        );
+
+        assertEquals(
+            "SOL-P002",
+            exception.diagnostic().code()
+        );
+
+        assertEquals(
+            "Expected 'end' to close the conditional statement, "
+                + "but found end of file.",
+            exception.diagnostic().message()
+        );
+    }
 }
