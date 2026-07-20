@@ -26,3 +26,54 @@ lowering of primitive types are defined by later backend specifications.
 The `void` type represents the absence of a returned value. Whether `void`
 is valid in declarations other than function return types is determined by
 later semantic validation.
+
+## Expressions and operators
+
+Sol 0.1 requires primitive operands to match exactly. There is no implicit
+conversion between `int` and `float`.
+
+### Unary operators
+
+| Operator | Operand   | Result    |
+|----------|-----------|-----------|
+| `!`      | `boolean` | `boolean` |
+| `-`      | `int`     | `int`     |
+| `-`      | `float`   | `float`   |
+| `+`      | `int`     | `int`     |
+| `+`      | `float`   | `float`   |
+
+### Arithmetic operators
+
+| Operators          | Operands          | Result   |
+|--------------------|-------------------|----------|
+| `*`, `/`, `+`, `-` |  `int`, `int`     |  `int`   |
+| `*`, `/`, `+`, `-` |  `float`, `float` |  `float` |
+| `%`                |  `int`, `int`     |  `int`   |
+
+### Relational operators
+
+| Operators            | Operands         | Result    |
+|----------------------|------------------|-----------|
+| `<`, `<=`, `>`, `>=` | `int`, `int`     | `boolean` |
+| `<`, `<=`, `>`, `>=` | `float`, `float` | `boolean` |
+
+### Equality operators
+
+| Operators  | Operands              | Result    |
+|------------|-----------------------|-----------|
+| `==`, `!=` |  matching value types | `boolean` |
+
+### Logical operators
+
+| Operators    | Operands             | Result    |
+|--------------|----------------------|-----------|
+| `&&`, `\|\|` | `boolean`, `boolean` | `boolean` |
+
+The `char` type is not numeric and does not participate in arithmetic or
+relational operations. Logical operators require `boolean` operands and do
+not perform truthiness conversions.
+
+String concatenation is not defined in Sol 0.1.
+
+Invalid expressions recover internally to the semantic error type so that
+semantic analysis can continue and report independent later errors.

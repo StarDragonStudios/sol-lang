@@ -420,7 +420,7 @@ class PrimitiveTypeResolutionTest {
             NullPointerException.class,
             () -> analysis.result()
                 .model()
-                .typeOf(null)
+                .typeOf((TypeReference) null)
         );
     }
 }

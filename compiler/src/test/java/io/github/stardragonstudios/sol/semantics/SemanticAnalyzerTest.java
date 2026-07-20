@@ -9,12 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class SemanticAnalyzerTest {
     private record Analysis(
@@ -260,7 +255,7 @@ class SemanticAnalyzerTest {
     void createsIndependentConditionalBranchScopes() {
         var analysis = analyze(
             """
-            fn test(value: int) -> int
+            fn test(value: boolean) -> int
                 if value then
                     let value: int = value
                     return value
@@ -427,7 +422,7 @@ class SemanticAnalyzerTest {
             elseScope.parent().orElseThrow()
         );
 
-        assertFalse(thenScope == elseScope);
+        assertNotSame(thenScope, elseScope);
         assertTrue(thenScope.isFrozen());
         assertTrue(elseScope.isFrozen());
 
