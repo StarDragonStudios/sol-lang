@@ -35,6 +35,14 @@ public record LocalVariableSymbol(
         return declaration.kind();
     }
 
+    public boolean isMutable() {
+        return declaration.kind() == VariableDeclarationKind.MUTABLE_LET;
+    }
+
+    public boolean isConstant() {
+        return declaration.kind() == VariableDeclarationKind.CONST;
+    }
+
     @Override
     public SourceSpan span() {
         return declaration.span();

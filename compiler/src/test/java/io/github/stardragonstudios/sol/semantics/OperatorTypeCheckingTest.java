@@ -383,15 +383,12 @@ class OperatorTypeCheckingTest {
         );
     }
 
-    private static TypedExpression analyzeInitializer(
-        String sourceExpression
-    ) {
+    private static TypedExpression analyzeInitializer(String sourceExpression) {
         var source = """
-            fn test(i: int, j: int, f: float, g: float, b: boolean, c: char, s: string) -> void
-                let result: int = %s
-                return
-            end
-            """.formatted(sourceExpression);
+        fn test(i: int, j: int, f: float, g: float, b: boolean, c: char, s: string) -> void
+            return %s
+        end
+        """.formatted(sourceExpression);
 
         var unit = Parser.parse(Lexer.scan(source));
         var result = SemanticAnalyzer.analyze(unit);
@@ -401,8 +398,8 @@ class OperatorTypeCheckingTest {
             unit.declarations().getFirst()
         );
 
-        var declaration = assertInstanceOf(
-            VariableDeclarationStatement.class,
+        var returnStatement = assertInstanceOf(
+            ReturnStatement.class,
             function.body()
                 .orElseThrow()
                 .statements()
@@ -410,7 +407,7 @@ class OperatorTypeCheckingTest {
         );
 
         return new TypedExpression(
-            declaration.initializer(),
+            returnStatement.expression().orElseThrow(),
             result
         );
     }

@@ -13,6 +13,11 @@ public final class SemanticAnalyzer {
     private static final String UNRESOLVED_NAME_CODE = "SOL-S002";
     private static final String UNKNOWN_TYPE_CODE = "SOL-S003";
     private static final String NON_BOOLEAN_CONDITION_CODE = "SOL-S006";
+    private static final String INVALID_VARIABLE_TYPE_CODE = "SOL-S007";
+    private static final String INCOMPATIBLE_INITIALIZER_CODE = "SOL-S008";
+    private static final String INVALID_ASSIGNMENT_TARGET_CODE = "SOL-S009";
+    private static final String IMMUTABLE_ASSIGNMENT_CODE = "SOL-S010";
+    private static final String INCOMPATIBLE_ASSIGNMENT_CODE = "SOL-S011";
 
     private SemanticAnalyzer() {}
 
@@ -52,8 +57,6 @@ public final class SemanticAnalyzer {
             predeclareFunctions();
             bindFunctionSignatures();
             bindFunctionBodies();
-
-            scopes.forEach(Scope::freeze);
 
             scopes.forEach(Scope::freeze);
 
@@ -201,37 +204,68 @@ public final class SemanticAnalyzer {
         }
 
         private void bindVariableDeclaration(VariableDeclarationStatement declaration, Scope scope) {
-            /*
-             * Resolve the declared type before inspecting
-             * the initializer, matching source order.
-             */
-            resolveTypeReference(declaration.type());
+            var declaredType = resolveTypeReference(declaration.type());
 
             /*
-             * Bind the initializer before declaring the
-             * variable. The variable is therefore not
+             * The initializer is bound before the variable
+             * enters its scope. A variable is therefore not
              * visible inside its own initializer.
              */
-            bindExpression(declaration.initializer(), scope);
+            var initializerType = bindExpression(declaration.initializer(), scope);
+
+            validateVariableType(declaration, declaredType);
+            validateVariableInitializer(declaration, declaredType, initializerType);
+
             var symbol = new LocalVariableSymbol(declaration);
             localVariableSymbols.put(declaration, symbol);
+
             declareOrReport(scope, symbol);
         }
 
         private void bindAssignment(AssignmentStatement assignment, Scope scope) {
             bindExpression(assignment.target(), scope);
+            var targetSymbol = resolvedNames.get(assignment.target());
 
-            var targetSymbol =
-                resolvedNames.get(assignment.target());
+            if (targetSymbol != null) assignmentTargets.put(assignment, targetSymbol);
 
-            if (targetSymbol != null) {
-                assignmentTargets.put(
-                    assignment,
-                    targetSymbol
-                );
-            }
+            var valueType = bindExpression(assignment.value(), scope);
+            validateAssignment(assignment, targetSymbol, valueType);
+        }
 
-            bindExpression(assignment.value(), scope);
+        private void validateVariableType(VariableDeclarationStatement declaration, TypeSymbol declaredType) {
+            if (declaredType == BuiltInTypes.ERROR || declaredType.isValue()) return;
+
+            diagnostics.add(new Diagnostic(
+                INVALID_VARIABLE_TYPE_CODE,
+                DiagnosticSeverity.ERROR,
+                "Variable '%s' cannot have non-value type '%s'."
+                    .formatted(
+                        declaration.name(),
+                        declaredType.name()
+                    ),
+                declaration.type().span()
+            ));
+        }
+
+        private void validateVariableInitializer(VariableDeclarationStatement declaration, TypeSymbol declaredType, TypeSymbol initializerType) {
+            if (
+                declaredType == BuiltInTypes.ERROR
+                    || initializerType == BuiltInTypes.ERROR
+                    || !declaredType.isValue()
+                    || declaredType == initializerType
+            ) return;
+
+            diagnostics.add(new Diagnostic(
+                INCOMPATIBLE_INITIALIZER_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot initialize variable '%s' of type '%s' with value of type '%s'."
+                    .formatted(
+                        declaration.name(),
+                        declaredType.name(),
+                        initializerType.name()
+                    ),
+                declaration.initializer().span()
+            ));
         }
 
         private void bindConditional(ConditionalStatement conditional, Scope scope) {
@@ -419,6 +453,88 @@ public final class SemanticAnalyzer {
             scopes.add(scope);
 
             return scope;
+        }
+
+        private void validateAssignment(AssignmentStatement assignment, Symbol targetSymbol, TypeSymbol valueType) {
+            switch (targetSymbol) {
+                case null -> {
+                    /*
+                     * bindName already emitted SOL-S002.
+                     */
+                    return;
+                }
+
+                case LocalVariableSymbol localVariable -> {
+                    validateLocalAssignment(assignment, localVariable, valueType);
+
+                    return;
+                }
+
+                case ParameterSymbol parameter -> {
+                    reportImmutableParameter(assignment, parameter);
+                    validateAssignmentType(assignment, parameter.name(), resolvedTypeOf(parameter), valueType);
+
+                    return;
+                }
+
+                default -> {}
+            }
+
+            diagnostics.add(new Diagnostic(
+                INVALID_ASSIGNMENT_TARGET_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot assign to '%s' because it is not a variable."
+                    .formatted(targetSymbol.name()),
+                assignment.target().span()
+            ));
+        }
+
+        private void validateLocalAssignment(AssignmentStatement assignment, LocalVariableSymbol variable, TypeSymbol valueType) {
+            if (!variable.isMutable()) {
+                diagnostics.add(new Diagnostic(
+                    IMMUTABLE_ASSIGNMENT_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot assign to immutable variable '%s'."
+                        .formatted(variable.name()),
+                    assignment.target().span()
+                ));
+            }
+
+            validateAssignmentType(assignment, variable.name(), resolvedTypeOf(variable), valueType);
+        }
+
+        private void reportImmutableParameter(AssignmentStatement assignment, ParameterSymbol parameter) {
+            diagnostics.add(new Diagnostic(
+                IMMUTABLE_ASSIGNMENT_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot assign to immutable parameter '%s'."
+                    .formatted(parameter.name()),
+                assignment.target().span()
+            ));
+        }
+
+        private void validateAssignmentType(AssignmentStatement assignment, String targetName, TypeSymbol targetType, TypeSymbol valueType) {
+            if (targetType == BuiltInTypes.ERROR || valueType == BuiltInTypes.ERROR || targetType == valueType) return;
+
+            diagnostics.add(new Diagnostic(
+                INCOMPATIBLE_ASSIGNMENT_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot assign value of type '%s' to '%s' of type '%s'."
+                    .formatted(
+                        valueType.name(),
+                        targetName,
+                        targetType.name()
+                    ),
+                assignment.value().span()
+            ));
+        }
+
+        private TypeSymbol resolvedTypeOf(LocalVariableSymbol variable) {
+            return resolvedTypes.getOrDefault(variable.type(), BuiltInTypes.ERROR);
+        }
+
+        private TypeSymbol resolvedTypeOf(ParameterSymbol parameter) {
+            return resolvedTypes.getOrDefault(parameter.type(), BuiltInTypes.ERROR);
         }
     }
 }
