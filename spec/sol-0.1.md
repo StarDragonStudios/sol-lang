@@ -77,3 +77,30 @@ String concatenation is not defined in Sol 0.1.
 
 Invalid expressions recover internally to the semantic error type so that
 semantic analysis can continue and report independent later errors.
+
+## Variables and assignments
+
+Every Sol 0.1 variable declaration has an explicit type and an initializer.
+
+| Form                       | Meaning                        |
+|----------------------------|--------------------------------|
+| `const name: T = value`    | Immutable constant declaration |
+| `let name: T = value`      | Immutable local variable       |
+| `@mut let name: T = value` | Mutable local variable         |
+
+Local variables cannot have type `void`.
+
+A variable initializer must have exactly the declared semantic type. Sol does
+not perform implicit conversions between `int`, `float`, or any other
+primitive types.
+
+Both `const` and ordinary `let` declarations are immutable after
+initialization. Only a local declared with `@mut let` can be reassigned.
+
+Function parameters are immutable.
+
+The value assigned to a mutable local variable must have exactly the target's
+declared type. Sol 0.1 performs no implicit assignment conversions.
+
+Initialization is not considered reassignment. Whether a `const` initializer
+can be evaluated at compile time is defined by later compiler work.

@@ -255,17 +255,17 @@ class SemanticAnalyzerTest {
     void createsIndependentConditionalBranchScopes() {
         var analysis = analyze(
             """
-            fn test(value: boolean) -> int
-                if value then
-                    let value: int = value
-                    return value
-                else
-                    let value: int = value
-                    return value
-                end
+            fn test(value: boolean) -> boolean
+                   if value then
+                       let value: boolean = value
+                       return value
+                   else
+                       let value: boolean = value
+                       return value
+                   end
 
-                return value
-            end
+                   return value
+               end
             """
         );
 
