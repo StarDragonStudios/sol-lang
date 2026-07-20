@@ -6,16 +6,13 @@ import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.*;
 
-import java.util.ArrayList;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 public final class SemanticAnalyzer {
     private static final String DUPLICATE_DECLARATION_CODE = "SOL-S001";
     private static final String UNRESOLVED_NAME_CODE = "SOL-S002";
     private static final String UNKNOWN_TYPE_CODE = "SOL-S003";
+    private static final String NON_BOOLEAN_CONDITION_CODE = "SOL-S006";
 
     private SemanticAnalyzer() {}
 
@@ -39,6 +36,7 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<AssignmentStatement, Symbol> assignmentTargets = new IdentityHashMap<>();
         private final IdentityHashMap<FunctionDeclaration, Boolean> duplicateFunctions = new IdentityHashMap<>();
         private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
+        private final IdentityHashMap<Expression, TypeSymbol> expressionTypes = new IdentityHashMap<>();
 
         private Binder(CompilationUnit unit) {
             this.unit = unit;
@@ -52,7 +50,10 @@ public final class SemanticAnalyzer {
 
         private SemanticAnalysisResult bind() {
             predeclareFunctions();
-            bindDeclarations();
+            bindFunctionSignatures();
+            bindFunctionBodies();
+
+            scopes.forEach(Scope::freeze);
 
             scopes.forEach(Scope::freeze);
 
@@ -65,7 +66,24 @@ public final class SemanticAnalyzer {
                 localVariableSymbols,
                 resolvedNames,
                 assignmentTargets,
-                resolvedTypes
+                resolvedTypes,
+                expressionTypes
+            );
+
+            diagnostics.sort(
+                Comparator
+                    .comparingInt(
+                        (Diagnostic diagnostic) ->
+                            diagnostic.span()
+                                .start()
+                                .offset()
+                    )
+                    .thenComparingInt(
+                        diagnostic ->
+                            diagnostic.span()
+                                .end()
+                                .offset()
+                    )
             );
 
             return new SemanticAnalysisResult(
@@ -85,34 +103,60 @@ public final class SemanticAnalyzer {
             }
         }
 
-        private void bindDeclarations() {
-            for (var declaration : unit.declarations()) if (declaration instanceof FunctionDeclaration function) bindFunction(function);
+        private void bindFunctionSignatures() {
+            for (var declaration : unit.declarations()) {
+                if (declaration instanceof FunctionDeclaration function) {
+                    bindFunctionSignature(function);
+                }
+            }
         }
 
-        private void bindFunction(FunctionDeclaration function) {
+        private void bindFunctionSignature(FunctionDeclaration function) {
             var functionSymbol = functionSymbols.get(function);
 
-            if (duplicateFunctions.containsKey(function)) reportDuplicate(functionSymbol);
+            if (duplicateFunctions.containsKey(function)) {
+                reportDuplicate(functionSymbol);
+            }
 
-            var functionScope = createChildScope(ScopeKind.FUNCTION, moduleScope);
+            var functionScope = createChildScope(
+                ScopeKind.FUNCTION,
+                moduleScope
+            );
 
             functionScopes.put(function, functionScope);
 
-            /*
-             * Parameter types occur before the return type
-             * in the source signature, so resolve them in
-             * source order before resolving the return type.
-             */
             for (var parameter : function.parameters()) {
                 resolveTypeReference(parameter.type());
-                var parameterSymbol = new ParameterSymbol(parameter);
-                parameterSymbols.put(parameter, parameterSymbol);
-                declareOrReport(functionScope, parameterSymbol);
+
+                var parameterSymbol =
+                    new ParameterSymbol(parameter);
+
+                parameterSymbols.put(
+                    parameter,
+                    parameterSymbol
+                );
+
+                declareOrReport(
+                    functionScope,
+                    parameterSymbol
+                );
             }
 
             resolveTypeReference(function.returnType());
+        }
 
+        private void bindFunctionBodies() {
+            for (var declaration : unit.declarations()) {
+                if (declaration instanceof FunctionDeclaration function) {
+                    bindFunctionBody(function);
+                }
+            }
+        }
+
+        private void bindFunctionBody(FunctionDeclaration function) {
             function.body().ifPresent(body -> {
+                var functionScope = functionScopes.get(function);
+
                 blockScopes.put(body, functionScope);
                 bindBlock(body, functionScope);
             });
@@ -175,19 +219,31 @@ public final class SemanticAnalyzer {
         }
 
         private void bindAssignment(AssignmentStatement assignment, Scope scope) {
-            var target = bindName(assignment.target(), scope);
-            target.ifPresent(symbol -> assignmentTargets.put(assignment, symbol));
+            bindExpression(assignment.target(), scope);
+
+            var targetSymbol =
+                resolvedNames.get(assignment.target());
+
+            if (targetSymbol != null) {
+                assignmentTargets.put(
+                    assignment,
+                    targetSymbol
+                );
+            }
+
             bindExpression(assignment.value(), scope);
         }
 
         private void bindConditional(ConditionalStatement conditional, Scope scope) {
-            bindExpression(conditional.condition(), scope);
+            var conditionType = bindExpression(conditional.condition(), scope);
+            validateCondition(conditional.condition(), conditionType);
             bindNestedBlock(conditional.thenBlock(), scope);
             conditional.elseBlock().ifPresent(block -> bindNestedBlock(block, scope));
         }
 
         private void bindWhile(WhileStatement whileStatement, Scope scope) {
-            bindExpression(whileStatement.condition(), scope);
+            var conditionType = bindExpression(whileStatement.condition(), scope);
+            validateCondition(whileStatement.condition(), conditionType);
             bindNestedBlock(whileStatement.body(), scope);
         }
 
@@ -197,43 +253,110 @@ public final class SemanticAnalyzer {
             bindBlock(block, blockScope);
         }
 
-        private void bindExpression(Expression expression, Scope scope) {
-            if (expression instanceof LiteralExpression) return;
+        private TypeSymbol bindExpression(Expression expression, Scope scope) {
+            TypeSymbol type;
 
+            switch (expression) {
+                case LiteralExpression literal -> type = BuiltInTypes.typeOf(literal.kind());
+                case NameExpression name -> type = bindNameExpression(name, scope);
+                case ParenthesizedExpression parenthesized -> type = bindExpression(parenthesized.expression(), scope);
+                case UnaryExpression unary -> {
+                    var operandType = bindExpression(unary.operand(), scope);
+                    type = OperatorTypeChecker.checkUnary(unary, operandType, diagnostics);
+                }
+                case BinaryExpression binary -> {
+                    var leftType = bindExpression(binary.left(), scope);
+                    var rightType = bindExpression(binary.right(), scope);
+                    type = OperatorTypeChecker.checkBinary(binary, leftType, rightType, diagnostics);
+                }
+                case CallExpression call -> type = bindCallExpression(call, scope);
+                case null, default -> {
+                    assert expression != null;
+                    throw new IllegalStateException("Unsupported expression type: " + expression.getClass().getName());
+                }
+            }
+
+            expressionTypes.put(expression, type);
+
+            return type;
+        }
+
+        private TypeSymbol bindNameExpression(NameExpression expression, Scope scope) {
+            var symbol = bindName(expression, scope);
+
+            return symbol
+                .map(this::typeOfValueSymbol)
+                .orElse(BuiltInTypes.ERROR);
+        }
+
+        private TypeSymbol typeOfValueSymbol(Symbol symbol) {
+            if (symbol instanceof ParameterSymbol parameter) {
+                return resolvedTypes.getOrDefault(
+                    parameter.type(),
+                    BuiltInTypes.ERROR
+                );
+            }
+
+            if (symbol instanceof LocalVariableSymbol localVariable) {
+                return resolvedTypes.getOrDefault(
+                    localVariable.type(),
+                    BuiltInTypes.ERROR
+                );
+            }
+
+            return BuiltInTypes.ERROR;
+        }
+
+        private TypeSymbol bindCallExpression(CallExpression call, Scope scope) {
+            bindExpression(call.callee(), scope);
+
+            for (var argument : call.arguments()) {
+                bindExpression(argument, scope);
+            }
+
+            return resolvedFunctionOf(call.callee())
+                .map(function -> resolvedTypes.getOrDefault(
+                    function.declaration().returnType(),
+                    BuiltInTypes.ERROR
+                ))
+                .orElse(BuiltInTypes.ERROR);
+        }
+
+        private Optional<FunctionSymbol> resolvedFunctionOf(Expression expression) {
             if (expression instanceof NameExpression name) {
-                bindName(name, scope);
+                var symbol = resolvedNames.get(name);
 
-                return;
+                if (symbol instanceof FunctionSymbol function) {
+                    return Optional.of(function);
+                }
+
+                return Optional.empty();
             }
 
             if (expression instanceof ParenthesizedExpression parenthesized) {
-                bindExpression(parenthesized.expression(), scope);
+                return resolvedFunctionOf(
+                    parenthesized.expression()
+                );
+            }
 
+            return Optional.empty();
+        }
+
+        private void validateCondition(Expression condition, TypeSymbol type) {
+            if (
+                type == BuiltInTypes.BOOLEAN
+                    || type == BuiltInTypes.ERROR
+            ) {
                 return;
             }
 
-            if (expression instanceof UnaryExpression unary) {
-                bindExpression(unary.operand(), scope);
-
-                return;
-            }
-
-            if (expression instanceof BinaryExpression binary) {
-                bindExpression(binary.left(), scope);
-                bindExpression(binary.right(), scope);
-
-                return;
-            }
-
-            if (expression instanceof CallExpression call) {
-                bindExpression(call.callee(), scope);
-
-                for (var argument : call.arguments()) bindExpression(argument, scope);
-
-                return;
-            }
-
-            throw new IllegalStateException("Unsupported expression type: " + expression.getClass().getName());
+            diagnostics.add(new Diagnostic(
+                NON_BOOLEAN_CONDITION_CODE,
+                DiagnosticSeverity.ERROR,
+                "Condition must have type 'boolean', but found '%s'."
+                    .formatted(type.name()),
+                condition.span()
+            ));
         }
 
         private Optional<Symbol> bindName(NameExpression expression, Scope scope) {
