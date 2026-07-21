@@ -3,9 +3,12 @@ package io.github.stardragonstudios.sol.semantics;
 import io.github.stardragonstudios.sol.lexer.Lexer;
 import io.github.stardragonstudios.sol.parser.Parser;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.*;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -14,18 +17,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExpressionTypeTest {
-    private record Analysis(
-        CompilationUnit unit,
-        SemanticAnalysisResult result
-    ) {}
+    private record Analysis(CompilationUnit unit, SemanticAnalysisResult result) {}
 
     private static Analysis analyze(String source) {
         var unit = Parser.parse(Lexer.scan(source));
 
-        return new Analysis(
-            unit,
-            SemanticAnalyzer.analyze(unit)
-        );
+        return new Analysis(unit, SemanticAnalyzer.analyze(unit));
     }
 
     @Test
@@ -47,44 +44,12 @@ class ExpressionTypeTest {
         var statements = function.body().orElseThrow().statements();
         var model = analysis.result().model();
 
-        assertInitializerType(
-            statements,
-            0,
-            BuiltInTypes.INT,
-            model
-        );
-
-        assertInitializerType(
-            statements,
-            1,
-            BuiltInTypes.FLOAT,
-            model
-        );
-
-        assertInitializerType(
-            statements,
-            2,
-            BuiltInTypes.BOOLEAN,
-            model
-        );
-
-        assertInitializerType(
-            statements,
-            3,
-            BuiltInTypes.CHAR,
-            model
-        );
-
-        assertInitializerType(
-            statements,
-            4,
-            BuiltInTypes.STRING,
-            model
-        );
-
-        assertTrue(
-            analysis.result().diagnostics().isEmpty()
-        );
+        assertInitializerType(statements, 0, BuiltInTypes.INT, model);
+        assertInitializerType(statements, 1, BuiltInTypes.FLOAT, model);
+        assertInitializerType(statements, 2, BuiltInTypes.BOOLEAN, model);
+        assertInitializerType(statements, 3, BuiltInTypes.CHAR, model);
+        assertInitializerType(statements, 4, BuiltInTypes.STRING, model);
+        assertTrue(analysis.result().diagnostics().isEmpty());
     }
 
     @Test
@@ -100,52 +65,17 @@ class ExpressionTypeTest {
 
         var function = functionAt(analysis.unit(), 0);
         var statements = function.body().orElseThrow().statements();
-
-        var declaration = assertInstanceOf(
-            VariableDeclarationStatement.class,
-            statements.get(0)
-        );
-
-        var parenthesized = assertInstanceOf(
-            ParenthesizedExpression.class,
-            declaration.initializer()
-        );
-
-        var parameterName = assertInstanceOf(
-            NameExpression.class,
-            parenthesized.expression()
-        );
-
-        var returnStatement = assertInstanceOf(
-            ReturnStatement.class,
-            statements.get(1)
-        );
-
-        var localName = assertInstanceOf(
-            NameExpression.class,
-            returnStatement.expression().orElseThrow()
-        );
-
+        var declaration = assertInstanceOf(VariableDeclarationStatement.class, statements.getFirst());
+        var parenthesized = assertInstanceOf(ParenthesizedExpression.class, declaration.initializer());
+        var parameterName = assertInstanceOf(NameExpression.class, parenthesized.expression());
+        var returnStatement = assertInstanceOf(ReturnStatement.class, statements.get(1));
+        var localName = assertInstanceOf(NameExpression.class, returnStatement.expression().orElseThrow());
         var model = analysis.result().model();
 
-        assertSame(
-            BuiltInTypes.INT,
-            model.typeOf(parameterName).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.INT,
-            model.typeOf(parenthesized).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.INT,
-            model.typeOf(localName).orElseThrow()
-        );
-
-        assertTrue(
-            analysis.result().diagnostics().isEmpty()
-        );
+        assertSame(BuiltInTypes.INT, model.typeOf(parameterName).orElseThrow());
+        assertSame(BuiltInTypes.INT, model.typeOf(parenthesized).orElseThrow());
+        assertSame(BuiltInTypes.INT, model.typeOf(localName).orElseThrow());
+        assertTrue(analysis.result().diagnostics().isEmpty());
     }
 
     @Test
@@ -159,7 +89,6 @@ class ExpressionTypeTest {
         );
 
         var function = functionAt(analysis.unit(), 0);
-
         var returnedName = assertInstanceOf(
             NameExpression.class,
             assertInstanceOf(
@@ -201,7 +130,6 @@ class ExpressionTypeTest {
         );
 
         var first = functionAt(analysis.unit(), 0);
-
         var call = assertInstanceOf(
             CallExpression.class,
             assertInstanceOf(
@@ -213,36 +141,14 @@ class ExpressionTypeTest {
             ).expression().orElseThrow()
         );
 
-        var callee = assertInstanceOf(
-            NameExpression.class,
-            call.callee()
-        );
-
-        var argument = assertInstanceOf(
-            NameExpression.class,
-            call.arguments().getFirst()
-        );
-
+        var callee = assertInstanceOf(NameExpression.class, call.callee());
+        var argument = assertInstanceOf(NameExpression.class, call.arguments().getFirst());
         var model = analysis.result().model();
 
-        assertSame(
-            BuiltInTypes.FLOAT,
-            model.typeOf(call).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.ERROR,
-            model.typeOf(callee).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.INT,
-            model.typeOf(argument).orElseThrow()
-        );
-
-        assertTrue(
-            analysis.result().diagnostics().isEmpty()
-        );
+        assertSame(BuiltInTypes.FLOAT, model.typeOf(call).orElseThrow());
+        assertSame(BuiltInTypes.ERROR, model.typeOf(callee).orElseThrow());
+        assertSame(BuiltInTypes.INT, model.typeOf(argument).orElseThrow());
+        assertTrue(analysis.result().diagnostics().isEmpty());
     }
 
     @Test
@@ -256,7 +162,6 @@ class ExpressionTypeTest {
         );
 
         var function = functionAt(analysis.unit(), 0);
-
         var call = assertInstanceOf(
             CallExpression.class,
             assertInstanceOf(
@@ -268,26 +173,17 @@ class ExpressionTypeTest {
             ).expression().orElseThrow()
         );
 
-        var callee = assertInstanceOf(
-            NameExpression.class,
-            call.callee()
-        );
-
+        var callee = assertInstanceOf(NameExpression.class, call.callee());
         var model = analysis.result().model();
 
-        assertSame(
-            BuiltInTypes.INT,
-            model.typeOf(callee).orElseThrow()
-        );
+        assertSame(BuiltInTypes.INT, model.typeOf(callee).orElseThrow());
+        assertSame(BuiltInTypes.ERROR, model.typeOf(call).orElseThrow());
 
-        assertSame(
-            BuiltInTypes.ERROR,
-            model.typeOf(call).orElseThrow()
-        );
+        var diagnostic = analysis.result().diagnostics().getFirst();
 
-        assertTrue(
-            analysis.result().diagnostics().isEmpty()
-        );
+        assertEquals("SOL-S013", diagnostic.code());
+        assertEquals("Expression of type 'int' is not callable.", diagnostic.message());
+        assertEquals(callee.span(), diagnostic.span());
     }
 
     @Test
@@ -301,7 +197,6 @@ class ExpressionTypeTest {
         );
 
         var function = functionAt(analysis.unit(), 0);
-
         var literal = assertInstanceOf(
             LiteralExpression.class,
             assertInstanceOf(
@@ -313,51 +208,28 @@ class ExpressionTypeTest {
             ).expression().orElseThrow()
         );
 
-        var clone = new LiteralExpression(
-            literal.kind(),
-            literal.lexeme(),
-            literal.span()
-        );
+        var clone = new LiteralExpression(literal.kind(), literal.lexeme(), literal.span());
 
         assertEquals(literal, clone);
 
         var model = analysis.result().model();
 
-        assertSame(
-            BuiltInTypes.INT,
-            model.typeOf(literal).orElseThrow()
-        );
-
-        assertTrue(
-            model.typeOf(clone).isEmpty()
-        );
-
-        assertThrows(
-            NullPointerException.class,
-            () -> model.typeOf((Expression) null)
-        );
+        assertSame(BuiltInTypes.INT, model.typeOf(literal).orElseThrow());
+        assertTrue(model.typeOf(clone).isEmpty());
+        assertThrows(NullPointerException.class, () -> model.typeOf((Expression) null));
     }
 
-    private static FunctionDeclaration functionAt(
-        CompilationUnit unit,
-        int index
-    ) {
-        return assertInstanceOf(
-            FunctionDeclaration.class,
-            unit.declarations().get(index)
-        );
+    private static FunctionDeclaration functionAt(CompilationUnit unit, int index) {
+        return assertInstanceOf(FunctionDeclaration.class, unit.declarations().get(index));
     }
 
     private static void assertInitializerType(
-        java.util.List<Statement> statements,
+        List<Statement> statements,
         int index,
-        io.github.stardragonstudios.sol.semantics.types.TypeSymbol expected,
+        TypeSymbol expected,
         SemanticModel model
     ) {
-        var declaration = assertInstanceOf(
-            VariableDeclarationStatement.class,
-            statements.get(index)
-        );
+        var declaration = assertInstanceOf(VariableDeclarationStatement.class, statements.get(index));
 
         assertSame(
             expected,

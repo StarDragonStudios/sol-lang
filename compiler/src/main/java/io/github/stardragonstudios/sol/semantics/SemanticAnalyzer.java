@@ -18,6 +18,13 @@ public final class SemanticAnalyzer {
     private static final String INVALID_ASSIGNMENT_TARGET_CODE = "SOL-S009";
     private static final String IMMUTABLE_ASSIGNMENT_CODE = "SOL-S010";
     private static final String INCOMPATIBLE_ASSIGNMENT_CODE = "SOL-S011";
+    private static final String INVALID_PARAMETER_TYPE_CODE = "SOL-S012";
+    private static final String NOT_CALLABLE_CODE = "SOL-S013";
+    private static final String INCORRECT_ARGUMENT_COUNT_CODE = "SOL-S014";
+    private static final String INCOMPATIBLE_ARGUMENT_CODE = "SOL-S015";
+    private static final String MISSING_RETURN_VALUE_CODE = "SOL-S016";
+    private static final String UNEXPECTED_RETURN_VALUE_CODE = "SOL-S017";
+    private static final String INCOMPATIBLE_RETURN_CODE = "SOL-S018";
 
     private SemanticAnalyzer() {}
 
@@ -42,6 +49,7 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<FunctionDeclaration, Boolean> duplicateFunctions = new IdentityHashMap<>();
         private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
         private final IdentityHashMap<Expression, TypeSymbol> expressionTypes = new IdentityHashMap<>();
+        private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions = new IdentityHashMap<>();
 
         private Binder(CompilationUnit unit) {
             this.unit = unit;
@@ -69,24 +77,15 @@ public final class SemanticAnalyzer {
                 localVariableSymbols,
                 resolvedNames,
                 assignmentTargets,
+                calledFunctions,
                 resolvedTypes,
                 expressionTypes
             );
 
             diagnostics.sort(
                 Comparator
-                    .comparingInt(
-                        (Diagnostic diagnostic) ->
-                            diagnostic.span()
-                                .start()
-                                .offset()
-                    )
-                    .thenComparingInt(
-                        diagnostic ->
-                            diagnostic.span()
-                                .end()
-                                .offset()
-                    )
+                    .comparingInt((Diagnostic diagnostic) -> diagnostic.span().start().offset())
+                    .thenComparingInt(diagnostic -> diagnostic.span().end().offset())
             );
 
             return new SemanticAnalysisResult(
@@ -114,6 +113,18 @@ public final class SemanticAnalyzer {
             }
         }
 
+        private void validateParameterType(FunctionDeclaration function, Parameter parameter, TypeSymbol type) {
+            if (type == BuiltInTypes.ERROR || type.isValue()) return;
+
+            diagnostics.add(new Diagnostic(
+                INVALID_PARAMETER_TYPE_CODE,
+                DiagnosticSeverity.ERROR,
+                "Parameter '%s' of function '%s' cannot have non-value type '%s'."
+                    .formatted(parameter.name(), function.name(), type.name()),
+                parameter.type().span()
+            ));
+        }
+
         private void bindFunctionSignature(FunctionDeclaration function) {
             var functionSymbol = functionSymbols.get(function);
 
@@ -129,20 +140,12 @@ public final class SemanticAnalyzer {
             functionScopes.put(function, functionScope);
 
             for (var parameter : function.parameters()) {
-                resolveTypeReference(parameter.type());
+                var parameterType = resolveTypeReference(parameter.type());
+                validateParameterType(function, parameter, parameterType);
 
-                var parameterSymbol =
-                    new ParameterSymbol(parameter);
-
-                parameterSymbols.put(
-                    parameter,
-                    parameterSymbol
-                );
-
-                declareOrReport(
-                    functionScope,
-                    parameterSymbol
-                );
+                var parameterSymbol = new ParameterSymbol(parameter);
+                parameterSymbols.put(parameter, parameterSymbol);
+                declareOrReport(functionScope, parameterSymbol);
             }
 
             resolveTypeReference(function.returnType());
@@ -159,48 +162,44 @@ public final class SemanticAnalyzer {
         private void bindFunctionBody(FunctionDeclaration function) {
             function.body().ifPresent(body -> {
                 var functionScope = functionScopes.get(function);
-
                 blockScopes.put(body, functionScope);
-                bindBlock(body, functionScope);
+                bindBlock(body, functionScope, function);
             });
         }
 
-        private void bindBlock(Block block, Scope scope) {
-            for (var statement : block.statements()) bindStatement(statement, scope);
+        private void bindBlock(Block block, Scope scope, FunctionDeclaration function) {
+            for (var statement : block.statements()) bindStatement(statement, scope, function);
         }
 
-        private void bindStatement(Statement statement, Scope scope) {
+        private void bindStatement(Statement statement, Scope scope, FunctionDeclaration function) {
             if (statement instanceof ReturnStatement returnStatement) {
-                returnStatement.expression().ifPresent(expression -> bindExpression(expression, scope));
-
+                bindReturn(returnStatement, scope, function);
                 return;
             }
 
             if (statement instanceof VariableDeclarationStatement variableDeclaration) {
                 bindVariableDeclaration(variableDeclaration, scope);
-
                 return;
             }
 
             if (statement instanceof AssignmentStatement assignment) {
                 bindAssignment(assignment, scope);
-
                 return;
             }
 
             if (statement instanceof ConditionalStatement conditional) {
-                bindConditional(conditional, scope);
-
+                bindConditional(conditional, scope, function);
                 return;
             }
 
             if (statement instanceof WhileStatement whileStatement) {
-                bindWhile(whileStatement, scope);
-
+                bindWhile(whileStatement, scope, function);
                 return;
             }
 
-            throw new IllegalStateException("Unsupported statement type: " + statement.getClass().getName());
+            throw new IllegalStateException(
+                "Unsupported statement type: " + statement.getClass().getName()
+            );
         }
 
         private void bindVariableDeclaration(VariableDeclarationStatement declaration, Scope scope) {
@@ -268,23 +267,24 @@ public final class SemanticAnalyzer {
             ));
         }
 
-        private void bindConditional(ConditionalStatement conditional, Scope scope) {
+        private void bindConditional(ConditionalStatement conditional, Scope scope, FunctionDeclaration function) {
             var conditionType = bindExpression(conditional.condition(), scope);
             validateCondition(conditional.condition(), conditionType);
-            bindNestedBlock(conditional.thenBlock(), scope);
-            conditional.elseBlock().ifPresent(block -> bindNestedBlock(block, scope));
+            bindNestedBlock(conditional.thenBlock(), scope, function);
+
+            conditional.elseBlock().ifPresent(block -> bindNestedBlock(block, scope, function));
         }
 
-        private void bindWhile(WhileStatement whileStatement, Scope scope) {
+        private void bindWhile(WhileStatement whileStatement, Scope scope, FunctionDeclaration function) {
             var conditionType = bindExpression(whileStatement.condition(), scope);
             validateCondition(whileStatement.condition(), conditionType);
-            bindNestedBlock(whileStatement.body(), scope);
+            bindNestedBlock(whileStatement.body(), scope, function);
         }
 
-        private void bindNestedBlock(Block block, Scope parent) {
+        private void bindNestedBlock(Block block, Scope parent, FunctionDeclaration function) {
             var blockScope = createChildScope(ScopeKind.BLOCK, parent);
             blockScopes.put(block, blockScope);
-            bindBlock(block, blockScope);
+            bindBlock(block, blockScope, function);
         }
 
         private TypeSymbol bindExpression(Expression expression, Scope scope) {
@@ -342,47 +342,111 @@ public final class SemanticAnalyzer {
         }
 
         private TypeSymbol bindCallExpression(CallExpression call, Scope scope) {
-            bindExpression(call.callee(), scope);
+            var calleeType = bindExpression(call.callee(), scope);
+            var argumentTypes = new ArrayList<TypeSymbol>(call.arguments().size());
 
             for (var argument : call.arguments()) {
-                bindExpression(argument, scope);
+                argumentTypes.add(bindExpression(argument, scope));
             }
 
-            return resolvedFunctionOf(call.callee())
-                .map(function -> resolvedTypes.getOrDefault(
-                    function.declaration().returnType(),
-                    BuiltInTypes.ERROR
-                ))
-                .orElse(BuiltInTypes.ERROR);
+            var resolvedFunction = resolvedFunctionOf(call.callee());
+
+            if (resolvedFunction.isEmpty()) {
+                if (calleeType != BuiltInTypes.ERROR) {
+                    diagnostics.add(new Diagnostic(
+                        NOT_CALLABLE_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Expression of type '%s' is not callable."
+                            .formatted(calleeType.name()),
+                        call.callee().span()
+                    ));
+                }
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var function = resolvedFunction.orElseThrow();
+            calledFunctions.put(call, function);
+
+            validateArgumentCount(call, function);
+            validateArgumentTypes(call, function, argumentTypes);
+
+            return resolvedTypes.getOrDefault(
+                function.declaration().returnType(),
+                BuiltInTypes.ERROR
+            );
         }
+
+        private void bindReturn(ReturnStatement statement, Scope scope, FunctionDeclaration function) {
+            var returnType = resolvedTypes.getOrDefault(function.returnType(), BuiltInTypes.ERROR);
+
+            if (statement.expression().isEmpty()) {
+                if (returnType.isValue()) {
+                    diagnostics.add(new Diagnostic(
+                        MISSING_RETURN_VALUE_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Function '%s' must return a value of type '%s'."
+                            .formatted(function.name(), returnType.name()),
+                        statement.span()
+                    ));
+                }
+
+                return;
+            }
+
+            var expression = statement.expression().orElseThrow();
+            var expressionType = bindExpression(expression, scope);
+
+            if (returnType == BuiltInTypes.VOID) {
+                diagnostics.add(new Diagnostic(
+                    UNEXPECTED_RETURN_VALUE_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Function '%s' returns 'void' and cannot return a value."
+                        .formatted(function.name()),
+                    expression.span()
+                ));
+
+                return;
+            }
+
+            if (
+                returnType == BuiltInTypes.ERROR
+                    || expressionType == BuiltInTypes.ERROR
+                    || returnType == expressionType
+            ) return;
+
+
+            diagnostics.add(new Diagnostic(
+                INCOMPATIBLE_RETURN_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot return value of type '%s' from function '%s' returning '%s'."
+                    .formatted(
+                        expressionType.name(),
+                        function.name(),
+                        returnType.name()
+                    ),
+                expression.span()
+            ));
+        }
+
 
         private Optional<FunctionSymbol> resolvedFunctionOf(Expression expression) {
             if (expression instanceof NameExpression name) {
                 var symbol = resolvedNames.get(name);
 
-                if (symbol instanceof FunctionSymbol function) {
-                    return Optional.of(function);
-                }
+                if (symbol instanceof FunctionSymbol function) return Optional.of(function);
 
                 return Optional.empty();
             }
 
-            if (expression instanceof ParenthesizedExpression parenthesized) {
-                return resolvedFunctionOf(
-                    parenthesized.expression()
-                );
-            }
+            if (expression instanceof ParenthesizedExpression parenthesized)
+                return resolvedFunctionOf(parenthesized.expression());
 
             return Optional.empty();
         }
 
         private void validateCondition(Expression condition, TypeSymbol type) {
-            if (
-                type == BuiltInTypes.BOOLEAN
-                    || type == BuiltInTypes.ERROR
-            ) {
-                return;
-            }
+            if (type == BuiltInTypes.BOOLEAN || type == BuiltInTypes.ERROR) return;
 
             diagnostics.add(new Diagnostic(
                 NON_BOOLEAN_CONDITION_CODE,
@@ -527,6 +591,59 @@ public final class SemanticAnalyzer {
                     ),
                 assignment.value().span()
             ));
+        }
+
+        private void validateArgumentCount(CallExpression call, FunctionSymbol function) {
+            var expected = function.declaration().parameters().size();
+            var actual = call.arguments().size();
+
+            if (expected == actual) return;
+
+            var argumentWord = expected == 1 ? "argument" : "arguments";
+
+            diagnostics.add(new Diagnostic(
+                INCORRECT_ARGUMENT_COUNT_CODE,
+                DiagnosticSeverity.ERROR,
+                "Function '%s' expects %d %s, but received %d."
+                    .formatted(
+                        function.name(),
+                        expected,
+                        argumentWord,
+                        actual
+                    ),
+                call.span()
+            ));
+        }
+
+        private void validateArgumentTypes(CallExpression call, FunctionSymbol function, List<TypeSymbol> argumentTypes) {
+            var parameters = function.declaration().parameters();
+            var comparableCount = Math.min(parameters.size(), argumentTypes.size());
+
+            for (var index = 0; index < comparableCount; index++) {
+                var parameter = parameters.get(index);
+                var expectedType = resolvedTypes.getOrDefault(parameter.type(), BuiltInTypes.ERROR);
+                var actualType = argumentTypes.get(index);
+
+                if (
+                    expectedType == BuiltInTypes.ERROR
+                        || actualType == BuiltInTypes.ERROR
+                        || !expectedType.isValue()
+                        || expectedType == actualType
+                ) continue;
+
+                diagnostics.add(new Diagnostic(
+                    INCOMPATIBLE_ARGUMENT_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Argument %d of function '%s' expects type '%s', but found '%s'."
+                        .formatted(
+                            index + 1,
+                            function.name(),
+                            expectedType.name(),
+                            actualType.name()
+                        ),
+                    call.arguments().get(index).span()
+                ));
+            }
         }
 
         private TypeSymbol resolvedTypeOf(LocalVariableSymbol variable) {
