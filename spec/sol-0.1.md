@@ -151,3 +151,122 @@ return expression
 Explicit return statements are validated in every nested block. Sol 0.1 does
 not yet verify that every possible control-flow path reaches a return
 statement.
+
+## Modules and injections
+
+A Sol module is identified by an external, case-sensitive module name. Module
+names contain one or more identifier segments separated by `.`:
+
+```sol
+std.console
+company.project.utilities
+application
+```
+
+Module names are supplied to semantic analysis together with their parsed
+compilation units. Sol 0.1 does not locate modules in the filesystem or derive
+module names from source filenames.
+
+Every function declared directly at the top level of a module is exported.
+This includes bodyful `fn` declarations and bodyless `@fn` declarations.
+
+Functions injected into a module are not automatically re-exported from that
+module.
+
+### Direct injections
+
+A direct injection introduces the target module's exported functions as
+unqualified names:
+
+```sol
+inject math.operations
+```
+
+A direct injection can select specific functions with `only`:
+
+```sol
+inject math.operations only add, subtract
+```
+
+Example:
+
+```sol
+inject math.operations only add
+
+fn calculate() -> int
+    return add(1, 2)
+end
+```
+
+Without `only`, every function declared directly in the target module is
+injected. With `only`, only the listed functions are injected.
+
+Injected functions retain the identity and signature of their declarations in
+the target module. Argument and return-type validation therefore behaves in
+the same way as for locally declared functions.
+
+Local declarations are registered before injections. A local function keeps
+its name when an injection attempts to introduce a conflicting name. Conflicts
+between local functions, directly injected functions, and namespace names are
+compile-time errors.
+
+### Namespace injections
+
+A namespace injection introduces one namespace name instead of introducing
+each function separately:
+
+```sol
+inject namespace std.console
+```
+
+Without an explicit alias, the namespace name is the final segment of the
+module name. The previous declaration therefore introduces `console`.
+
+An explicit namespace alias is declared with `as`:
+
+```sol
+inject namespace std.console as io
+```
+
+Functions in an injected namespace are accessed with `::`:
+
+```sol
+inject namespace std.console as io
+
+fn show() -> void
+    io::print_line("Hello")
+    return
+end
+```
+
+Namespace names and aliases are case-sensitive. A namespace is not a runtime
+value and cannot be assigned, returned, or passed as an argument.
+
+Sol 0.1 supports one namespace qualifier followed by one function name:
+
+```sol
+namespace::function
+```
+
+Chained qualification such as `a::b::function` is not supported.
+
+### Module resolution
+
+Semantic analysis receives all participating modules explicitly and performs
+program-wide declaration phases:
+
+1. register every module
+2. create every module scope
+3. predeclare every locally declared function
+4. resolve every injection
+5. bind every function signature
+6. bind every function body
+7. freeze every completed scope
+
+Because all local functions are predeclared before injections and function
+bodies are analyzed, forward references and mutually dependent modules can be
+resolved.
+
+Sol 0.1 does not reject cyclic module references at the function-declaration
+level. Module-level executable initialization and initialization-cycle
+detection are not defined.
