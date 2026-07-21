@@ -3,10 +3,7 @@ package io.github.stardragonstudios.sol.semantics;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.*;
 
-import java.util.IdentityHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 public final class SemanticModel {
     private final Scope moduleScope;
@@ -20,6 +17,10 @@ public final class SemanticModel {
     private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes;
     private final IdentityHashMap<Expression, TypeSymbol> expressionTypes;
     private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions;
+    private final IdentityHashMap<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols;
+    private final IdentityHashMap<InjectionDeclaration, ModuleSymbol> injectedModules;
+    private final IdentityHashMap<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions;
+    private final IdentityHashMap<InjectionDeclaration, NamespaceSymbol> injectedNamespaces;
 
     SemanticModel(
         Scope moduleScope,
@@ -30,7 +31,10 @@ public final class SemanticModel {
         Map<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols,
         Map<NameExpression, Symbol> resolvedNames,
         Map<AssignmentStatement, Symbol> assignmentTargets,
-        Map<CallExpression, FunctionSymbol> calledFunctions,
+        Map<CallExpression, FunctionSymbol> calledFunctions,Map<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols,
+        Map<InjectionDeclaration, ModuleSymbol> injectedModules,
+        Map<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions,
+        Map<InjectionDeclaration, NamespaceSymbol> injectedNamespaces,
         Map<TypeReference, TypeSymbol> resolvedTypes,
         Map<Expression, TypeSymbol> expressionTypes
     ) {
@@ -45,6 +49,10 @@ public final class SemanticModel {
         this.resolvedTypes = copyIdentityMap(resolvedTypes, "Resolved type associations");
         this.expressionTypes = copyIdentityMap(expressionTypes, "Expression type associations");
         this.calledFunctions = copyIdentityMap(calledFunctions, "Called function associations");
+        this.qualifiedNameSymbols = copyIdentityMap(qualifiedNameSymbols, "Qualified name associations");
+        this.injectedModules = copyIdentityMap(injectedModules, "Injected module associations");
+        this.directlyInjectedFunctions = copyIdentityListMap(directlyInjectedFunctions, "Directly injected function associations");
+        this.injectedNamespaces = copyIdentityMap(injectedNamespaces, "Injected namespace associations");
     }
 
     public Scope moduleScope() {
@@ -92,6 +100,30 @@ public final class SemanticModel {
         return Optional.ofNullable(resolvedNames.get(expression));
     }
 
+    public Optional<FunctionSymbol> symbolOf(QualifiedNameExpression expression) {
+        Objects.requireNonNull(expression, "Qualified name expression must not be null.");
+
+        return Optional.ofNullable(qualifiedNameSymbols.get(expression));
+    }
+
+    public Optional<ModuleSymbol> injectedModuleOf(InjectionDeclaration declaration) {
+        Objects.requireNonNull(declaration, "Injection declaration must not be null.");
+
+        return Optional.ofNullable(injectedModules.get(declaration));
+    }
+
+    public List<FunctionSymbol> directlyInjectedFunctionsOf(InjectionDeclaration declaration) {
+        Objects.requireNonNull(declaration, "Injection declaration must not be null.");
+
+        return directlyInjectedFunctions.getOrDefault(declaration, List.of());
+    }
+
+    public Optional<NamespaceSymbol> injectedNamespaceOf(InjectionDeclaration declaration) {
+        Objects.requireNonNull(declaration, "Injection declaration must not be null.");
+
+        return Optional.ofNullable(injectedNamespaces.get(declaration));
+    }
+
     public Optional<Symbol> assignmentTargetOf(AssignmentStatement statement) {
         Objects.requireNonNull(statement, "Assignment statement must not be null.");
 
@@ -105,14 +137,10 @@ public final class SemanticModel {
     }
 
     public Optional<TypeSymbol> typeOf(Expression expression) {
-        Objects.requireNonNull(
-            expression,
-            "Expression must not be null."
+        Objects.requireNonNull(expression, "Expression must not be null."
         );
 
-        return Optional.ofNullable(
-            expressionTypes.get(expression)
-        );
+        return Optional.ofNullable(expressionTypes.get(expression));
     }
 
     private static <K, V> IdentityHashMap<K, V> copyIdentityMap(Map<K, V> source, String description) {
@@ -124,6 +152,22 @@ public final class SemanticModel {
             Objects.requireNonNull(value, description + " must not contain null values.");
 
             copy.put(key, value);
+        });
+
+        return copy;
+    }
+
+    private static <K, V>
+    IdentityHashMap<K, List<V>> copyIdentityListMap(Map<K, List<V>> source, String description) {
+        Objects.requireNonNull(source, description + " must not be null.");
+
+        var copy = new IdentityHashMap<K, List<V>>();
+
+        source.forEach((key, values) -> {
+            Objects.requireNonNull(key, description + " must not contain null keys.");
+            Objects.requireNonNull(values, description + " must not contain null lists.");
+
+            copy.put(key, List.copyOf(values));
         });
 
         return copy;

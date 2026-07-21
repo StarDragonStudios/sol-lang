@@ -25,13 +25,68 @@ public final class SemanticAnalyzer {
     private static final String MISSING_RETURN_VALUE_CODE = "SOL-S016";
     private static final String UNEXPECTED_RETURN_VALUE_CODE = "SOL-S017";
     private static final String INCOMPATIBLE_RETURN_CODE = "SOL-S018";
+    private static final String UNRESOLVED_MODULE_CODE = "SOL-S019";
+    private static final String UNKNOWN_INJECTED_SYMBOL_CODE = "SOL-S020";
+    private static final String NON_NAMESPACE_QUALIFIER_CODE = "SOL-S021";
+    private static final String UNKNOWN_NAMESPACE_MEMBER_CODE = "SOL-S022";
+
+    private static final ModuleName ISOLATED_MODULE_NAME = new ModuleName(List.of("<isolated>"));
 
     private SemanticAnalyzer() {}
 
     public static SemanticAnalysisResult analyze(CompilationUnit unit) {
         Objects.requireNonNull(unit, "Compilation unit must not be null.");
 
-        return new Binder(unit).bind();
+        var sourceModule = new SourceModule(ISOLATED_MODULE_NAME, unit);
+
+        return analyzeModules(List.of(sourceModule)).analysisOf(ISOLATED_MODULE_NAME).orElseThrow();
+    }
+
+    public static SemanticProgramAnalysisResult analyzeModules(List<SourceModule> sourceModules) {
+        Objects.requireNonNull(sourceModules, "Source modules must not be null.");
+
+        return new ProgramBinder(sourceModules).bind();
+    }
+
+    private static final class ProgramBinder {
+        private final LinkedHashMap<ModuleName, ModuleSymbol> modules = new LinkedHashMap<>();
+        private final LinkedHashMap<ModuleName, Binder> binders = new LinkedHashMap<>();
+        private final IdentityHashMap<TypeReference, TypeSymbol> programResolvedTypes = new IdentityHashMap<>();
+
+        private ProgramBinder(List<SourceModule> sourceModules) {
+            var modulesCopy = new ArrayList<SourceModule>();
+
+            for (var sourceModule : sourceModules) modulesCopy.add(Objects.requireNonNull(sourceModule, "Source modules must not contain null values."));
+
+            for (var sourceModule : modulesCopy) {
+                var module = new ModuleSymbol(sourceModule.name(), sourceModule.unit());
+
+                if (modules.putIfAbsent(sourceModule.name(), module) != null)
+                    throw new IllegalArgumentException("Duplicate source module '%s'.".formatted(sourceModule.name().qualifiedName()));
+            }
+
+            for (var sourceModule : modulesCopy) {
+                var module = modules.get(sourceModule.name());
+
+                binders.put(
+                    sourceModule.name(),
+                    new Binder(sourceModule, module, modules, programResolvedTypes)
+                );
+            }
+        }
+
+        private SemanticProgramAnalysisResult bind() {
+            binders.values().forEach(Binder::predeclareFunctions);
+            binders.values().forEach(Binder::resolveInjections);
+            binders.values().forEach(Binder::bindFunctionSignatures);
+            binders.values().forEach(Binder::bindFunctionBodies);
+
+            var analyses = new LinkedHashMap<ModuleName, SemanticAnalysisResult>();
+
+            binders.forEach((name, binder) -> analyses.put(name, binder.finish()));
+
+            return new SemanticProgramAnalysisResult(modules, analyses);
+        }
     }
 
     private static final class Binder {
@@ -50,22 +105,33 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
         private final IdentityHashMap<Expression, TypeSymbol> expressionTypes = new IdentityHashMap<>();
         private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions = new IdentityHashMap<>();
+        private final IdentityHashMap<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols = new IdentityHashMap<>();
+        private final IdentityHashMap<InjectionDeclaration, ModuleSymbol> injectedModules = new IdentityHashMap<>();
+        private final IdentityHashMap<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions = new IdentityHashMap<>();
+        private final IdentityHashMap<InjectionDeclaration, NamespaceSymbol> injectedNamespaces = new IdentityHashMap<>();
+        private final ModuleSymbol module;
+        private final Map<ModuleName, ModuleSymbol> modules;
+        private final IdentityHashMap<TypeReference, TypeSymbol> programResolvedTypes;
 
-        private Binder(CompilationUnit unit) {
-            this.unit = unit;
+        private Binder(
+            SourceModule sourceModule,
+            ModuleSymbol module,
+            Map<ModuleName, ModuleSymbol> modules,
+            IdentityHashMap<TypeReference, TypeSymbol> programResolvedTypes
+        ) {
+            Objects.requireNonNull(sourceModule, "Source module must not be null.");
 
-            moduleScope = new Scope(
-                ScopeKind.MODULE
-            );
+            this.module = Objects.requireNonNull(module, "Semantic module must not be null.");
+            this.modules = Map.copyOf(Objects.requireNonNull(modules, "Semantic module registry must not be null."));
+            this.programResolvedTypes = Objects.requireNonNull(programResolvedTypes, "Program type associations must not be null.");
+
+            unit = sourceModule.unit();
+            moduleScope = module.scope();
 
             scopes.add(moduleScope);
         }
 
-        private SemanticAnalysisResult bind() {
-            predeclareFunctions();
-            bindFunctionSignatures();
-            bindFunctionBodies();
-
+        private SemanticAnalysisResult finish() {
             scopes.forEach(Scope::freeze);
 
             var model = new SemanticModel(
@@ -78,6 +144,10 @@ public final class SemanticAnalyzer {
                 resolvedNames,
                 assignmentTargets,
                 calledFunctions,
+                qualifiedNameSymbols,
+                injectedModules,
+                directlyInjectedFunctions,
+                injectedNamespaces,
                 resolvedTypes,
                 expressionTypes
             );
@@ -88,10 +158,7 @@ public final class SemanticAnalyzer {
                     .thenComparingInt(diagnostic -> diagnostic.span().end().offset())
             );
 
-            return new SemanticAnalysisResult(
-                model,
-                diagnostics
-            );
+            return new SemanticAnalysisResult(model, diagnostics);
         }
 
         private void predeclareFunctions() {
@@ -100,7 +167,7 @@ public final class SemanticAnalyzer {
                     var symbol = new FunctionSymbol(function);
                     functionSymbols.put(function, symbol);
 
-                    if (!moduleScope.declare(symbol)) duplicateFunctions.put(function, true);
+                    if (!module.declareExport(symbol)) duplicateFunctions.put(function, true);
                 }
             }
         }
@@ -304,6 +371,7 @@ public final class SemanticAnalyzer {
                     type = OperatorTypeChecker.checkBinary(binary, leftType, rightType, diagnostics);
                 }
                 case CallExpression call -> type = bindCallExpression(call, scope);
+                case QualifiedNameExpression qualified -> type = bindQualifiedNameExpression(qualified, scope);
                 case null, default -> {
                     assert expression != null;
                     throw new IllegalStateException("Unsupported expression type: " + expression.getClass().getName());
@@ -315,12 +383,64 @@ public final class SemanticAnalyzer {
             return type;
         }
 
+        private TypeSymbol bindQualifiedNameExpression(QualifiedNameExpression expression, Scope scope) {
+            bindExpression(expression.qualifier(), scope);
+
+            expressionTypes.put(expression.member(), BuiltInTypes.ERROR);
+
+            var qualifierSymbol = resolvedNames.get(expression.qualifier());
+
+            if (qualifierSymbol == null) {
+                /*
+                 * bindName already emitted SOL-S002.
+                 */
+                return BuiltInTypes.ERROR;
+            }
+
+            if (!(qualifierSymbol instanceof NamespaceSymbol namespace)) {
+                diagnostics.add(new Diagnostic(
+                    NON_NAMESPACE_QUALIFIER_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Name '%s' does not refer to an injected namespace."
+                        .formatted(
+                            expression.qualifier().name()
+                        ),
+                    expression.qualifier().span()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var function = namespace.targetModule().exportedFunction(expression.member().name());
+
+            if (function.isEmpty()) {
+                diagnostics.add(new Diagnostic(
+                    UNKNOWN_NAMESPACE_MEMBER_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Module '%s' does not declare function '%s'."
+                        .formatted(
+                            namespace.targetModule()
+                                .name()
+                                .qualifiedName(),
+                            expression.member().name()
+                        ),
+                    expression.member().span()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var resolvedFunction = function.orElseThrow();
+
+            qualifiedNameSymbols.put(expression, resolvedFunction);
+
+            return BuiltInTypes.ERROR;
+        }
+
         private TypeSymbol bindNameExpression(NameExpression expression, Scope scope) {
             var symbol = bindName(expression, scope);
 
-            return symbol
-                .map(this::typeOfValueSymbol)
-                .orElse(BuiltInTypes.ERROR);
+            return symbol.map(this::typeOfValueSymbol).orElse(BuiltInTypes.ERROR);
         }
 
         private TypeSymbol typeOfValueSymbol(Symbol symbol) {
@@ -345,9 +465,7 @@ public final class SemanticAnalyzer {
             var calleeType = bindExpression(call.callee(), scope);
             var argumentTypes = new ArrayList<TypeSymbol>(call.arguments().size());
 
-            for (var argument : call.arguments()) {
-                argumentTypes.add(bindExpression(argument, scope));
-            }
+            for (var argument : call.arguments()) argumentTypes.add(bindExpression(argument, scope));
 
             var resolvedFunction = resolvedFunctionOf(call.callee());
 
@@ -371,10 +489,7 @@ public final class SemanticAnalyzer {
             validateArgumentCount(call, function);
             validateArgumentTypes(call, function, argumentTypes);
 
-            return resolvedTypes.getOrDefault(
-                function.declaration().returnType(),
-                BuiltInTypes.ERROR
-            );
+            return resolvedTypeOf(function.declaration().returnType());
         }
 
         private void bindReturn(ReturnStatement statement, Scope scope, FunctionDeclaration function) {
@@ -442,6 +557,9 @@ public final class SemanticAnalyzer {
             if (expression instanceof ParenthesizedExpression parenthesized)
                 return resolvedFunctionOf(parenthesized.expression());
 
+            if (expression instanceof QualifiedNameExpression qualified)
+                return Optional.ofNullable(qualifiedNameSymbols.get(qualified));
+
             return Optional.empty();
         }
 
@@ -483,11 +601,13 @@ public final class SemanticAnalyzer {
                 var type = primitive.orElseThrow();
 
                 resolvedTypes.put(reference, type);
+                programResolvedTypes.put(reference, type);
 
                 return type;
             }
 
             resolvedTypes.put(reference, BuiltInTypes.ERROR);
+            programResolvedTypes.put(reference, BuiltInTypes.ERROR);
 
             diagnostics.add(new Diagnostic(
                 UNKNOWN_TYPE_CODE,
@@ -497,6 +617,10 @@ public final class SemanticAnalyzer {
             ));
 
             return BuiltInTypes.ERROR;
+        }
+
+        private TypeSymbol resolvedTypeOf(TypeReference reference) {
+            return programResolvedTypes.getOrDefault(reference, BuiltInTypes.ERROR);
         }
 
         private void declareOrReport(Scope scope, Symbol symbol) {
@@ -621,7 +745,7 @@ public final class SemanticAnalyzer {
 
             for (var index = 0; index < comparableCount; index++) {
                 var parameter = parameters.get(index);
-                var expectedType = resolvedTypes.getOrDefault(parameter.type(), BuiltInTypes.ERROR);
+                var expectedType = resolvedTypeOf(parameter.type());
                 var actualType = argumentTypes.get(index);
 
                 if (
@@ -647,11 +771,111 @@ public final class SemanticAnalyzer {
         }
 
         private TypeSymbol resolvedTypeOf(LocalVariableSymbol variable) {
-            return resolvedTypes.getOrDefault(variable.type(), BuiltInTypes.ERROR);
+            return resolvedTypeOf(variable.type());
         }
 
         private TypeSymbol resolvedTypeOf(ParameterSymbol parameter) {
-            return resolvedTypes.getOrDefault(parameter.type(), BuiltInTypes.ERROR);
+            return resolvedTypeOf(parameter.type());
+        }
+
+        private void resolveInjections() {
+            for (var declaration : unit.declarations())
+                if (declaration instanceof InjectionDeclaration injection)
+                    resolveInjection(injection);
+        }
+
+        private void resolveInjection(InjectionDeclaration injection) {
+            var targetName = new ModuleName(injection.modulePath().segments());
+
+            var targetModule = modules.get(targetName);
+
+            if (targetModule == null) {
+                diagnostics.add(new Diagnostic(
+                    UNRESOLVED_MODULE_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot resolve module '%s'."
+                        .formatted(
+                            targetName.qualifiedName()
+                        ),
+                    injection.modulePath().span()
+                ));
+
+                return;
+            }
+
+            injectedModules.put(injection, targetModule);
+
+            switch (injection.kind()) {
+                case DIRECT -> resolveDirectInjection(injection, targetModule);
+
+                case NAMESPACE -> resolveNamespaceInjection(injection, targetModule);
+            }
+        }
+
+        private void resolveDirectInjection(InjectionDeclaration injection, ModuleSymbol targetModule) {
+            var injected = new ArrayList<FunctionSymbol>();
+
+            if (injection.selectedNames().isEmpty()) {
+                for (var function : targetModule.exportedFunctions())
+                    declareInjectedFunction(injection, function, injected);
+            } else {
+                for (var selectedName : injection.selectedNames()) {
+                    var function = targetModule.exportedFunction(selectedName);
+
+                    if (function.isEmpty()) {
+                        diagnostics.add(new Diagnostic(
+                            UNKNOWN_INJECTED_SYMBOL_CODE,
+                            DiagnosticSeverity.ERROR,
+                            "Module '%s' does not declare function '%s'."
+                                .formatted(
+                                    targetModule.name()
+                                        .qualifiedName(),
+                                    selectedName
+                                ),
+                            injection.span()
+                        ));
+
+                        continue;
+                    }
+
+                    declareInjectedFunction(injection, function.orElseThrow(), injected);
+                }
+            }
+
+            directlyInjectedFunctions.put(injection, List.copyOf(injected));
+        }
+
+        private void declareInjectedFunction(InjectionDeclaration injection, FunctionSymbol function, List<FunctionSymbol> injected) {
+            if (!moduleScope.declare(function)) {
+                reportInjectedDuplicate(function.name(), injection);
+
+                return;
+            }
+
+            injected.add(function);
+        }
+
+        private void resolveNamespaceInjection(InjectionDeclaration injection, ModuleSymbol targetModule) {
+            var namespaceName = injection.alias().orElseGet(() -> targetModule.name().simpleName());
+            var namespace = new NamespaceSymbol(namespaceName, targetModule, injection);
+
+            if (!moduleScope.declare(namespace)) {
+                reportInjectedDuplicate(namespaceName, injection);
+
+                return;
+            }
+
+            injectedNamespaces.put(injection, namespace);
+        }
+
+        private void reportInjectedDuplicate(String name, InjectionDeclaration injection) {
+            diagnostics.add(new Diagnostic(
+                DUPLICATE_DECLARATION_CODE,
+                DiagnosticSeverity.ERROR,
+                "Duplicate declaration of '%s'."
+                    .formatted(name),
+                injection.span()
+            ));
         }
     }
 }

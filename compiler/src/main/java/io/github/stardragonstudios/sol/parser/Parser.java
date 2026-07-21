@@ -985,13 +985,11 @@ public final class Parser {
                  TRUE,
                  FALSE,
                  CHAR_LITERAL,
-                 STRING_LITERAL ->
-                parseLiteralExpression();
+                 STRING_LITERAL -> parseLiteralExpression();
 
-            case IDENTIFIER -> parseNameExpression();
+            case IDENTIFIER -> parseNameOrQualifiedNameExpression();
 
-            case LEFT_PAREN ->
-                parseParenthesizedExpression();
+            case LEFT_PAREN -> parseParenthesizedExpression();
 
             default -> throw expectedToken(
                 "an expression",
@@ -1000,38 +998,38 @@ public final class Parser {
         };
     }
 
-    private NameExpression parseNameExpression() {
-        var token = consume(
-            TokenKind.IDENTIFIER,
-            "an identifier"
-        );
+    private Expression parseNameOrQualifiedNameExpression() {
+        var qualifier = parseNameExpression();
 
-        return new NameExpression(
-            token.lexeme(),
-            token.span()
+        if (!match(TokenKind.DOUBLE_COLON)) return qualifier;
+
+        var member = parseNameExpression();
+
+        if (check(TokenKind.DOUBLE_COLON))
+            throw expectedToken("a call or expression operator after the namespace-qualified name", peek());
+
+        return new QualifiedNameExpression(
+            qualifier,
+            member,
+            new SourceSpan(qualifier.span().start(), member.span().end())
         );
+    }
+
+    private NameExpression parseNameExpression() {
+        var token = consume(TokenKind.IDENTIFIER, "an identifier");
+
+        return new NameExpression(token.lexeme(), token.span());
     }
 
     private ParenthesizedExpression
     parseParenthesizedExpression() {
-        var leftParenthesis = consume(
-            TokenKind.LEFT_PAREN,
-            "'('"
-        );
-
+        var leftParenthesis = consume(TokenKind.LEFT_PAREN, "'('");
         var expression = parseExpression();
-
-        var rightParenthesis = consume(
-            TokenKind.RIGHT_PAREN,
-            "')' after the parenthesized expression"
-        );
+        var rightParenthesis = consume(TokenKind.RIGHT_PAREN, "')' after the parenthesized expression");
 
         return new ParenthesizedExpression(
             expression,
-            new SourceSpan(
-                leftParenthesis.span().start(),
-                rightParenthesis.span().end()
-            )
+            new SourceSpan(leftParenthesis.span().start(), rightParenthesis.span().end())
         );
     }
 
