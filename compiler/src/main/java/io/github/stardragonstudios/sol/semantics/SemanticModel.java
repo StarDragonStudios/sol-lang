@@ -19,6 +19,7 @@ public final class SemanticModel {
     private final IdentityHashMap<AssignmentStatement, Symbol> assignmentTargets;
     private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes;
     private final IdentityHashMap<Expression, TypeSymbol> expressionTypes;
+    private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions;
 
     SemanticModel(
         Scope moduleScope,
@@ -29,6 +30,7 @@ public final class SemanticModel {
         Map<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols,
         Map<NameExpression, Symbol> resolvedNames,
         Map<AssignmentStatement, Symbol> assignmentTargets,
+        Map<CallExpression, FunctionSymbol> calledFunctions,
         Map<TypeReference, TypeSymbol> resolvedTypes,
         Map<Expression, TypeSymbol> expressionTypes
     ) {
@@ -42,10 +44,16 @@ public final class SemanticModel {
         this.assignmentTargets = copyIdentityMap(assignmentTargets, "Assignment target associations");
         this.resolvedTypes = copyIdentityMap(resolvedTypes, "Resolved type associations");
         this.expressionTypes = copyIdentityMap(expressionTypes, "Expression type associations");
+        this.calledFunctions = copyIdentityMap(calledFunctions, "Called function associations");
     }
 
     public Scope moduleScope() {
         return moduleScope;
+    }
+
+    public Optional<FunctionSymbol> calledFunctionOf(CallExpression call) {
+        Objects.requireNonNull(call, "Call expression must not be null.");
+        return Optional.ofNullable(calledFunctions.get(call));
     }
 
     public Optional<Scope> scopeOf(FunctionDeclaration declaration) {

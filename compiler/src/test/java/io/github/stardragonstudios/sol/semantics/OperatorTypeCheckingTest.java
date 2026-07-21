@@ -135,7 +135,8 @@ class OperatorTypeCheckingTest {
     @Test
     void typesNestedExpressions() {
         var typed = analyzeInitializer(
-            "!(i < j && b)"
+            "!(i < j && b)",
+            "boolean"
         );
 
         var unary = assertInstanceOf(
@@ -188,7 +189,8 @@ class OperatorTypeCheckingTest {
     @Test
     void suppressesCascadingOperatorDiagnostics() {
         var typed = analyzeInitializer(
-            "missing + 1"
+            "missing + 1",
+            "int"
         );
 
         assertSame(
@@ -332,11 +334,8 @@ class OperatorTypeCheckingTest {
         );
     }
 
-    private static void assertExpressionType(
-        String sourceExpression,
-        TypeSymbol expectedType
-    ) {
-        var typed = analyzeInitializer(sourceExpression);
+    private static void assertExpressionType(String sourceExpression, TypeSymbol expectedType) {
+        var typed = analyzeInitializer(sourceExpression, expectedType.name());
 
         assertSame(
             expectedType,
@@ -346,17 +345,11 @@ class OperatorTypeCheckingTest {
                 .orElseThrow()
         );
 
-        assertTrue(
-            typed.result().diagnostics().isEmpty()
-        );
+        assertTrue(typed.result().diagnostics().isEmpty());
     }
 
-    private static void assertInvalidExpression(
-        String sourceExpression,
-        String expectedCode,
-        String expectedMessage
-    ) {
-        var typed = analyzeInitializer(sourceExpression);
+    private static void assertInvalidExpression(String sourceExpression, String expectedCode, String expectedMessage) {
+        var typed = analyzeInitializer(sourceExpression, "int");
 
         assertSame(
             BuiltInTypes.ERROR,
@@ -366,49 +359,35 @@ class OperatorTypeCheckingTest {
                 .orElseThrow()
         );
 
-        var diagnostic =
-            typed.result().diagnostics().getFirst();
+        var diagnostic = typed.result().diagnostics().getFirst();
 
         assertEquals(expectedCode, diagnostic.code());
         assertEquals(expectedMessage, diagnostic.message());
-
-        assertEquals(
-            typed.expression().span(),
-            diagnostic.span()
-        );
-
-        assertEquals(
-            DiagnosticSeverity.ERROR,
-            diagnostic.severity()
-        );
+        assertEquals(typed.expression().span(), diagnostic.span());
+        assertEquals(DiagnosticSeverity.ERROR, diagnostic.severity());
     }
 
-    private static TypedExpression analyzeInitializer(String sourceExpression) {
+    private static TypedExpression analyzeInitializer(String sourceExpression, String declaredType) {
         var source = """
         fn test(i: int, j: int, f: float, g: float, b: boolean, c: char, s: string) -> void
-            return %s
+            let result: %s = %s
+            return
         end
-        """.formatted(sourceExpression);
+        """.formatted(declaredType, sourceExpression);
 
         var unit = Parser.parse(Lexer.scan(source));
         var result = SemanticAnalyzer.analyze(unit);
 
-        var function = assertInstanceOf(
-            FunctionDeclaration.class,
-            unit.declarations().getFirst()
-        );
+        var function = assertInstanceOf(FunctionDeclaration.class, unit.declarations().getFirst());
 
-        var returnStatement = assertInstanceOf(
-            ReturnStatement.class,
+        var declaration = assertInstanceOf(
+            VariableDeclarationStatement.class,
             function.body()
                 .orElseThrow()
                 .statements()
                 .getFirst()
         );
 
-        return new TypedExpression(
-            returnStatement.expression().orElseThrow(),
-            result
-        );
+        return new TypedExpression(declaration.initializer(), result);
     }
 }

@@ -104,3 +104,50 @@ declared type. Sol 0.1 performs no implicit assignment conversions.
 
 Initialization is not considered reassignment. Whether a `const` initializer
 can be evaluated at compile time is defined by later compiler work.
+
+## Functions, calls, and returns
+
+A bodyful function is declared with `fn`:
+
+```sol
+fn add(left: int, right: int) -> int
+    return left + right
+end
+```
+
+A bodyless function signature is declared with `@fn`:
+
+```sol
+@fn external(value: int) -> int
+```
+
+Every function parameter has an explicit value type. Parameters cannot have
+type `void` and are immutable inside the function.
+
+Every function has an explicit return type. The type `void` indicates that the
+function returns no value.
+
+Sol 0.1 calls only directly declared functions. Function values, closures, and
+other callable objects are not supported.
+
+A call must provide exactly one argument for every declared parameter.
+Arguments are matched to parameters by position, and every argument type must
+exactly match its parameter type. Sol 0.1 performs no implicit call
+conversions.
+
+A function returning `void` uses a bare return:
+
+```sol
+return
+```
+
+A value-returning function returns an expression whose type exactly matches
+the declared return type:
+
+```sol
+return expression
+```
+
+Explicit return statements are validated in every nested block. Sol 0.1 does
+not yet verify that every possible control-flow path reaches a return
+statement.
