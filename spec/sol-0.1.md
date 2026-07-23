@@ -250,6 +250,78 @@ namespace::function
 
 Chained qualification such as `a::b::function` is not supported.
 
+## Executable entry point
+
+A Sol executable identifies its entry point with the exact, case-sensitive
+`@init` annotation:
+
+```sol
+@init
+fn launch() -> int
+    return 0
+end
+```
+
+The function name is unrestricted. A function named `init`, `main`, or any
+other conventional entry-point name remains an ordinary function unless it is
+annotated with `@init`.
+
+Exactly one function may be annotated with `@init` in a complete executable.
+The annotated function may be declared in any participating module. Injecting
+or importing that function into another module does not create another entry
+point because the annotation belongs to the original function declaration.
+
+An entry-point function must have a body and must return the built-in `int`
+type. The returned integer becomes the process exit code. By convention, `0`
+indicates successful execution, while non-zero values indicate failure or an
+application-defined exit state.
+
+```sol
+@init
+fn launch() -> int
+    return 7
+end
+```
+
+Entry-point functions may declare parameters:
+
+```sol
+@init
+fn launch(argument: string, retries: int) -> int
+    return 0
+end
+```
+
+Sol 0.1 does not yet define how operating-system command-line arguments are
+converted into entry-point parameters. Entry-point parameters therefore use
+ordinary function parameter validation, but no additional startup-signature
+restriction is imposed.
+
+Additional annotations may appear on the entry-point function. Repeating
+`@init` on the same declaration still identifies one entry-point candidate.
+Annotation names are case-sensitive, so `@Init`, `@INIT`, and `@initialize` do
+not identify an executable entry point.
+
+A bodyless declaration cannot be used as the entry point:
+
+```sol
+@init
+@fn native_launch() -> int
+```
+
+Isolated semantic analysis and general multimodule analysis do not require an
+entry point, allowing libraries, editor buffers, tests, and incomplete module
+sets to be analyzed independently. General analysis still discovers and
+validates an `@init` declaration when one is present.
+
+Executable-program analysis requires exactly one valid `@init` function.
+
+Semantic analysis resolves the canonical module and function symbols of the
+entry point. It does not execute the function, generate the platform entry
+function, interpret exit codes, or provide startup arguments. Those operations
+belong to later backend and runtime phases.
+
+
 ### Module resolution
 
 Semantic analysis receives all participating modules explicitly and performs
@@ -260,8 +332,9 @@ program-wide declaration phases:
 3. predeclare every locally declared function
 4. resolve every injection
 5. bind every function signature
-6. bind every function body
-7. freeze every completed scope
+6. collect and validate every function annotated with `@init`
+7. bind every function body
+8. freeze every completed scope
 
 Because all local functions are predeclared before injections and function
 bodies are analyzed, forward references and mutually dependent modules can be
