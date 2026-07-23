@@ -2,14 +2,16 @@ package io.github.stardragonstudios.sol.backend.c;
 
 import java.util.Objects;
 
-public final class CCodeGenerationException
-    extends IllegalStateException {
+public final class CCodeGenerationException extends IllegalStateException {
 
     public enum Reason {
         MISSING_ENTRY_POINT,
         PROGRAM_SEMANTIC_ERRORS,
         MODULE_SEMANTIC_ERRORS,
-        UNFROZEN_SEMANTIC_SCOPE
+        UNFROZEN_SEMANTIC_SCOPE,
+        UNSUPPORTED_TYPE,
+        UNSUPPORTED_STATEMENT,
+        UNSUPPORTED_EXPRESSION
     }
 
     private final Reason reason;
