@@ -1,0 +1,242 @@
+package io.github.stardragonstudios.sol.ir;
+
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Objects;
+import java.util.Set;
+import java.util.StringJoiner;
+
+public final class IrTextFormatter {
+    private static final String INDENT = "  ";
+    private final StringBuilder text = new StringBuilder();
+
+    private IrTextFormatter() {}
+
+    public static String format(IrProgram program) {
+        Objects.requireNonNull(program, "Formatted IR program must not be null.");
+
+        var formatter = new IrTextFormatter();
+        formatter.writeProgram(program);
+
+        return formatter.text.toString();
+    }
+
+    private void writeProgram(IrProgram program) {
+        line(0, "program {");
+
+        if (program.entryPoint().isPresent()) {
+            var entryPoint = program.entryPoint().orElseThrow();
+
+            line(1, "entry @%s::%s".formatted(entryPoint.module().name().qualifiedName(), entryPoint.function().id()));
+        } else {
+            line(1, "entry none");
+        }
+
+        if (!program.modules().isEmpty()) blankLine();
+
+
+        for (var index = 0; index < program.modules().size(); index++) {
+            writeModule(program.modules().get(index));
+
+            if (index < program.modules().size() - 1) blankLine();
+        }
+
+        line(0, "}");
+    }
+
+    private void writeModule(IrModule module) {
+        line(1, "module @%s {".formatted(module.name().qualifiedName()));
+
+        if (!module.functions().isEmpty()) {
+            for (var index = 0; index < module.functions().size(); index++) {
+                writeFunction(module.functions().get(index));
+
+                if (index < module.functions().size() - 1) blankLine();
+            }
+        }
+
+        line(1, "}");
+    }
+
+    private void writeFunction(IrFunction function) {
+        if (!function.hasBody()) {
+            line(2, "declare %s".formatted(signature(function)));
+
+            return;
+        }
+
+        line(2, "define %s {".formatted(signature(function)));
+
+        Set<IrValue> emittedConstants = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        var blocks = function.blocks();
+
+        for (var index = 0; index < blocks.size(); index++) {
+            writeBlock(blocks.get(index), emittedConstants);
+
+            if (index < blocks.size() - 1) blankLine();
+        }
+
+        line(2, "}");
+    }
+
+    private void writeBlock(IrBasicBlock block, Set<IrValue> emittedConstants) {
+        line(3, block.id() + ":");
+
+        for (var instruction : block.instructions()) {
+            emitRequiredConstants(instruction, emittedConstants);
+
+            line(4, formatInstruction(instruction));
+        }
+
+        if (block.terminator() instanceof IrReturnTerminator returnTerminator) {
+            returnTerminator.value().ifPresent(value -> emitRequiredConstants(value, emittedConstants));
+
+            line(4, formatReturn(returnTerminator));
+
+            return;
+        }
+
+        throw new IllegalArgumentException(
+            "Unsupported IR terminator type '%s'.".formatted(block.terminator().getClass().getSimpleName())
+        );
+    }
+
+    private void emitRequiredConstants(IrValue value, Set<IrValue> emittedConstants) {
+        Objects.requireNonNull(value, "Formatted IR value must not be null.");
+
+        if (value instanceof IrInstruction instruction)
+            for (var operand : instruction.operands()) emitRequiredConstants(operand, emittedConstants);
+
+        if (isConstant(value) && emittedConstants.add(value)) line(4, formatConstant(value));
+    }
+
+    private String signature(IrFunction function) {
+        var parameters = new StringJoiner(", ");
+
+        for (var parameter : function.parameters())
+            parameters.add("%s %s: %s".formatted(parameter.id(), parameter.name(), parameter.type().displayName()));
+
+        return "@%s %s(%s) -> %s".formatted(
+            function.id(),
+            function.name(),
+            parameters,
+            function.returnType().displayName()
+        );
+    }
+
+    private String formatInstruction(IrInstruction instruction) {
+        if (instruction instanceof IrUnaryInstruction unary) {
+            return "%s: %s = %s %s".formatted(
+                unary.id(),
+                unary.type().displayName(),
+                unaryOperationName(unary.operator()),
+                unary.operand().id()
+            );
+        }
+
+        if (instruction instanceof IrBinaryInstruction binary) {
+            return "%s: %s = %s %s, %s".formatted(
+                binary.id(),
+                binary.type().displayName(),
+                binaryOperationName(binary.operator()),
+                binary.left().id(),
+                binary.right().id()
+            );
+        }
+
+        throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
+    }
+
+    private String formatConstant(IrValue value) {
+        return "%s: %s = const %s".formatted(
+            value.id(),
+            value.type().displayName(),
+            constantLiteral(value)
+        );
+    }
+
+    private String formatReturn(IrReturnTerminator terminator) {
+        return terminator.value().map(value -> "return " + value.id()).orElse("return");
+    }
+
+    private boolean isConstant(IrValue value) {
+        return value instanceof IrIntConstant
+            || value instanceof IrFloatConstant
+            || value instanceof IrBooleanConstant
+            || value instanceof IrCharConstant
+            || value instanceof IrStringConstant;
+    }
+
+    private String constantLiteral(IrValue value) {
+        if (value instanceof IrIntConstant constant) return Long.toString(constant.value());
+        if (value instanceof IrFloatConstant constant) return Double.toString(constant.value());
+        if (value instanceof IrBooleanConstant constant) return Boolean.toString(constant.value());
+        if (value instanceof IrCharConstant constant) return "U+%04X".formatted(constant.codePoint());
+        if (value instanceof IrStringConstant constant) return quoteString(constant.value());
+
+        throw new IllegalArgumentException("Unsupported IR constant type '%s'.".formatted(value.getClass().getSimpleName()));
+    }
+
+    private String unaryOperationName(IrUnaryOperator operator) {
+        return switch (operator) {
+            case LOGICAL_NOT -> "logical_not";
+            case NEGATE -> "negate";
+            case POSITIVE -> "positive";
+        };
+    }
+
+    private String binaryOperationName(IrBinaryOperator operator) {
+        return switch (operator) {
+            case MULTIPLY -> "multiply";
+            case DIVIDE -> "divide";
+            case REMAINDER -> "remainder";
+            case ADD -> "add";
+            case SUBTRACT -> "subtract";
+            case LESS_THAN -> "less_than";
+            case LESS_THAN_OR_EQUAL -> "less_than_or_equal";
+            case GREATER_THAN -> "greater_than";
+            case GREATER_THAN_OR_EQUAL -> "greater_than_or_equal";
+            case EQUAL -> "equal";
+            case NOT_EQUAL -> "not_equal";
+            case LOGICAL_AND -> "logical_and";
+            case LOGICAL_OR -> "logical_or";
+        };
+    }
+
+    private String quoteString(String value) {
+        var result = new StringBuilder("\"");
+
+        for (var offset = 0; offset < value.length(); ) {
+            var codePoint = value.codePointAt(offset);
+
+            offset += Character.charCount(codePoint);
+
+            switch (codePoint) {
+                case '\\' -> result.append("\\\\");
+                case '"' -> result.append("\\\"");
+                case '\n' -> result.append("\\n");
+                case '\r' -> result.append("\\r");
+                case '\t' -> result.append("\\t");
+                case '\b' -> result.append("\\b");
+                case '\f' -> result.append("\\f");
+                default -> {
+                    if (codePoint >= 0x20 && codePoint <= 0x7E) result.appendCodePoint(codePoint);
+                    else result.append("\\u{%X}".formatted(codePoint));
+                }
+            }
+        }
+
+        return result.append('"').toString();
+    }
+
+    private void line(int indentation, String content) {
+        text.repeat(INDENT, indentation);
+        text.append(content);
+        text.append('\n');
+    }
+
+    private void blankLine() {
+        text.append('\n');
+    }
+}
