@@ -9,6 +9,7 @@ Sol source
 → lexer
 → parser
 → semantic analysis
+→ semantic-to-IR lowering
 → typed Sol IR
 → LLVM IR
 → native object code
@@ -210,6 +211,147 @@ program {
 Primitive constants are printed before their first use in a function.
 
 The textual form is a debugging and testing representation. It is not currently a stable serialization format and is not accepted as compiler input.
+
+## Semantic-to-IR lowering
+
+Semantic-to-IR lowering is implemented under:
+
+```text
+io.github.stardragonstudios.sol.lowering
+```
+
+The public entry point is:
+
+```java
+IrProgramLowerer.lower(
+    SemanticProgramAnalysisResult program
+)
+```
+
+Lowering accepts a completed semantic program and produces an immutable
+`IrProgram`.
+
+Programs containing semantic errors are rejected before any IR objects are
+produced. Warnings do not prevent lowering.
+
+### Boundary rules
+
+The lowering layer may depend on syntax and semantic models because it is the
+bridge between the frontend and Sol IR.
+
+The `ir` package itself remains independent from:
+
+* syntax-tree nodes;
+* semantic symbols;
+* diagnostics;
+* source-name resolution;
+* LLVM;
+* native ABI details.
+
+Lowering uses the canonical symbols and types already stored in the semantic
+model. It does not resolve source names or type names again.
+
+Function, parameter and entry-point associations are preserved by object
+identity.
+
+### Deterministic lowering
+
+Lowering performs two program-level passes.
+
+The first pass assigns every semantic function a globally unique
+`IrFunctionId`, following module and declaration order.
+
+The second pass lowers modules and functions using those preassigned
+identifiers.
+
+Inside each function:
+
+* parameters receive the first `IrValueId` values in declaration order;
+* constants and instructions receive subsequent value identifiers in
+  evaluation order;
+* basic blocks receive local `IrBlockId` values;
+* operands are lowered before the instruction that consumes them;
+* public IR collections preserve their original deterministic order.
+
+No static or process-global counters are used.
+
+### Supported function subset
+
+The initial lowering subset supports:
+
+* bodyless function declarations;
+* functions containing one top-level return statement;
+* ordered parameters;
+* primitive parameter and return types;
+* bare returns;
+* value returns.
+
+Bodyless declarations remain bodyless and do not receive fabricated basic
+blocks.
+
+A lowered function body currently contains one basic block whose instruction
+list is followed by one `IrReturnTerminator`.
+
+### Supported expression subset
+
+The initial expression subset supports:
+
+* integer literals;
+* floating-point literals;
+* boolean literals;
+* character literals;
+* parameter references;
+* parenthesized expressions;
+* numeric positive and negation;
+* logical negation;
+* arithmetic binary operators;
+* relational operators;
+* equality and inequality;
+* logical conjunction and disjunction.
+
+Primitive literal lexemes are decoded during lowering after lexical and
+semantic validation.
+
+Parentheses do not create additional IR values.
+
+Unary and binary expressions emit value-producing instructions after their
+operands have been lowered.
+
+### Unsupported syntax
+
+The following constructs are not lowered by this initial layer:
+
+* local variables;
+* assignments;
+* conditionals;
+* loops;
+* calls;
+* qualified calls;
+* string literals;
+* structs;
+* references.
+
+Encountering unsupported syntax produces an `IrLoweringException` with a
+deterministic explanation.
+
+Unsupported syntax is never silently discarded or replaced with placeholder
+IR.
+
+### Failure model
+
+Source-program mistakes must be reported by semantic diagnostics before
+lowering.
+
+An `IrLoweringException` represents one of the following compiler-side
+failures:
+
+* lowering was invoked for a semantically invalid program;
+* required canonical semantic information is missing;
+* unsupported syntax reached the lowering layer;
+* semantically validated input produced structurally invalid IR.
+
+IR constructors continue to enforce their own invariants independently from
+the lowering layer.
 
 ## Future extensions
 
