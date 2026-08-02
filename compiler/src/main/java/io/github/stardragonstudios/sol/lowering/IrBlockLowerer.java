@@ -4,6 +4,7 @@ import io.github.stardragonstudios.sol.ir.*;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.syntax.AssignmentStatement;
 import io.github.stardragonstudios.sol.syntax.Block;
+import io.github.stardragonstudios.sol.syntax.CallStatement;
 import io.github.stardragonstudios.sol.syntax.ConditionalStatement;
 import io.github.stardragonstudios.sol.syntax.Expression;
 import io.github.stardragonstudios.sol.syntax.ReturnStatement;
@@ -40,13 +41,10 @@ final class IrBlockLowerer {
             case ReturnStatement returnStatement -> lowerReturn(returnStatement, model, context);
             case ConditionalStatement conditional -> lowerConditional(conditional, model, context);
             case WhileStatement whileStatement -> lowerWhile(whileStatement, model, context);
+            case CallStatement call -> IrStatementLowerer.lower(call, model, context);
 
             default -> throw new IrLoweringException(
-                "Unsupported statement syntax '%s' in function '%s' during IR lowering."
-                    .formatted(
-                        statement.getClass().getSimpleName(),
-                        context.function().name()
-                    )
+                "Unsupported statement syntax '%s' in function '%s' during IR lowering.".formatted(statement.getClass().getSimpleName(), context.function().name())
             );
         }
     }

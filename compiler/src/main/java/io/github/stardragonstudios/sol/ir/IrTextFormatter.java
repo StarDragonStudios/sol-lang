@@ -1,10 +1,6 @@
 package io.github.stardragonstudios.sol.ir;
 
-import java.util.Collections;
-import java.util.IdentityHashMap;
-import java.util.Objects;
-import java.util.Set;
-import java.util.StringJoiner;
+import java.util.*;
 
 public final class IrTextFormatter {
     private static final String INDENT = "  ";
@@ -125,16 +121,8 @@ public final class IrTextFormatter {
     }
 
     private String formatInstruction(IrInstruction instruction) {
-        if (instruction instanceof IrLocalInitializeInstruction(IrLocal local, IrValue initializer)) {
-
-            return "initialize %s %s %s: %s, %s".formatted(
-                local.id(),
-                localKindName(local.kind()),
-                local.name(),
-                local.type().displayName(),
-                initializer.id()
-            );
-        }
+        if (instruction instanceof IrLocalInitializeInstruction(IrLocal local, IrValue initializer))
+            return "initialize %s %s %s: %s, %s".formatted(local.id(), localKindName(local.kind()), local.name(), local.type().displayName(), initializer.id());
 
         if (instruction instanceof IrLocalLoadInstruction load)
             return "%s: %s = load %s".formatted(load.id(), load.type().displayName(), load.local().id());
@@ -142,26 +130,27 @@ public final class IrTextFormatter {
         if (instruction instanceof IrLocalStoreInstruction(IrLocal local, IrValue value))
             return "store %s, %s".formatted(local.id(), value.id());
 
-        if (instruction instanceof IrUnaryInstruction unary) {
-            return "%s: %s = %s %s".formatted(
-                unary.id(),
-                unary.type().displayName(),
-                unaryOperationName(unary.operator()),
-                unary.operand().id()
-            );
-        }
+        if (instruction instanceof IrValueCallInstruction call)
+            return "%s: %s = call @%s %s(%s)".formatted(call.id(), call.type().displayName(), call.target().id(), call.target().name(), formatCallArguments(call.arguments()));
 
-        if (instruction instanceof IrBinaryInstruction binary) {
-            return "%s: %s = %s %s, %s".formatted(
-                binary.id(),
-                binary.type().displayName(),
-                binaryOperationName(binary.operator()),
-                binary.left().id(),
-                binary.right().id()
-            );
-        }
+        if (instruction instanceof IrVoidCallInstruction(IrFunctionReference target, List<IrValue> arguments))
+            return "call @%s %s(%s)".formatted(target.id(), target.name(), formatCallArguments(arguments));
+
+        if (instruction instanceof IrUnaryInstruction unary)
+            return "%s: %s = %s %s".formatted(unary.id(), unary.type().displayName(), unaryOperationName(unary.operator()), unary.operand().id());
+
+        if (instruction instanceof IrBinaryInstruction binary)
+            return "%s: %s = %s %s, %s".formatted(binary.id(), binary.type().displayName(), binaryOperationName(binary.operator()), binary.left().id(), binary.right().id());
 
         throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
+    }
+
+    private String formatCallArguments(List<IrValue> arguments) {
+        var formatted = new StringJoiner(", ");
+
+        for (var argument : arguments) formatted.add(argument.id().toString());
+
+        return formatted.toString();
     }
 
     private String formatTerminator(IrTerminator terminator) {

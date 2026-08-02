@@ -6,11 +6,15 @@ import io.github.stardragonstudios.sol.ir.IrEntryPoint;
 import io.github.stardragonstudios.sol.ir.IrFunction;
 import io.github.stardragonstudios.sol.ir.IrModule;
 import io.github.stardragonstudios.sol.ir.IrProgram;
+import io.github.stardragonstudios.sol.ir.IrType;
 import io.github.stardragonstudios.sol.semantics.FunctionSymbol;
 import io.github.stardragonstudios.sol.semantics.ModuleName;
 import io.github.stardragonstudios.sol.semantics.ModuleSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticAnalysisResult;
+import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.semantics.SemanticProgramAnalysisResult;
+import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
+import io.github.stardragonstudios.sol.syntax.TypeReference;
 
 import java.util.*;
 
@@ -24,7 +28,13 @@ public final class IrProgramLowerer {
 
         var programContext = new IrProgramLoweringContext();
 
+        /*
+         * Identifiers and typed references are assigned before any function
+         * body is lowered. Calls may therefore target functions declared
+         * later or functions belonging to another module.
+         */
         assignFunctionIdentifiers(program, programContext);
+        assignFunctionReferences(program, programContext);
 
         var loweredModules = new ArrayList<IrModule>();
         var modulesBySymbol = new IdentityHashMap<ModuleSymbol, IrModule>();
@@ -75,6 +85,31 @@ public final class IrProgramLowerer {
         }
     }
 
+    private static void assignFunctionReferences(SemanticProgramAnalysisResult program, IrProgramLoweringContext context) {
+        for (var moduleName : program.moduleNames()) {
+            var module = requireModule(program, moduleName);
+            var model = requireAnalysis(program, moduleName).model();
+
+            for (var function : module.exportedFunctions()) {
+                var parameterTypes = new ArrayList<IrType>();
+
+                for (var parameter : function.declaration().parameters()) {
+                    var semanticType = requireType(model, parameter.type(), "parameter '%s' of function '%s'".formatted(parameter.name(), function.name()));
+
+                    parameterTypes.add(IrTypeLowerer.lower(semanticType));
+                }
+
+                var returnType = IrTypeLowerer.lower(requireType(model, function.declaration().returnType(), "return type of function '%s'".formatted(function.name())));
+
+                context.assignFunctionReference(function, parameterTypes, returnType);
+            }
+        }
+    }
+
+    private static TypeSymbol requireType(SemanticModel model, TypeReference reference, String description) {
+        return model.typeOf(reference).orElseThrow(() -> new IrLoweringException("The %s has no resolved semantic type.".formatted(description)));
+    }
+
     private static IrProgram createLibraryProgram(ArrayList<IrModule> modules) {
         try {
             return IrProgram.library(modules);
@@ -84,44 +119,28 @@ public final class IrProgramLowerer {
     }
 
     private static ModuleSymbol requireModule(SemanticProgramAnalysisResult program, ModuleName name) {
-        return program.moduleOf(name).orElseThrow(
-            () -> new IrLoweringException(
-                "Semantic program has no canonical module '%s'.".formatted(name.qualifiedName())
-            )
-        );
+        return program.moduleOf(name).orElseThrow(() -> new IrLoweringException("Semantic program has no canonical module '%s'.".formatted(name.qualifiedName())));
     }
 
     private static SemanticAnalysisResult requireAnalysis(SemanticProgramAnalysisResult program, ModuleName name) {
-        return program.analysisOf(name).orElseThrow(
-            () -> new IrLoweringException(
-                "Semantic program has no analysis for module '%s'.".formatted(name.qualifiedName())
-            )
-        );
+        return program.analysisOf(name).orElseThrow(() -> new IrLoweringException("Semantic program has no analysis for module '%s'.".formatted(name.qualifiedName())));
     }
 
     private static void validateNoSemanticErrors(SemanticProgramAnalysisResult program) {
-        firstError(program.programDiagnostics()).ifPresent(diagnostic -> {
-            throw semanticError(diagnostic);
-        });
+        firstError(program.programDiagnostics()).ifPresent(diagnostic -> {throw semanticError(diagnostic);});
 
         for (var moduleName : program.moduleNames()) {
             var analysis = requireAnalysis(program, moduleName);
 
-            firstError(analysis.diagnostics()).ifPresent(diagnostic -> {
-                throw semanticError(diagnostic);
-            });
+            firstError(analysis.diagnostics()).ifPresent(diagnostic -> {throw semanticError(diagnostic);});
         }
     }
 
     private static Optional<Diagnostic> firstError(List<Diagnostic> diagnostics) {
-        return diagnostics.stream()
-            .filter(diagnostic -> diagnostic.severity() == DiagnosticSeverity.ERROR)
-            .findFirst();
+        return diagnostics.stream().filter(diagnostic -> diagnostic.severity() == DiagnosticSeverity.ERROR).findFirst();
     }
 
     private static IrLoweringException semanticError(Diagnostic diagnostic) {
-        return new IrLoweringException(
-            "Cannot lower a semantic program containing error '%s': %s".formatted(diagnostic.code(), diagnostic.message())
-        );
+        return new IrLoweringException("Cannot lower a semantic program containing error '%s': %s".formatted(diagnostic.code(), diagnostic.message()));
     }
 }
