@@ -104,15 +104,51 @@ All value identifiers are unique inside a function.
 
 An `IrBasicBlock` contains:
 
-* a deterministic block identifier;
+* a canonical `IrBlockTarget`;
+* a deterministic `IrBlockId`;
 * an ordered immutable instruction list;
 * exactly one terminator.
 
 A block cannot exist without a terminator.
 
-Instructions cannot appear after the terminator because the terminator is stored separately from the instruction list.
+Instructions cannot appear after the terminator because the terminator is stored
+separately from the instruction list.
 
-Branch terminators and branch-target validation will be introduced with control-flow lowering.
+`IrBlockTarget` permits forward references and cyclic control-flow graphs
+without making basic blocks mutable.
+
+Block identifiers use deterministic value equality. Branch membership is
+validated using the canonical target instance, preventing a terminator from
+referencing an equivalent target belonging to another function.
+
+A function rejects:
+
+* duplicate block identifiers;
+* repeated canonical block-target instances;
+* branches to undeclared targets;
+* branches to equivalent but non-canonical target wrappers.
+
+## Control flow
+
+Every `IrTerminator` exposes:
+
+* its ordered value operands;
+* its ordered basic-block targets.
+
+The supported terminators are:
+
+* `IrReturnTerminator`, for bare and value returns;
+* `IrBranchTerminator`, for unconditional branches;
+* `IrConditionalBranchTerminator`, for boolean conditional branches.
+
+Conditional branch conditions must have exact type `boolean`.
+
+Branch targets must be canonical targets declared by blocks of the same
+function.
+
+Sol IR supports forward branches, merge blocks, loop back-edges and nested
+cyclic control-flow graphs without depending on LLVM block objects or textual
+source labels.
 
 ## Values and instructions
 
@@ -320,8 +356,10 @@ Inside each function:
 * constants and value-producing instructions receive subsequent value
   identifiers in evaluation order;
 * local and value identifiers use independent counters;
-* basic blocks receive local `IrBlockId` values;
-* operands are lowered before the instruction that consumes them;
+* basic-block targets receive local `IrBlockId` values in deterministic
+  reservation order;
+* completed blocks are preserved in deterministic lowering order;
+* operands are lowered before the instruction or terminator that consumes them;
 * local initializers are lowered before their initialization instruction;
 * assignment values are lowered before their store instruction;
 * public IR collections preserve their original deterministic order.
@@ -333,8 +371,6 @@ No static or process-global counters are used.
 The current lowering subset supports:
 
 * bodyless function declarations;
-* bodyful functions containing zero or more supported linear statements
-  followed by one final top-level return statement;
 * ordered parameters;
 * primitive parameter and return types;
 * `const` local declarations;
@@ -342,13 +378,29 @@ The current lowering subset supports:
 * mutable `@mut let` declarations;
 * assignment statements targeting mutable locals;
 * bare returns;
-* value returns.
+* value returns;
+* conditional statements;
+* optional `else` branches;
+* nested conditionals;
+* `while` loops;
+* nested loops;
+* nested statement blocks.
 
 Bodyless declarations remain bodyless and do not receive fabricated basic
 blocks.
 
-A lowered function body currently contains one basic block whose instruction
-list is followed by one `IrReturnTerminator`.
+Bodyful functions lower to deterministic control-flow graphs containing one or
+more basic blocks.
+
+Every reachable path must terminate explicitly. Statements appearing after a
+terminator in the same syntax block are rejected as unreachable during
+lowering.
+
+Conditionals create branch, optional merge and continuation blocks only when
+the corresponding control-flow paths can continue.
+
+Loops create a condition block, body block, continuation block and a canonical
+back-edge from the body path to the condition.
 
 ### Supported expression subset
 
@@ -392,15 +444,16 @@ type checking.
 
 The following constructs are not lowered by the current layer:
 
-* conditionals;
-* loops;
-* nested statement blocks;
 * calls;
 * qualified calls;
 * string literals;
 * structs;
 * references;
 * global variables;
+* `break`;
+* `continue`;
+* exceptions;
+* pattern matching;
 
 Encountering unsupported syntax produces an `IrLoweringException` with a
 deterministic explanation.
@@ -428,15 +481,15 @@ the lowering layer.
 
 The current design must permit later representation of:
 
-* unconditional branches;
-* conditional branches;
-* loops;
 * calls;
 * global storage;
 * structs;
 * references;
 * ownership operations;
 * destruction;
+* `break` and `continue`;
+* exceptions;
+* pattern matching;
 * SSA values or a later SSA transformation layer.
 
 LLVM-specific types, blocks, instructions and ownership rules belong exclusively to the LLVM backend.

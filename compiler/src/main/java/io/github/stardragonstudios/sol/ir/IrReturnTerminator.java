@@ -1,5 +1,6 @@
 package io.github.stardragonstudios.sol.ir;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -25,5 +26,12 @@ public record IrReturnTerminator(Optional<IrValue> value) implements IrTerminato
 
     public boolean returnsValue() {
         return value.isPresent();
+    }
+
+    @Override
+    public List<IrValue> operands() {
+        if (value.isEmpty()) return List.of();
+
+        return List.of(value.orElseThrow());
     }
 }

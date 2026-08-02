@@ -106,7 +106,7 @@ class IrBasicBlockTest {
 
         assertThrows(
             NullPointerException.class,
-            () -> new IrBasicBlock(null, List.of(), terminator)
+            () -> new IrBasicBlock((IrBlockTarget) null, List.of(), terminator)
         );
 
         assertThrows(

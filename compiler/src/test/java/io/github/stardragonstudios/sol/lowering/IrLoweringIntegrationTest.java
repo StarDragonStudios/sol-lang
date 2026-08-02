@@ -125,8 +125,7 @@ class IrLoweringIntegrationTest {
                         else for (var operand : instruction.operands()) collectValue(operand, kinds, visited);
                     }
 
-                    if (block.terminator() instanceof IrReturnTerminator(Optional<IrValue> value1))
-                        value1.ifPresent(value -> collectValue(value, kinds, visited));
+                    for (var operand : block.terminator().operands()) collectValue(operand, kinds, visited);
                 }
             }
         }

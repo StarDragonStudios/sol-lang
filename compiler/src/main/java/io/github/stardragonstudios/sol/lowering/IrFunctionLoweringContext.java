@@ -2,6 +2,7 @@ package io.github.stardragonstudios.sol.lowering;
 
 import io.github.stardragonstudios.sol.ir.IrBasicBlock;
 import io.github.stardragonstudios.sol.ir.IrBlockId;
+import io.github.stardragonstudios.sol.ir.IrBlockTarget;
 import io.github.stardragonstudios.sol.ir.IrInstruction;
 import io.github.stardragonstudios.sol.ir.IrLocal;
 import io.github.stardragonstudios.sol.ir.IrLocalId;
@@ -26,14 +27,20 @@ final class IrFunctionLoweringContext {
     private final FunctionSymbol function;
     private final IdentityHashMap<ParameterSymbol, IrParameter> parameters = new IdentityHashMap<>();
     private final IdentityHashMap<LocalVariableSymbol, IrLocal> locals = new IdentityHashMap<>();
-    private final List<IrInstruction> instructions = new ArrayList<>();
+    private final List<IrBasicBlock> blocks = new ArrayList<>();
+    private final Set<IrBlockTarget> allocatedBlockTargets = Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<IrBlockTarget> startedBlockTargets = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<IrInstruction> emittedInstructions = Collections.newSetFromMap(new IdentityHashMap<>());
+
+    private List<IrInstruction> instructions = new ArrayList<>();
+
+    private IrBlockTarget currentBlockTarget;
 
     private int nextBlockIndex;
     private int nextValueIndex;
     private int nextLocalIndex;
 
-    private boolean finished;
+    private boolean hasStartedBlock;
 
     IrFunctionLoweringContext(FunctionSymbol function) {
         this.function = Objects.requireNonNull(function, "Lowered function symbol must not be null.");
@@ -109,6 +116,54 @@ final class IrFunctionLoweringContext {
         return identifier;
     }
 
+    IrBlockTarget newBlockTarget() {
+        var target = new IrBlockTarget(nextBlockId());
+
+        allocatedBlockTargets.add(target);
+
+        return target;
+    }
+
+    IrBlockTarget currentBlockTarget() {
+        ensureInitialBlock();
+
+        if (currentBlockTarget == null)
+            throw new IrLoweringException("Function '%s' has no active IR basic block.".formatted(function.name()));
+
+        return currentBlockTarget;
+    }
+
+    boolean hasActiveBlock() {
+        return currentBlockTarget != null;
+    }
+
+    void beginBlock(IrBlockTarget target) {
+        Objects.requireNonNull(target, "Started IR block target must not be null.");
+
+        if (currentBlockTarget != null)
+            throw new IrLoweringException(
+                "Function '%s' cannot begin IR block '%s' before terminating block '%s'.".formatted(
+                    function.name(),
+                    target.id(),
+                    currentBlockTarget.id()
+                )
+            );
+
+        if (!allocatedBlockTargets.contains(target))
+            throw new IrLoweringException(
+                "IR block target '%s' was not allocated by function '%s'.".formatted(target.id(), function.name())
+            );
+
+        if (!startedBlockTargets.add(target))
+            throw new IrLoweringException(
+                "IR block target '%s' has already been started in function '%s'.".formatted(target.id(), function.name())
+            );
+
+        currentBlockTarget = target;
+        instructions = new ArrayList<>();
+        hasStartedBlock = true;
+    }
+
     IrValueId nextValueId() {
         var identifier = new IrValueId(nextValueIndex);
         nextValueIndex++;
@@ -126,8 +181,7 @@ final class IrFunctionLoweringContext {
     void emit(IrInstruction instruction) {
         Objects.requireNonNull(instruction, "Emitted IR instruction must not be null.");
 
-        if (finished)
-            throw new IrLoweringException("IR instructions cannot be emitted after the function block has been terminated.");
+        ensureActiveBlock();
 
         if (!emittedInstructions.add(instruction))
             throw new IrLoweringException("The same IR instruction instance cannot be emitted more than once.");
@@ -139,15 +193,36 @@ final class IrFunctionLoweringContext {
         return List.copyOf(instructions);
     }
 
+    List<IrBasicBlock> blocks() {
+        return List.copyOf(blocks);
+    }
+
     IrBasicBlock finishBlock(IrTerminator terminator) {
         Objects.requireNonNull(terminator, "Lowered function terminator must not be null.");
 
-        if (finished)
-            throw new IrLoweringException("Function '%s' has already finished its IR block.".formatted(function.name()));
+        ensureActiveBlock();
 
-        finished = true;
+        var block = new IrBasicBlock(currentBlockTarget, instructions, terminator);
 
-        return new IrBasicBlock(nextBlockId(), instructions, terminator);
+        blocks.add(block);
+
+        currentBlockTarget = null;
+        instructions = new ArrayList<>();
+
+        return block;
+    }
+
+    private void ensureInitialBlock() {
+        if (currentBlockTarget == null && !hasStartedBlock) beginBlock(newBlockTarget());
+    }
+
+    private void ensureActiveBlock() {
+        ensureInitialBlock();
+
+        if (currentBlockTarget == null)
+            throw new IrLoweringException(
+                "Function '%s' has no active IR basic block. Begin a block before emitting instructions or a terminator.".formatted(function.name())
+            );
     }
 
     private boolean belongsToFunction(ParameterSymbol parameter) {

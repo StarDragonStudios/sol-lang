@@ -92,17 +92,9 @@ public final class IrTextFormatter {
             line(4, formatInstruction(instruction));
         }
 
-        if (block.terminator() instanceof IrReturnTerminator returnTerminator) {
-            returnTerminator.value().ifPresent(value -> emitRequiredConstants(value, emittedConstants));
+        for (var operand : block.terminator().operands()) emitRequiredConstants(operand, emittedConstants);
 
-            line(4, formatReturn(returnTerminator));
-
-            return;
-        }
-
-        throw new IllegalArgumentException(
-            "Unsupported IR terminator type '%s'.".formatted(block.terminator().getClass().getSimpleName())
-        );
+        line(4, formatTerminator(block.terminator()));
     }
 
     private void emitRequiredConstants(IrValue value, Set<IrValue> emittedConstants) {
@@ -133,32 +125,22 @@ public final class IrTextFormatter {
     }
 
     private String formatInstruction(IrInstruction instruction) {
-        if (instruction instanceof IrLocalInitializeInstruction initialization) {
-            var local = initialization.local();
+        if (instruction instanceof IrLocalInitializeInstruction(IrLocal local, IrValue initializer)) {
 
             return "initialize %s %s %s: %s, %s".formatted(
                 local.id(),
                 localKindName(local.kind()),
                 local.name(),
                 local.type().displayName(),
-                initialization.initializer().id()
+                initializer.id()
             );
         }
 
-        if (instruction instanceof IrLocalLoadInstruction load) {
-            return "%s: %s = load %s".formatted(
-                load.id(),
-                load.type().displayName(),
-                load.local().id()
-            );
-        }
+        if (instruction instanceof IrLocalLoadInstruction load)
+            return "%s: %s = load %s".formatted(load.id(), load.type().displayName(), load.local().id());
 
-        if (instruction instanceof IrLocalStoreInstruction store) {
-            return "store %s, %s".formatted(
-                store.local().id(),
-                store.value().id()
-            );
-        }
+        if (instruction instanceof IrLocalStoreInstruction(IrLocal local, IrValue value))
+            return "store %s, %s".formatted(local.id(), value.id());
 
         if (instruction instanceof IrUnaryInstruction unary) {
             return "%s: %s = %s %s".formatted(
@@ -182,6 +164,21 @@ public final class IrTextFormatter {
         throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
     }
 
+    private String formatTerminator(IrTerminator terminator) {
+        if (terminator instanceof IrReturnTerminator(java.util.Optional<IrValue> value1))
+            return value1.map(value -> "return " + value.id()).orElse("return");
+
+        if (terminator instanceof IrBranchTerminator(IrBlockTarget target))
+            return "branch %s".formatted(target);
+
+        if (terminator instanceof IrConditionalBranchTerminator(IrValue condition, IrBlockTarget trueTarget, IrBlockTarget falseTarget))
+            return "branch_if %s, %s, %s".formatted(condition.id(), trueTarget, falseTarget);
+
+        throw new IllegalArgumentException(
+            "Unsupported IR terminator type '%s'.".formatted(terminator.getClass().getSimpleName())
+        );
+    }
+
     private String localKindName(IrLocalKind kind) {
         return switch (kind) {
             case CONSTANT -> "const";
@@ -196,10 +193,6 @@ public final class IrTextFormatter {
             value.type().displayName(),
             constantLiteral(value)
         );
-    }
-
-    private String formatReturn(IrReturnTerminator terminator) {
-        return terminator.value().map(value -> "return " + value.id()).orElse("return");
     }
 
     private boolean isConstant(IrValue value) {
