@@ -2445,30 +2445,20 @@ class ParserTest {
     }
 
     @Test
-    void rejectsFunctionCallsUsedAsStatements() {
+    void rejectsNonCallExpressionsUsedAsStatements() {
         var exception = assertThrows(
             ParsingException.class,
-            () -> Parser.parse(
-                Lexer.scan(
-                    """
+            () -> Parser.parse(Lexer.scan(
+                """
                     fn update() -> void
-                        update_value()
+                        counter + 1
                     end
-                    """
-                )
-            )
+                """
+            ))
         );
 
-        assertEquals(
-            "SOL-P002",
-            exception.diagnostic().code()
-        );
-
-        assertEquals(
-            "Expected '=' after the assignment target, "
-                + "but found '('.",
-            exception.diagnostic().message()
-        );
+        assertEquals("SOL-P002", exception.diagnostic().code());
+        assertEquals("Expected '=' after the assignment target, but found '+'.", exception.diagnostic().message());
     }
 
     @Test

@@ -160,8 +160,8 @@ Every `IrValue` has:
 `IrInstruction` represents an ordered operation inside a basic block.
 
 An instruction does not necessarily produce a value. Local initialization,
-local updates, future destruction operations and `void` calls may exist only as
-instructions.
+local updates, `void` calls, future destruction operations and other side-effect
+operations may exist only as instructions.
 
 `IrValueInstruction` represents an instruction that also produces a typed
 value.
@@ -170,7 +170,8 @@ The initial value forms are:
 
 * logical negation;
 * numeric negation;
-* numeric positive.
+* numeric positive;
+* value-returning function calls.
 
 The initial binary operations are:
 
@@ -234,6 +235,56 @@ rejected.
 
 Sol IR does not prescribe whether a local becomes an LLVM `alloca`, an SSA
 value, a register, a native stack slot or another backend representation.
+
+## Function references and calls
+
+`IrFunctionReference` represents the target-independent identity and typed
+signature of a called function.
+
+A function reference contains:
+
+* the global `IrFunctionId`;
+* the diagnostic function name;
+* the ordered parameter types;
+* the return type.
+
+Function references do not contain:
+
+* function bodies;
+* LLVM symbols or blocks;
+* native linker names;
+* calling conventions;
+* ABI metadata.
+
+Every semantic `FunctionSymbol` receives one canonical
+`IrFunctionReference` before function bodies are lowered. Direct calls,
+directly injected calls and namespace-qualified calls that resolve to the same
+semantic function therefore share the same canonical reference instance.
+
+Call arguments preserve source evaluation order.
+
+`IrValueCallInstruction` represents a call whose function returns a value. It
+is both an instruction and an `IrValue`.
+
+`IrVoidCallInstruction` represents a call whose function returns `void`. It is
+an instruction without a fabricated result value.
+
+Call construction validates:
+
+* argument count;
+* argument order;
+* exact argument types;
+* whether the target returns a value or `void`.
+
+Program validation additionally requires:
+
+* every called function identifier to exist in the IR program;
+* the referenced name to match the canonical function;
+* parameter and return types to match the canonical function signature;
+* all calls to one function to share one canonical function-reference instance.
+
+Functions without bodies remain valid call targets when their declarations are
+present in the program. Sol IR does not invent bodies for external functions.
 
 ## Returns
 
@@ -372,6 +423,12 @@ The current lowering subset supports:
 
 * bodyless function declarations;
 * ordered parameters;
+* direct function calls;
+* directly injected function calls;
+* namespace-qualified function calls;
+* ordered call arguments;
+* calls returning values;
+* calls returning `void`;
 * primitive parameter and return types;
 * `const` local declarations;
 * immutable `let` declarations;
@@ -437,15 +494,26 @@ A local-variable reference resolves through its canonical
 An assignment resolves through the canonical assignment-target symbol, lowers
 the assigned expression, and emits an `IrLocalStoreInstruction`.
 
-Lowering does not repeat source-name lookup, mutability checking or assignment
-type checking.
+A call resolves exclusively through the canonical `FunctionSymbol` associated
+with its `CallExpression` by semantic analysis. Lowering does not inspect the
+source spelling of a direct, injected or namespace-qualified callee.
+
+Arguments are lowered from left to right before the call instruction is
+emitted.
+
+Calls returning values emit `IrValueCallInstruction`. Calls returning `void`
+emit `IrVoidCallInstruction` and may appear as standalone call statements.
+
+The parser permits standalone statements only for call expressions. Arbitrary
+expressions whose values are discarded are not accepted as statements.
+
+Lowering does not repeat source-name lookup, function selection, signature
+resolution, mutability checking or assignment type checking.
 
 ### Unsupported syntax
 
 The following constructs are not lowered by the current layer:
 
-* calls;
-* qualified calls;
 * string literals;
 * structs;
 * references;
@@ -481,7 +549,6 @@ the lowering layer.
 
 The current design must permit later representation of:
 
-* calls;
 * global storage;
 * structs;
 * references;

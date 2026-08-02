@@ -1,9 +1,11 @@
 package io.github.stardragonstudios.sol.ir;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -59,7 +61,7 @@ public record IrProgram(List<IrModule> modules, Optional<IrEntryPoint> entryPoin
 
     private static void validateModules(List<IrModule> modules) {
         var moduleNames = new HashSet<IrModuleName>();
-        var functionIdentifiers = new HashSet<IrFunctionId>();
+        var functionsByIdentifier = new HashMap<IrFunctionId, IrFunction>();
 
         Set<IrModule> moduleInstances = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<IrFunction> functionInstances = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -77,10 +79,71 @@ public record IrProgram(List<IrModule> modules, Optional<IrEntryPoint> entryPoin
                 if (!functionInstances.add(function))
                     throw new IllegalArgumentException("IR program must not contain the same function instance in more than one module.");
 
-                if (!functionIdentifiers.add(function.id()))
+                var previous = functionsByIdentifier.putIfAbsent(function.id(), function);
+
+                if (previous != null)
                     throw new IllegalArgumentException("IR program must not contain duplicate global function identifier '%s'.".formatted(function.id()));
             }
         }
+
+        validateCallTargets(modules, functionsByIdentifier);
+    }
+
+    private static void validateCallTargets(List<IrModule> modules, Map<IrFunctionId, IrFunction> functionsByIdentifier) {
+        /*
+         * Every call to one function identifier must share the same
+         * canonical IrFunctionReference instance.
+         */
+        var canonicalReferences = new HashMap<IrFunctionId, IrFunctionReference>();
+
+        for (var module : modules)
+            for (var function : module.functions())
+                for (var block : function.blocks())
+                    for (var instruction : block.instructions())
+                        if (instruction instanceof IrCallInstruction call)
+                            validateCallTarget(call.target(), functionsByIdentifier, canonicalReferences);
+    }
+
+    private static void validateCallTarget(
+        IrFunctionReference reference,
+        Map<IrFunctionId, IrFunction> functionsByIdentifier,
+        Map<IrFunctionId, IrFunctionReference> canonicalReferences
+    ) {
+        Objects.requireNonNull(reference, "IR call target reference must not be null.");
+
+        var function = functionsByIdentifier.get(reference.id());
+
+        if (function == null)
+            throw new IllegalArgumentException("IR call references undeclared function identifier '%s'.".formatted(reference.id()));
+
+        if (!function.name().equals(reference.name()))
+            throw new IllegalArgumentException(
+                "IR call target '%s' does not match canonical function name '%s' for identifier '%s'.".formatted(reference.name(), function.name(), reference.id())
+            );
+
+        var parameterTypes = function.parameters().stream().map(IrParameter::type).toList();
+
+        if (!parameterTypes.equals(reference.parameterTypes()))
+            throw new IllegalArgumentException(
+                "IR call target '%s' does not match the canonical parameter types of function '%s'.".formatted(reference.id(), function.name())
+            );
+
+        if (!function.returnType().equals(reference.returnType()))
+            throw new IllegalArgumentException(
+                "IR call target '%s' returns '%s', but canonical function '%s' returns '%s'.".formatted(
+                    reference.id(),
+                    reference.returnType().displayName(),
+                    function.name(),
+                    function.returnType().displayName()
+                )
+            );
+
+        var canonicalReference = canonicalReferences.putIfAbsent(reference.id(), reference);
+
+        if (canonicalReference != null && canonicalReference != reference)
+            throw new IllegalArgumentException(
+                "IR calls to function '%s' must share one canonical function-reference instance.".formatted(function.name())
+            );
     }
 
     private static void validateEntryPoint(List<IrModule> modules, IrEntryPoint entryPoint) {

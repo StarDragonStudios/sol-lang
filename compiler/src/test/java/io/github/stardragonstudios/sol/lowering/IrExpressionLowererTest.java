@@ -166,30 +166,6 @@ class IrExpressionLowererTest {
     }
 
     @Test
-    void rejectsUnsupportedCallExpressions() {
-        var exception = assertThrows(
-            IrLoweringException.class,
-            () -> lowerReturnedExpression(
-                """
-                fn identity(value: int) -> int
-                    return value
-                end
-
-                fn use() -> int
-                    return identity(1)
-                end
-                """,
-                1
-            )
-        );
-
-        assertEquals(
-            "Unsupported expression syntax 'CallExpression' during IR lowering.",
-            exception.getMessage()
-        );
-    }
-
-    @Test
     void rejectsIntegerOverflowExplicitly() {
         var exception = assertThrows(
             IrLoweringException.class,

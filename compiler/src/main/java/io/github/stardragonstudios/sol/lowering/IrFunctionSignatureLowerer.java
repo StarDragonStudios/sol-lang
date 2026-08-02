@@ -21,7 +21,7 @@ final class IrFunctionSignatureLowerer {
 
         validateCanonicalFunction(function, model);
 
-        var functionContext = new IrFunctionLoweringContext(function);
+        var functionContext = new IrFunctionLoweringContext(function, programContext);
         var loweredParameters = new ArrayList<IrParameter>();
 
         for (var parameterDeclaration : function.declaration().parameters()) {

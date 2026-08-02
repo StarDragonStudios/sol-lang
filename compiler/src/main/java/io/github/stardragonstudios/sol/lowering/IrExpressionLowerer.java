@@ -4,10 +4,12 @@ import io.github.stardragonstudios.sol.ir.IrBinaryInstruction;
 import io.github.stardragonstudios.sol.ir.IrLocalLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrUnaryInstruction;
 import io.github.stardragonstudios.sol.ir.IrValue;
+import io.github.stardragonstudios.sol.ir.IrValueCallInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.syntax.BinaryExpression;
+import io.github.stardragonstudios.sol.syntax.CallExpression;
 import io.github.stardragonstudios.sol.syntax.Expression;
 import io.github.stardragonstudios.sol.syntax.LiteralExpression;
 import io.github.stardragonstudios.sol.syntax.NameExpression;
@@ -30,10 +32,9 @@ final class IrExpressionLowerer {
             case ParenthesizedExpression parenthesized -> lower(parenthesized.expression(), model, context);
             case UnaryExpression unary -> lowerUnary(unary, model, context);
             case BinaryExpression binary -> lowerBinary(binary, model, context);
+            case CallExpression call -> lowerCall(call, model, context);
 
-            default -> throw new IrLoweringException(
-                "Unsupported expression syntax '%s' during IR lowering.".formatted(expression.getClass().getSimpleName())
-            );
+            default -> throw new IrLoweringException("Unsupported expression syntax '%s' during IR lowering.".formatted(expression.getClass().getSimpleName()));
         };
 
         validateSemanticType(expression, lowered, model);
@@ -42,9 +43,7 @@ final class IrExpressionLowerer {
     }
 
     private static IrValue lowerName(NameExpression expression, SemanticModel model, IrFunctionLoweringContext context) {
-        var symbol = model.symbolOf(expression).orElseThrow(() -> new IrLoweringException(
-            "Name expression '%s' has no resolved semantic symbol.".formatted(expression.name()))
-        );
+        var symbol = model.symbolOf(expression).orElseThrow(() -> new IrLoweringException("Name expression '%s' has no resolved semantic symbol.".formatted(expression.name())));
 
         if (symbol instanceof ParameterSymbol parameter) return context.parameter(parameter);
 
@@ -57,9 +56,7 @@ final class IrExpressionLowerer {
             return instruction;
         }
 
-        throw new IrLoweringException(
-            "Resolved symbol '%s' is not supported as an IR value in the current lowering subset.".formatted(symbol.name())
-        );
+        throw new IrLoweringException("Resolved symbol '%s' is not supported as an IR value in the current lowering subset.".formatted(symbol.name()));
     }
 
     private static IrValue lowerUnary(UnaryExpression expression, SemanticModel model, IrFunctionLoweringContext context) {
@@ -68,11 +65,7 @@ final class IrExpressionLowerer {
         final IrUnaryInstruction instruction;
 
         try {
-            instruction = new IrUnaryInstruction(
-                context.nextValueId(),
-                IrOperatorLowerer.lower(expression.operator()),
-                operand
-            );
+            instruction = new IrUnaryInstruction(context.nextValueId(), IrOperatorLowerer.lower(expression.operator()), operand);
         } catch (IllegalArgumentException exception) {
             throw invalidOperatorExpression("unary", exception);
         }
@@ -89,12 +82,7 @@ final class IrExpressionLowerer {
         final IrBinaryInstruction instruction;
 
         try {
-            instruction = new IrBinaryInstruction(
-                context.nextValueId(),
-                IrOperatorLowerer.lower(expression.operator()),
-                left,
-                right
-            );
+            instruction = new IrBinaryInstruction(context.nextValueId(), IrOperatorLowerer.lower(expression.operator()), left, right);
         } catch (IllegalArgumentException exception) {
             throw invalidOperatorExpression("binary", exception);
         }
@@ -104,10 +92,16 @@ final class IrExpressionLowerer {
         return instruction;
     }
 
+    private static IrValue lowerCall(CallExpression expression, SemanticModel model, IrFunctionLoweringContext context) {
+        var instruction = IrCallLowerer.lower(expression, model, context);
+
+        if (instruction instanceof IrValueCallInstruction valueCall) return valueCall;
+
+        throw new IrLoweringException("Call to void function '%s' cannot be used as an IR value.".formatted(instruction.target().name()));
+    }
+
     private static IrLoweringException invalidOperatorExpression(String kind, IllegalArgumentException cause) {
-        return new IrLoweringException(
-            "Semantically validated %s expression produced invalid IR: %s".formatted(kind, cause.getMessage())
-        );
+        return new IrLoweringException("Semantically validated %s expression produced invalid IR: %s".formatted(kind, cause.getMessage()));
     }
 
     private static void validateSemanticType(Expression expression, IrValue value, SemanticModel model) {
@@ -117,10 +111,7 @@ final class IrExpressionLowerer {
 
         var expectedType = IrTypeLowerer.lower(semanticType);
 
-        if (!expectedType.equals(value.type())) {
-            throw new IrLoweringException(
-                "Lowered expression type '%s' does not match semantic type '%s'.".formatted(value.type().displayName(), expectedType.displayName())
-            );
-        }
+        if (!expectedType.equals(value.type()))
+            throw new IrLoweringException("Lowered expression type '%s' does not match semantic type '%s'.".formatted(value.type().displayName(), expectedType.displayName()));
     }
 }

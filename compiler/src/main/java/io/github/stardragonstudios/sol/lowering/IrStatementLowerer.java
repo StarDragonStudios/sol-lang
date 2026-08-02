@@ -5,6 +5,7 @@ import io.github.stardragonstudios.sol.ir.IrLocalStoreInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.syntax.AssignmentStatement;
+import io.github.stardragonstudios.sol.syntax.CallStatement;
 import io.github.stardragonstudios.sol.syntax.Statement;
 import io.github.stardragonstudios.sol.syntax.VariableDeclarationStatement;
 
@@ -21,10 +22,10 @@ final class IrStatementLowerer {
         switch (statement) {
             case VariableDeclarationStatement declaration -> lowerVariableDeclaration(declaration, model, context);
             case AssignmentStatement assignment -> lowerAssignment(assignment, model, context);
+            case CallStatement call -> IrCallLowerer.lower(call.call(), model, context);
 
             default -> throw new IrLoweringException(
-                "Unsupported statement syntax '%s' in function '%s' during IR lowering."
-                    .formatted(statement.getClass().getSimpleName(), context.function().name())
+                "Unsupported statement syntax '%s' in function '%s' during IR lowering.".formatted(statement.getClass().getSimpleName(), context.function().name())
             );
         }
     }
