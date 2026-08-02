@@ -78,14 +78,10 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
                 throw new IllegalArgumentException("IR function must not contain the same parameter instance more than once.");
 
             if (!identifiers.add(parameter.id()))
-                throw new IllegalArgumentException(
-                    "IR function must not contain duplicate parameter identifier '%s'.".formatted(parameter.id())
-                );
+                throw new IllegalArgumentException("IR function must not contain duplicate parameter identifier '%s'.".formatted(parameter.id()));
 
             if (!names.add(parameter.name()))
-                throw new IllegalArgumentException(
-                    "IR function must not contain duplicate parameter name '%s'.".formatted(parameter.name())
-                );
+                throw new IllegalArgumentException("IR function must not contain duplicate parameter name '%s'.".formatted(parameter.name()));
         }
     }
 
@@ -94,6 +90,7 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
 
         var blockIdentifiers = new HashSet<IrBlockId>();
 
+        Set<IrBlockTarget> declaredBlockTargets = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<IrParameter> declaredParameters = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<IrInstruction> declaredInstructions = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<IrLocal> declaredLocals = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -103,17 +100,13 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
         declaredParameters.addAll(parameters);
 
         for (var block : body.orElseThrow()) {
-            if (!blockIdentifiers.add(block.id()))
-                throw new IllegalArgumentException(
-                    "IR function must not contain duplicate basic block identifier '%s'.".formatted(block.id())
-                );
+            if (!declaredBlockTargets.add(block.target())) throw new IllegalArgumentException("IR function must not contain the same basic block target instance more than once.");
+            if (!blockIdentifiers.add(block.id())) throw new IllegalArgumentException("IR function must not contain duplicate basic block identifier '%s'.".formatted(block.id()));
 
             for (var instruction : block.instructions()) {
-                if (!declaredInstructions.add(instruction))
-                    throw new IllegalArgumentException("IR function must not contain the same instruction instance more than once.");
+                if (!declaredInstructions.add(instruction)) throw new IllegalArgumentException("IR function must not contain the same instruction instance more than once.");
 
-                if (instruction instanceof IrLocalInitializeInstruction initialization)
-                    declareLocal(initialization.local(), declaredLocals, localsByIdentifier);
+                if (instruction instanceof IrLocalInitializeInstruction initialization) declareLocal(initialization.local(), declaredLocals, localsByIdentifier);
             }
         }
 
@@ -121,14 +114,7 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
 
         Set<IrValue> visitedValues = Collections.newSetFromMap(new IdentityHashMap<>());
 
-        for (var parameter : parameters) validateValueGraph(
-            parameter,
-            declaredParameters,
-            declaredInstructions,
-            declaredLocals,
-            valuesByIdentifier,
-            visitedValues
-        );
+        for (var parameter : parameters) validateValueGraph(parameter, declaredParameters, declaredInstructions, declaredLocals, valuesByIdentifier, visitedValues);
 
         for (var block : body.orElseThrow()) {
             for (var instruction : block.instructions()) {
@@ -142,36 +128,27 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
                 );
             }
 
-            if (block.terminator() instanceof IrReturnTerminator returnTerminator) {
-                validateReturn(returnType, returnTerminator);
-
-                returnTerminator.value().ifPresent(
-                    value ->
-                        validateValueGraph(
-                            value,
-                            declaredParameters,
-                            declaredInstructions,
-                            declaredLocals,
-                            valuesByIdentifier,
-                            visitedValues
-                        )
-                );
-            }
+            validateTerminator(
+                block.terminator(),
+                returnType,
+                declaredBlockTargets,
+                declaredParameters,
+                declaredInstructions,
+                declaredLocals,
+                valuesByIdentifier,
+                visitedValues
+            );
         }
     }
 
     private static void declareLocal(IrLocal local, Set<IrLocal> declaredLocals, Map<IrLocalId, IrLocal> localsByIdentifier) {
         if (!declaredLocals.add(local))
-            throw new IllegalArgumentException(
-                "IR local '%s' is initialized more than once.".formatted(local.id())
-            );
+            throw new IllegalArgumentException("IR local '%s' is initialized more than once.".formatted(local.id()));
 
         var previous = localsByIdentifier.putIfAbsent(local.id(), local);
 
         if (previous != null && previous != local)
-            throw new IllegalArgumentException(
-                "IR function must not contain duplicate local identifier '%s'.".formatted(local.id())
-            );
+            throw new IllegalArgumentException("IR function must not contain duplicate local identifier '%s'.".formatted(local.id()));
     }
 
     private static void validateInstruction(
@@ -184,13 +161,11 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
     ) {
         Objects.requireNonNull(instruction, "IR instruction must not be null.");
 
-        if (!declaredInstructions.contains(instruction))
-            throw new IllegalArgumentException("IR function references an undeclared instruction instance.");
+        if (!declaredInstructions.contains(instruction)) throw new IllegalArgumentException("IR function references an undeclared instruction instance.");
 
         validateLocalReference(instruction, declaredLocals);
 
         if (instruction instanceof IrValueInstruction valueInstruction) {
-
             validateValueGraph(
                 valueInstruction,
                 declaredParameters,
@@ -211,6 +186,43 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
             valuesByIdentifier,
             visitedValues
         );
+    }
+
+    private static void validateTerminator(
+        IrTerminator terminator,
+        IrType returnType,
+        Set<IrBlockTarget> declaredBlockTargets,
+        Set<IrParameter> declaredParameters,
+        Set<IrInstruction> declaredInstructions,
+        Set<IrLocal> declaredLocals,
+        Map<IrValueId, IrValue> valuesByIdentifier,
+        Set<IrValue> visitedValues
+    ) {
+        Objects.requireNonNull(terminator, "IR terminator must not be null.");
+
+        var targets = Objects.requireNonNull(terminator.targets(), "IR terminator targets must not be null.");
+
+        for (var target : targets) {
+            Objects.requireNonNull(target, "IR terminator targets must not contain null values.");
+
+            if (!declaredBlockTargets.contains(target))
+                throw new IllegalArgumentException("IR function terminator references undeclared basic block target '%s'.".formatted(target.id()));
+        }
+
+        var operands = Objects.requireNonNull(terminator.operands(), "IR terminator operands must not be null.");
+
+        for (var operand : operands) {
+            validateValueGraph(
+                operand,
+                declaredParameters,
+                declaredInstructions,
+                declaredLocals,
+                valuesByIdentifier,
+                visitedValues
+            );
+        }
+
+        if (terminator instanceof IrReturnTerminator returnTerminator) validateReturn(returnType, returnTerminator);
     }
 
     private static void validateValueGraph(
@@ -238,15 +250,7 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
                 throw new IllegalArgumentException("IR function value graph references an undeclared instruction '%s'.".formatted(value.id()));
 
             validateLocalReference(instruction, declaredLocals);
-
-            validateOperands(
-                instruction,
-                declaredParameters,
-                declaredInstructions,
-                declaredLocals,
-                valuesByIdentifier,
-                visitedValues
-            );
+            validateOperands(instruction, declaredParameters, declaredInstructions, declaredLocals, valuesByIdentifier, visitedValues);
         }
     }
 
