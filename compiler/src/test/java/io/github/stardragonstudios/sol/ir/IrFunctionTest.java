@@ -285,17 +285,10 @@ class IrFunctionTest {
 
     private record TestEffectInstruction(List<IrValue> operands) implements IrInstruction {
         private TestEffectInstruction {
-            operands = List.copyOf(operands);
-        }
-
-        @Override
-        public IrValueId id() {
-            return null;
-        }
-
-        @Override
-        public IrType type() {
-            return null;
+            operands =
+                List.copyOf(
+                    operands
+                );
         }
     }
 }
