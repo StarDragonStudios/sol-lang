@@ -21,16 +21,15 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
         if (name.isBlank()) throw new IllegalArgumentException("IR function name must not be blank.");
 
         validateParameters(parameters);
+
         parameters = List.copyOf(parameters);
 
         if (body.isPresent()) {
             var blocks = body.orElseThrow();
 
-            if (blocks.isEmpty())
-                throw new IllegalArgumentException("Defined IR function must contain at least one basic block.");
+            if (blocks.isEmpty()) throw new IllegalArgumentException("Defined IR function must contain at least one basic block.");
 
-            for (var block : blocks)
-                Objects.requireNonNull(block, "IR function body must not contain null basic blocks.");
+            for (var block : blocks) Objects.requireNonNull(block, "IR function body must not contain null basic blocks.");
 
             body = Optional.of(List.copyOf(blocks));
         }
@@ -42,7 +41,13 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
         return new IrFunction(id, name, parameters, returnType, Optional.empty());
     }
 
-    public static IrFunction definition(IrFunctionId id, String name, List<IrParameter> parameters, IrType returnType, List<IrBasicBlock> blocks) {
+    public static IrFunction definition(
+        IrFunctionId id,
+        String name,
+        List<IrParameter> parameters,
+        IrType returnType,
+        List<IrBasicBlock> blocks
+    ) {
         Objects.requireNonNull(blocks, "Defined IR function blocks must not be null.");
 
         return new IrFunction(id, name, parameters, returnType, Optional.of(blocks));
@@ -63,7 +68,8 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
     private static void validateParameters(List<IrParameter> parameters) {
         var identifiers = new HashSet<IrValueId>();
         var names = new HashSet<String>();
-        var instances = Collections.newSetFromMap(new IdentityHashMap<IrParameter, Boolean>());
+
+        Set<IrParameter> instances = Collections.newSetFromMap(new IdentityHashMap<>());
 
         for (var parameter : parameters) {
             Objects.requireNonNull(parameter, "IR function parameters must not contain null values.");
@@ -73,14 +79,12 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
 
             if (!identifiers.add(parameter.id()))
                 throw new IllegalArgumentException(
-                    "IR function must not contain duplicate parameter identifier '%s'."
-                        .formatted(parameter.id())
+                    "IR function must not contain duplicate parameter identifier '%s'.".formatted(parameter.id())
                 );
 
             if (!names.add(parameter.name()))
                 throw new IllegalArgumentException(
-                    "IR function must not contain duplicate parameter name '%s'."
-                        .formatted(parameter.name())
+                    "IR function must not contain duplicate parameter name '%s'.".formatted(parameter.name())
                 );
         }
     }
@@ -92,50 +96,89 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
 
         Set<IrParameter> declaredParameters = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<IrInstruction> declaredInstructions = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<IrLocal> declaredLocals = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        var localsByIdentifier = new HashMap<IrLocalId, IrLocal>();
 
         declaredParameters.addAll(parameters);
 
         for (var block : body.orElseThrow()) {
             if (!blockIdentifiers.add(block.id()))
                 throw new IllegalArgumentException(
-                    "IR function must not contain duplicate basic block identifier '%s'."
-                        .formatted(block.id())
+                    "IR function must not contain duplicate basic block identifier '%s'.".formatted(block.id())
                 );
 
-            for (var instruction : block.instructions())
+            for (var instruction : block.instructions()) {
                 if (!declaredInstructions.add(instruction))
                     throw new IllegalArgumentException("IR function must not contain the same instruction instance more than once.");
+
+                if (instruction instanceof IrLocalInitializeInstruction initialization)
+                    declareLocal(initialization.local(), declaredLocals, localsByIdentifier);
+            }
         }
 
         var valuesByIdentifier = new HashMap<IrValueId, IrValue>();
 
         Set<IrValue> visitedValues = Collections.newSetFromMap(new IdentityHashMap<>());
 
-        for (var parameter : parameters)
-            validateValueGraph(parameter, declaredParameters, declaredInstructions, valuesByIdentifier, visitedValues);
+        for (var parameter : parameters) validateValueGraph(
+            parameter,
+            declaredParameters,
+            declaredInstructions,
+            declaredLocals,
+            valuesByIdentifier,
+            visitedValues
+        );
 
         for (var block : body.orElseThrow()) {
-            for (var instruction : block.instructions())
-                validateInstruction(instruction, declaredParameters, declaredInstructions, valuesByIdentifier, visitedValues);
+            for (var instruction : block.instructions()) {
+                validateInstruction(
+                    instruction,
+                    declaredParameters,
+                    declaredInstructions,
+                    declaredLocals,
+                    valuesByIdentifier,
+                    visitedValues
+                );
+            }
 
             if (block.terminator() instanceof IrReturnTerminator returnTerminator) {
                 validateReturn(returnType, returnTerminator);
 
-                returnTerminator.value().ifPresent(value -> validateValueGraph(
-                    value,
-                    declaredParameters,
-                    declaredInstructions,
-                    valuesByIdentifier,
-                    visitedValues
-                ));
+                returnTerminator.value().ifPresent(
+                    value ->
+                        validateValueGraph(
+                            value,
+                            declaredParameters,
+                            declaredInstructions,
+                            declaredLocals,
+                            valuesByIdentifier,
+                            visitedValues
+                        )
+                );
             }
         }
+    }
+
+    private static void declareLocal(IrLocal local, Set<IrLocal> declaredLocals, Map<IrLocalId, IrLocal> localsByIdentifier) {
+        if (!declaredLocals.add(local))
+            throw new IllegalArgumentException(
+                "IR local '%s' is initialized more than once.".formatted(local.id())
+            );
+
+        var previous = localsByIdentifier.putIfAbsent(local.id(), local);
+
+        if (previous != null && previous != local)
+            throw new IllegalArgumentException(
+                "IR function must not contain duplicate local identifier '%s'.".formatted(local.id())
+            );
     }
 
     private static void validateInstruction(
         IrInstruction instruction,
         Set<IrParameter> declaredParameters,
         Set<IrInstruction> declaredInstructions,
+        Set<IrLocal> declaredLocals,
         Map<IrValueId, IrValue> valuesByIdentifier,
         Set<IrValue> visitedValues
     ) {
@@ -144,10 +187,27 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
         if (!declaredInstructions.contains(instruction))
             throw new IllegalArgumentException("IR function references an undeclared instruction instance.");
 
-        validateValueGraph(
+        validateLocalReference(instruction, declaredLocals);
+
+        if (instruction instanceof IrValueInstruction valueInstruction) {
+
+            validateValueGraph(
+                valueInstruction,
+                declaredParameters,
+                declaredInstructions,
+                declaredLocals,
+                valuesByIdentifier,
+                visitedValues
+            );
+
+            return;
+        }
+
+        validateOperands(
             instruction,
             declaredParameters,
             declaredInstructions,
+            declaredLocals,
             valuesByIdentifier,
             visitedValues
         );
@@ -157,6 +217,7 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
         IrValue value,
         Set<IrParameter> declaredParameters,
         Set<IrInstruction> declaredInstructions,
+        Set<IrLocal> declaredLocals,
         Map<IrValueId, IrValue> valuesByIdentifier,
         Set<IrValue> visitedValues
     ) {
@@ -172,55 +233,61 @@ public record IrFunction(IrFunctionId id, String name, List<IrParameter> paramet
         if (value instanceof IrParameter parameter && !declaredParameters.contains(parameter))
             throw new IllegalArgumentException("IR function value graph references an undeclared parameter '%s'.".formatted(parameter.name()));
 
-        if (value instanceof IrInstruction instruction) {
+        if (value instanceof IrValueInstruction instruction) {
             if (!declaredInstructions.contains(instruction))
                 throw new IllegalArgumentException("IR function value graph references an undeclared instruction '%s'.".formatted(value.id()));
+
+            validateLocalReference(instruction, declaredLocals);
 
             validateOperands(
                 instruction,
                 declaredParameters,
                 declaredInstructions,
+                declaredLocals,
                 valuesByIdentifier,
                 visitedValues
             );
         }
     }
 
+    private static void validateLocalReference(IrInstruction instruction, Set<IrLocal> declaredLocals) {
+        if (instruction instanceof IrLocalInstruction localInstruction && !declaredLocals.contains(localInstruction.local()))
+            throw new IllegalArgumentException("IR function references undeclared local '%s'.".formatted(localInstruction.local().id()));
+    }
+
     private static void validateOperands(
         IrInstruction instruction,
         Set<IrParameter> declaredParameters,
         Set<IrInstruction> declaredInstructions,
+        Set<IrLocal> declaredLocals,
         Map<IrValueId, IrValue> valuesByIdentifier,
         Set<IrValue> visitedValues
     ) {
         var operands = Objects.requireNonNull(instruction.operands(), "IR instruction operands must not be null.");
 
-        for (var operand : operands)
-            validateValueGraph(operand, declaredParameters, declaredInstructions, valuesByIdentifier, visitedValues);
+        for (var operand : operands) {
+            validateValueGraph(
+                operand,
+                declaredParameters,
+                declaredInstructions,
+                declaredLocals,
+                valuesByIdentifier,
+                visitedValues
+            );
+        }
     }
 
     private static void validateReturn(IrType returnType, IrReturnTerminator terminator) {
         if (!returnType.isValue()) {
             if (terminator.returnsValue())
-                throw new IllegalArgumentException(
-                    "IR function returning '%s' must use a bare return."
-                        .formatted(returnType.displayName())
-                );
+                throw new IllegalArgumentException("IR function returning '%s' must use a bare return.".formatted(returnType.displayName()));
 
             return;
         }
 
-        var value = terminator.value().orElseThrow(
-            () -> new IllegalArgumentException(
-                "IR function returning '%s' must return a value."
-                    .formatted(returnType.displayName())
-            )
-        );
+        var value = terminator.value().orElseThrow(() -> new IllegalArgumentException("IR function returning '%s' must return a value.".formatted(returnType.displayName())));
 
         if (!returnType.equals(value.type()))
-            throw new IllegalArgumentException(
-                "IR return type '%s' does not match function return type '%s'."
-                    .formatted(value.type().displayName(), returnType.displayName())
-            );
+            throw new IllegalArgumentException("IR return type '%s' does not match function return type '%s'.".formatted(value.type().displayName(), returnType.displayName()));
     }
 }

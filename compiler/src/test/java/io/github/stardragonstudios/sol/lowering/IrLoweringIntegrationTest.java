@@ -1,21 +1,6 @@
 package io.github.stardragonstudios.sol.lowering;
 
-import io.github.stardragonstudios.sol.ir.IrBinaryInstruction;
-import io.github.stardragonstudios.sol.ir.IrBinaryOperator;
-import io.github.stardragonstudios.sol.ir.IrBooleanConstant;
-import io.github.stardragonstudios.sol.ir.IrCharConstant;
-import io.github.stardragonstudios.sol.ir.IrFloatConstant;
-import io.github.stardragonstudios.sol.ir.IrFunction;
-import io.github.stardragonstudios.sol.ir.IrFunctionId;
-import io.github.stardragonstudios.sol.ir.IrInstruction;
-import io.github.stardragonstudios.sol.ir.IrIntConstant;
-import io.github.stardragonstudios.sol.ir.IrProgram;
-import io.github.stardragonstudios.sol.ir.IrReturnTerminator;
-import io.github.stardragonstudios.sol.ir.IrReturnTerminator;
-import io.github.stardragonstudios.sol.ir.IrTextFormatter;
-import io.github.stardragonstudios.sol.ir.IrUnaryInstruction;
-import io.github.stardragonstudios.sol.ir.IrUnaryOperator;
-import io.github.stardragonstudios.sol.ir.IrValue;
+import io.github.stardragonstudios.sol.ir.*;
 import io.github.stardragonstudios.sol.lexer.Lexer;
 import io.github.stardragonstudios.sol.parser.Parser;
 import io.github.stardragonstudios.sol.semantics.ModuleName;
@@ -128,14 +113,17 @@ class IrLoweringIntegrationTest {
     }
 
     private static Set<Class<?>> collectConstantKinds(IrProgram program) {
-        var kinds = new java.util.HashSet<Class<?>>();
+        var kinds = new HashSet<Class<?>>();
 
         Set<IrValue> visited = Collections.newSetFromMap(new IdentityHashMap<>());
 
         for (var module : program.modules()) {
             for (var function : module.functions()) {
                 for (var block : function.blocks()) {
-                    for (var instruction : block.instructions()) collectValue(instruction, kinds, visited);
+                    for (var instruction : block.instructions()) {
+                        if (instruction instanceof IrValueInstruction valueInstruction) collectValue(valueInstruction, kinds, visited);
+                        else for (var operand : instruction.operands()) collectValue(operand, kinds, visited);
+                    }
 
                     if (block.terminator() instanceof IrReturnTerminator(Optional<IrValue> value1))
                         value1.ifPresent(value -> collectValue(value, kinds, visited));
@@ -143,7 +131,9 @@ class IrLoweringIntegrationTest {
             }
         }
 
-        return Set.copyOf(kinds);
+        return Set.copyOf(
+            kinds
+        );
     }
 
     private static void collectValue(IrValue value, Set<Class<?>> kinds, Set<IrValue> visited) {
@@ -156,7 +146,7 @@ class IrLoweringIntegrationTest {
                 || value instanceof IrCharConstant
         ) kinds.add(value.getClass());
 
-        if (value instanceof IrInstruction instruction) for (var operand : instruction.operands()) collectValue(operand, kinds, visited);
+        if (value instanceof IrValueInstruction instruction) for (var operand : instruction.operands()) collectValue(operand, kinds, visited);
     }
 
     private static IrProgram lowerSupportedProgram() {

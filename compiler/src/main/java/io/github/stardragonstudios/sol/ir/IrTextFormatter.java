@@ -8,6 +8,7 @@ import java.util.StringJoiner;
 
 public final class IrTextFormatter {
     private static final String INDENT = "  ";
+
     private final StringBuilder text = new StringBuilder();
 
     private IrTextFormatter() {}
@@ -16,6 +17,7 @@ public final class IrTextFormatter {
         Objects.requireNonNull(program, "Formatted IR program must not be null.");
 
         var formatter = new IrTextFormatter();
+
         formatter.writeProgram(program);
 
         return formatter.text.toString();
@@ -27,13 +29,16 @@ public final class IrTextFormatter {
         if (program.entryPoint().isPresent()) {
             var entryPoint = program.entryPoint().orElseThrow();
 
-            line(1, "entry @%s::%s".formatted(entryPoint.module().name().qualifiedName(), entryPoint.function().id()));
+            line(1, "entry @%s::%s".formatted(
+                    entryPoint.module().name().qualifiedName(),
+                    entryPoint.function().id()
+                )
+            );
         } else {
             line(1, "entry none");
         }
 
         if (!program.modules().isEmpty()) blankLine();
-
 
         for (var index = 0; index < program.modules().size(); index++) {
             writeModule(program.modules().get(index));
@@ -47,12 +52,10 @@ public final class IrTextFormatter {
     private void writeModule(IrModule module) {
         line(1, "module @%s {".formatted(module.name().qualifiedName()));
 
-        if (!module.functions().isEmpty()) {
-            for (var index = 0; index < module.functions().size(); index++) {
-                writeFunction(module.functions().get(index));
+        for (var index = 0; index < module.functions().size(); index++) {
+            writeFunction(module.functions().get(index));
 
-                if (index < module.functions().size() - 1) blankLine();
-            }
+            if (index < module.functions().size() - 1) blankLine();
         }
 
         line(1, "}");
@@ -84,7 +87,7 @@ public final class IrTextFormatter {
         line(3, block.id() + ":");
 
         for (var instruction : block.instructions()) {
-            emitRequiredConstants(instruction, emittedConstants);
+            for (var operand : instruction.operands()) emitRequiredConstants(operand, emittedConstants);
 
             line(4, formatInstruction(instruction));
         }
@@ -105,17 +108,21 @@ public final class IrTextFormatter {
     private void emitRequiredConstants(IrValue value, Set<IrValue> emittedConstants) {
         Objects.requireNonNull(value, "Formatted IR value must not be null.");
 
-        if (value instanceof IrInstruction instruction)
-            for (var operand : instruction.operands()) emitRequiredConstants(operand, emittedConstants);
-
+        if (value instanceof IrValueInstruction instruction) for (var operand : instruction.operands()) emitRequiredConstants(operand, emittedConstants);
         if (isConstant(value) && emittedConstants.add(value)) line(4, formatConstant(value));
     }
 
     private String signature(IrFunction function) {
         var parameters = new StringJoiner(", ");
 
-        for (var parameter : function.parameters())
-            parameters.add("%s %s: %s".formatted(parameter.id(), parameter.name(), parameter.type().displayName()));
+        for (var parameter : function.parameters()) {
+            parameters.add("%s %s: %s".formatted(
+                    parameter.id(),
+                    parameter.name(),
+                    parameter.type().displayName()
+                )
+            );
+        }
 
         return "@%s %s(%s) -> %s".formatted(
             function.id(),
@@ -126,6 +133,33 @@ public final class IrTextFormatter {
     }
 
     private String formatInstruction(IrInstruction instruction) {
+        if (instruction instanceof IrLocalInitializeInstruction initialization) {
+            var local = initialization.local();
+
+            return "initialize %s %s %s: %s, %s".formatted(
+                local.id(),
+                localKindName(local.kind()),
+                local.name(),
+                local.type().displayName(),
+                initialization.initializer().id()
+            );
+        }
+
+        if (instruction instanceof IrLocalLoadInstruction load) {
+            return "%s: %s = load %s".formatted(
+                load.id(),
+                load.type().displayName(),
+                load.local().id()
+            );
+        }
+
+        if (instruction instanceof IrLocalStoreInstruction store) {
+            return "store %s, %s".formatted(
+                store.local().id(),
+                store.value().id()
+            );
+        }
+
         if (instruction instanceof IrUnaryInstruction unary) {
             return "%s: %s = %s %s".formatted(
                 unary.id(),
@@ -146,6 +180,14 @@ public final class IrTextFormatter {
         }
 
         throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
+    }
+
+    private String localKindName(IrLocalKind kind) {
+        return switch (kind) {
+            case CONSTANT -> "const";
+            case IMMUTABLE -> "let";
+            case MUTABLE -> "mut";
+        };
     }
 
     private String formatConstant(IrValue value) {
@@ -220,6 +262,7 @@ public final class IrTextFormatter {
                 case '\t' -> result.append("\\t");
                 case '\b' -> result.append("\\b");
                 case '\f' -> result.append("\\f");
+
                 default -> {
                     if (codePoint >= 0x20 && codePoint <= 0x7E) result.appendCodePoint(codePoint);
                     else result.append("\\u{%X}".formatted(codePoint));

@@ -1,8 +1,11 @@
 package io.github.stardragonstudios.sol.ir;
 
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 public record IrBasicBlock(IrBlockId id, List<IrInstruction> instructions, IrTerminator terminator) {
     public IrBasicBlock {
@@ -14,11 +17,16 @@ public record IrBasicBlock(IrBlockId id, List<IrInstruction> instructions, IrTer
 
         var instructionValueIds = new HashSet<IrValueId>();
 
+        Set<IrInstruction> instances = Collections.newSetFromMap(new IdentityHashMap<>());
+
         for (var instruction : instructions) {
             Objects.requireNonNull(instruction, "IR basic block instructions must not contain null values.");
 
-            if (!instructionValueIds.add(instruction.id()))
-                throw new IllegalArgumentException("IR basic block must not contain duplicate instruction value identifier '%s'.".formatted(instruction.id()));
+            if (!instances.add(instruction))
+                throw new IllegalArgumentException("IR basic block must not contain the same instruction instance more than once.");
+
+            if (instruction instanceof IrValueInstruction valueInstruction && !instructionValueIds.add(valueInstruction.id()))
+                throw new IllegalArgumentException("IR basic block must not contain duplicate instruction value identifier '%s'.".formatted(valueInstruction.id()));
         }
     }
 }

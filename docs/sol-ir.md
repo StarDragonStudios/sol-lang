@@ -62,7 +62,8 @@ Identifiers are deterministic objects rather than source names.
 
 * `IrFunctionId` identifies a function globally inside an `IrProgram`.
 * `IrBlockId` identifies a basic block inside an `IrFunction`.
-* `IrValueId` identifies parameters, constants and instructions inside an `IrFunction`.
+* `IrLocalId` identifies local storage inside an `IrFunction`.
+* `IrValueId` identifies parameters, constants and value-producing instructions inside an `IrFunction`.
 
 Source names may be retained for diagnostics and textual inspection, but they do not define IR identity.
 
@@ -122,8 +123,8 @@ Every `IrValue` has:
 
 `IrInstruction` represents an ordered operation inside a basic block.
 
-An instruction does not necessarily produce a value. Operations such as future
-stores, assignments, destruction operations and `void` calls may exist only as
+An instruction does not necessarily produce a value. Local initialization,
+local updates, future destruction operations and `void` calls may exist only as
 instructions.
 
 `IrValueInstruction` represents an instruction that also produces a typed
@@ -149,6 +150,54 @@ The initial binary operations are:
 Operator constructors enforce their structural type rules immediately.
 
 Semantic analysis remains responsible for reporting source diagnostics. IR validation treats invalid construction as a compiler error.
+
+## Local storage
+
+`IrLocal` represents target-independent function-local storage.
+
+Every local contains:
+
+* a deterministic `IrLocalId`;
+* a diagnostic source name;
+* an explicit value type;
+* an `IrLocalKind`.
+
+The supported local kinds are:
+
+* `CONSTANT`, corresponding to `const`;
+* `IMMUTABLE`, corresponding to ordinary `let`;
+* `MUTABLE`, corresponding to `@mut let`.
+
+An `IrLocal` is not an `IrValue` and does not represent a native address,
+pointer or stack slot.
+
+Local storage is manipulated through:
+
+* `IrLocalInitializeInstruction`, which initializes one local without producing
+  a value;
+* `IrLocalLoadInstruction`, which reads one local and produces a typed value;
+* `IrLocalStoreInstruction`, which updates mutable local storage without
+  producing a value.
+
+Initialization and storage operations require exact type equality.
+
+A store can only target an `IrLocal` whose kind is `MUTABLE`. Constants and
+immutable locals cannot be represented as valid store targets.
+
+Local identifiers and value identifiers belong to independent identifier
+spaces. `local0` and `%0` may therefore coexist in the same function.
+
+Source names do not define local identity. Distinct shadowed locals may preserve
+the same diagnostic name while retaining different `IrLocalId` values and
+different canonical instances.
+
+Function validation requires every referenced local instance to be introduced
+by exactly one local-initialization instruction. Duplicate local identifiers,
+duplicate initialization and references to undeclared local instances are
+rejected.
+
+Sol IR does not prescribe whether a local becomes an LLVM `alloca`, an SSA
+value, a register, a native stack slot or another backend representation.
 
 ## Returns
 
@@ -267,22 +316,31 @@ identifiers.
 Inside each function:
 
 * parameters receive the first `IrValueId` values in declaration order;
-* constants and instructions receive subsequent value identifiers in
-  evaluation order;
+* local declarations receive `IrLocalId` values in source declaration order;
+* constants and value-producing instructions receive subsequent value
+  identifiers in evaluation order;
+* local and value identifiers use independent counters;
 * basic blocks receive local `IrBlockId` values;
 * operands are lowered before the instruction that consumes them;
+* local initializers are lowered before their initialization instruction;
+* assignment values are lowered before their store instruction;
 * public IR collections preserve their original deterministic order.
 
 No static or process-global counters are used.
 
 ### Supported function subset
 
-The initial lowering subset supports:
+The current lowering subset supports:
 
 * bodyless function declarations;
-* functions containing one top-level return statement;
+* bodyful functions containing zero or more supported linear statements
+  followed by one final top-level return statement;
 * ordered parameters;
 * primitive parameter and return types;
+* `const` local declarations;
+* immutable `let` declarations;
+* mutable `@mut let` declarations;
+* assignment statements targeting mutable locals;
 * bare returns;
 * value returns.
 
@@ -301,6 +359,7 @@ The initial expression subset supports:
 * boolean literals;
 * character literals;
 * parameter references;
+* local-variable references;
 * parenthesized expressions;
 * numeric positive and negation;
 * logical negation;
@@ -317,19 +376,31 @@ Parentheses do not create additional IR values.
 Unary and binary expressions emit value-producing instructions after their
 operands have been lowered.
 
+A local declaration lowers its initializer first, creates one canonical
+`IrLocal`, and then emits an `IrLocalInitializeInstruction`.
+
+A local-variable reference resolves through its canonical
+`LocalVariableSymbol` and emits an `IrLocalLoadInstruction`.
+
+An assignment resolves through the canonical assignment-target symbol, lowers
+the assigned expression, and emits an `IrLocalStoreInstruction`.
+
+Lowering does not repeat source-name lookup, mutability checking or assignment
+type checking.
+
 ### Unsupported syntax
 
-The following constructs are not lowered by this initial layer:
+The following constructs are not lowered by the current layer:
 
-* local variables;
-* assignments;
 * conditionals;
 * loops;
+* nested statement blocks;
 * calls;
 * qualified calls;
 * string literals;
 * structs;
-* references.
+* references;
+* global variables;
 
 Encountering unsupported syntax produces an `IrLoweringException` with a
 deterministic explanation.
@@ -357,12 +428,11 @@ the lowering layer.
 
 The current design must permit later representation of:
 
-* local storage;
-* assignments;
 * unconditional branches;
 * conditional branches;
 * loops;
 * calls;
+* global storage;
 * structs;
 * references;
 * ownership operations;
