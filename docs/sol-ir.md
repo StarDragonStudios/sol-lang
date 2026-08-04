@@ -545,6 +545,14 @@ failures:
 IR constructors continue to enforce their own invariants independently from
 the lowering layer.
 
+## LLVM backend
+
+The target-independent LLVM generation layer is documented in
+[`llvm-backend.md`](llvm-backend.md).
+
+The backend consumes only validated Sol IR and does not expose LLVM objects
+through the Sol IR package boundary.
+
 ## Future extensions
 
 The current design must permit later representation of:
