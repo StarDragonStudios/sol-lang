@@ -4,7 +4,9 @@
 [versions]
 guava = "33.4.5-jre"
 junit-jupiter = "5.12.1"
+llvm = "21.1.8-1.5.13"
 
 [libraries]
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+llvm-platform = { module = "org.bytedeco:llvm-platform", version.ref = "llvm" }
