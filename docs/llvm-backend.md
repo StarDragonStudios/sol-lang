@@ -1,7 +1,9 @@
 # LLVM backend
 
-The LLVM backend transforms validated typed Sol IR into target-independent,
-verified LLVM IR.
+The LLVM backend transforms validated typed Sol IR into verified LLVM IR.
+
+It can also configure the generated module for a native target and emit a
+native object file.
 
 It is implemented under:
 
@@ -20,20 +22,22 @@ typed Sol IR
 → executable
 ```
 
-This backend performs the first two steps only.
+This backend performs every step through native object emission.
+
+Native linking and executable production remain toolchain responsibilities.
 
 It does not:
 
 * consume syntax or semantic AST nodes;
 * generate C source;
 * invoke GCC, Clang or another C compiler;
-* select a native target;
-* emit object files;
 * invoke a linker;
 * link the Sol runtime.
 
-Target selection and native object generation belong to the object-emission
-layer built on top of the verified LLVM module.
+Native target selection and object generation are implemented by the
+object-emission layer built on top of `LlvmBackend`.
+
+The linker and runtime integration remain outside the LLVM backend.
 
 ## Dependency
 
@@ -53,6 +57,76 @@ The JVM must allow native access for unnamed modules:
 ```
 
 Gradle tests and application executions configure this option explicitly.
+
+## Native target configuration
+
+Native target support is initialized lazily and at most once per JVM process.
+
+Initialization:
+
+* loads the LLVM native library;
+* initializes the native target;
+* initializes the native assembly printer.
+
+`LlvmTargetConfiguration.host()` obtains the host:
+
+* default target triple;
+* CPU name;
+* CPU feature string.
+
+The default host configuration uses LLVM's default optimization level,
+relocation model and code model.
+
+An explicit `LlvmTargetConfiguration` can instead provide:
+
+* a target triple;
+* a CPU name;
+* a CPU feature string;
+* a code-generation optimization level;
+* a relocation model;
+* a code model.
+
+Configuration values are normalized and validated before a target machine is
+created.
+
+## Target machines
+
+`LlvmTargetMachine.create` resolves the configured target triple and verifies
+that the resolved LLVM target provides:
+
+* a target-machine implementation;
+* an assembly backend capable of native object emission.
+
+The target machine exposes its resolved target name, configuration and data
+layout.
+
+Before object emission, it configures the LLVM module with the exact target
+triple and target data layout used by native code generation.
+
+`LlvmTargetMachine` implements `AutoCloseable`. Closing it is idempotent, and
+using its native handle after closure produces an explicit
+`LlvmBackendException`.
+
+## Native object emission
+
+`LlvmObjectBackend.emitHostObject` generates an LLVM module and emits an object
+file using the detected host configuration.
+
+`LlvmObjectBackend.emitObject` performs the same operation using an explicit
+target configuration.
+
+Object emission:
+
+1. normalizes the destination path;
+2. creates missing parent directories;
+3. rejects a destination that identifies a directory;
+4. applies the target triple and data layout to the module;
+5. verifies the configured module;
+6. emits an LLVM native object file;
+7. verifies that the result is a non-empty regular file.
+
+If emission fails after creating a new destination file, the incomplete file
+is removed. A pre-existing destination is not deleted during failure cleanup.
 
 ## Primitive type mapping
 
@@ -233,10 +307,19 @@ Strings allocated by LLVM printing and verification APIs are released with
 Calling module operations after closure produces an explicit
 `LlvmBackendException`.
 
+`LlvmTargetMachine` owns one `LLVMTargetMachineRef`.
+
+Target-data values created to obtain or apply a data layout are temporary and
+are disposed immediately after use.
+
 ## Verification
 
 Every module produced by `LlvmBackend.generate` is verified before it is
 returned.
+
+The object-emission layer verifies the module again after applying the target
+triple and data layout, ensuring that the exact module passed to native code
+generation is valid.
 
 Verification uses status-returning behavior rather than aborting the compiler
 process.
@@ -261,16 +344,12 @@ compiler invocation into another.
 
 ## Current exclusions
 
-The initial backend does not support:
+The current backend does not support:
 
 * strings;
-* native target triples;
-* target data layouts;
-* target machines;
-* object-file generation;
-* optimization pipelines;
+* LLVM IR optimization pipelines;
 * debug information;
 * runtime linking;
 * executable output.
 
-These capabilities belong to later backend and toolchain stages.
+Runtime linking and executable production belong to later toolchain stages.
