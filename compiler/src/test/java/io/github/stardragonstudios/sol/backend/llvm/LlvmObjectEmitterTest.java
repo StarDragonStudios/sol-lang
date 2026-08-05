@@ -495,6 +495,11 @@ class LlvmObjectEmitterTest {
                         1
                     )
             ) {
+                errorPointer.put(
+                    0,
+                    (Pointer) null
+                );
+
                 binary =
                     LLVMCreateBinary(
                         buffer,
@@ -562,6 +567,11 @@ class LlvmObjectEmitterTest {
                     1
                 )
         ) {
+            errorPointer.put(
+                0,
+                (Pointer) null
+            );
+
             var status =
                 LLVMCreateMemoryBufferWithContentsOfFile(
                     nativePath,

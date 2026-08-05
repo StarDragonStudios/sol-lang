@@ -55,6 +55,8 @@ public final class LlvmTargetMachine
             var target = new LLVMTargetRef();
             var errorPointer = new PointerPointer<BytePointer>(1)
         ) {
+            errorPointer.put(0, (Pointer) null);
+
             var status = LLVMGetTargetFromTriple(nativeTriple, target, errorPointer);
             var nativeError = errorPointer.get(BytePointer.class);
 
