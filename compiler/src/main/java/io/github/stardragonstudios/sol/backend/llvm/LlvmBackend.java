@@ -13,9 +13,19 @@ public final class LlvmBackend {
         var module = LlvmModule.create(moduleName);
 
         try {
+            /*
+             * Validate the native startup boundary before lowering
+             * parameter types. Entry-point parameters remain valid
+             * Sol IR even when the current native bridge cannot bind
+             * them yet.
+             */
+            LlvmEntryPointLowerer.validate(program);
+
             var context = LlvmProgramPredeclarer.predeclare(program, module);
 
             for (var irModule : program.modules()) for (var function : irModule.functions()) LlvmFunctionBodyLowerer.lower(function, context);
+
+            LlvmEntryPointLowerer.lower(program, context);
 
             module.verify();
 
