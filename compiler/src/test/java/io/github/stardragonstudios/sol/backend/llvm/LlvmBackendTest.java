@@ -202,6 +202,57 @@ class LlvmBackendTest {
         }
     }
 
+    @Test
+    void lowersStandardFileExistsToNativeImplementation() {
+        var pathParameter = new IrParameter(new IrValueId(0), "path", PrimitiveIrType.STRING);
+        var exists = IrFunction.declaration(new IrFunctionId(0), "exists", List.of(pathParameter), PrimitiveIrType.BOOLEAN);
+        var program = IrProgram.library(List.of(new IrModule(new IrModuleName(List.of("std", "file")), List.of(exists))));
+
+        try (var module = LlvmBackend.generate(program, "sol.file")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("declare ptr @fopen(ptr, ptr)"));
+            assertTrue(text.contains("declare i32 @fclose(ptr)"));
+            assertTrue(text.contains("define i1 @sol.function0.exists({ ptr, i64 } %path)"));
+            assertTrue(text.contains("c\"rb\\00\""));
+            assertTrue(text.contains("@llvm.memcpy"));
+            assertTrue(text.contains("store i8 0"));
+            assertTrue(text.contains("file.opened:"));
+            assertTrue(text.contains("file.missing:"));
+            assertTrue(text.contains("call ptr @fopen"));
+            assertTrue(text.contains("call i32 @fclose"));
+
+            module.verify();
+        }
+    }
+
+    @Test
+    void lowersStandardFileWriteFunctionsToNativeImplementations() {
+        var writePath = new IrParameter(new IrValueId(0), "path", PrimitiveIrType.STRING);
+        var writeContent = new IrParameter(new IrValueId(1), "content", PrimitiveIrType.STRING);
+        var writeText = IrFunction.declaration(new IrFunctionId(0), "write_text", List.of(writePath, writeContent), PrimitiveIrType.BOOLEAN);
+        var appendPath = new IrParameter(new IrValueId(0), "path", PrimitiveIrType.STRING);
+        var appendContent = new IrParameter(new IrValueId(1), "content", PrimitiveIrType.STRING);
+        var appendText = IrFunction.declaration(new IrFunctionId(1), "append_text", List.of(appendPath, appendContent), PrimitiveIrType.BOOLEAN);
+        var program = IrProgram.library(List.of(new IrModule(new IrModuleName(List.of("std", "file")), List.of(writeText, appendText))));
+
+        try (var module = LlvmBackend.generate(program, "sol.file-write")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("declare i64 @fwrite(ptr, i64, i64, ptr)"));
+            assertTrue(text.contains("define i1 @sol.function0.write_text({ ptr, i64 } %path, { ptr, i64 } %content)"));
+            assertTrue(text.contains("define i1 @sol.function1.append_text({ ptr, i64 } %path, { ptr, i64 } %content)"));
+            assertTrue(text.contains("c\"wb\\00\""));
+            assertTrue(text.contains("c\"ab\\00\""));
+            assertTrue(text.contains("call i64 @fwrite"));
+            assertTrue(text.contains("all_bytes_written"));
+            assertTrue(text.contains("file_write_succeeded"));
+            assertTrue(text.contains("file.open_failed:"));
+
+            module.verify();
+        }
+    }
+
     private static IrFunction constantFunction(IrFunctionId identifier, String name, PrimitiveIrType returnType, IrValue value) {
         return IrFunction.definition(identifier, name, List.of(), returnType, List.of(new IrBasicBlock(new IrBlockId(0), List.of(), IrReturnTerminator.returning(value))));
     }

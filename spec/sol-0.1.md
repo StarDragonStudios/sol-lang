@@ -397,3 +397,68 @@ procedural bootstrap.
 Console strings are written as UTF-8 data.
 
 Console input is not defined in Sol 0.1.
+
+### File
+
+The Sol 0.1 file module is:
+
+```sol
+std.file
+```
+
+It currently exports:
+
+```sol
+@fn exists(path: string) -> boolean
+@fn write_text(path: string, content: string) -> boolean
+@fn append_text(path: string, content: string) -> boolean
+```
+
+The conventional Sol 0.1 usage is a namespace injection with the alias `file`:
+
+```sol
+inject namespace std.file as file
+```
+
+`exists` tests whether the supplied path can be opened as an existing file:
+
+```sol
+file::exists("data.txt")
+```
+
+It returns `true` when the file exists and can be opened, and `false` when it
+cannot be opened.
+
+`write_text` writes the supplied string to the file:
+
+```sol
+file::write_text("data.txt", "Hello")
+```
+
+If the file does not exist, it is created. If the file already exists, its
+previous contents are replaced. The function returns `true` only when the
+complete string is written and the file is closed successfully.
+
+`append_text` appends the supplied string to the end of the file:
+
+```sol
+file::append_text("data.txt", " Sol")
+```
+
+If the file does not exist, it is created. Existing contents are preserved.
+The function returns `true` only when the complete string is written and the
+file is closed successfully.
+
+Text content is written as the UTF-8 bytes represented by the Sol `string`.
+The string's byte length determines the amount of data written; file contents
+are not treated as NUL-terminated C strings.
+
+Relative file paths are interpreted relative to the current working directory
+of the generated native process.
+
+In Sol 0.1, `file` is a namespace alias and is not a runtime object. A future
+object-oriented Sol API may expose files through the `File` class.
+
+Reading file contents is not defined by this initial Sol 0.1 file API. Returning
+dynamically allocated strings requires runtime string ownership and lifetime
+semantics that are outside the scope of this module.

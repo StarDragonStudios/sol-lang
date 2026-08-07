@@ -19,7 +19,7 @@ and its native compilation pipeline:
 * LLVM IR generation;
 * native object-file emission;
 * host-native executable linking.
-* a bundled native console standard-library module.
+* bundled native console and file standard-library modules.
 
 The compiler is implemented in Java, but generated Sol executables are native
 programs and do not depend on the JVM.
@@ -167,6 +167,28 @@ end
 `print(string)` and `print_line(string)`. The `csl` name above is the
 conventional Sol 0.1 namespace alias for console access.
 
+`std.file` provides the initial procedural filesystem API through
+`exists(string)`, `write_text(string, string)` and
+`append_text(string, string)`.
+
+The conventional Sol 0.1 namespace alias is `file`:
+
+```sol
+inject namespace std.file as file
+
+@init
+fn launch() -> int
+    if file::write_text("output.txt", "Hello") then
+        file::append_text("output.txt", " Sol")
+        return 0
+    else
+        return 1
+    end
+end
+```
+
+File paths are resolved by the generated native process relative to its current
+working directory unless an absolute path is supplied.
 
 Injected modules are discovered recursively.
 
