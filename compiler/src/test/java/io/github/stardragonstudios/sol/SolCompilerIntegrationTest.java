@@ -225,6 +225,111 @@ final class SolCompilerIntegrationTest {
         assertEquals("", standardError);
     }
 
+    @Test
+    void compilesAndRunsProgramUsingBundledFileExists()
+        throws IOException, InterruptedException {
+
+        assumeNativeLinkerAvailable();
+
+        var source = temporaryDirectory.resolve("file-exists.sol");
+        var existingFile = temporaryDirectory.resolve("present.txt");
+
+        Files.writeString(existingFile, "Sol");
+
+        Files.writeString(
+            source,
+            """
+            inject namespace std.file as file
+
+            @init
+            fn launch() -> int
+                if file::exists("present.txt") then
+                    if file::exists("missing.txt") then
+                        return 12
+                    else
+                        return 23
+                    end
+                else
+                    return 11
+                end
+            end
+            """
+        );
+
+        var errorBytes = new ByteArrayOutputStream();
+        var exitCode = SolCompiler.run(new String[] {source.toString()}, new PrintStream(errorBytes), new CompilerPipeline()::compile);
+        var executable = temporaryDirectory.resolve(executableName("file-exists"));
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), exitCode, errorBytes::toString);
+        assertEquals("", errorBytes.toString());
+        assertTrue(Files.isRegularFile(executable));
+
+        /*
+         * std.file paths are resolved by the native process,
+         * so run it from the test directory containing present.txt.
+         */
+        var process = new ProcessBuilder(executable.toString()).directory(temporaryDirectory.toFile()).start();
+        var standardOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        var standardError = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        var processExitCode = process.waitFor();
+
+        assertEquals(23, processExitCode, standardError);
+        assertEquals("", standardOutput);
+        assertEquals("", standardError);
+    }
+
+    @Test
+    void compilesAndRunsProgramUsingBundledFileWriteFunctions() throws IOException, InterruptedException {
+        assumeNativeLinkerAvailable();
+
+        var source = temporaryDirectory.resolve("file-write.sol");
+        var outputFile = temporaryDirectory.resolve("output.txt");
+
+        /*
+         * Verifies that write_text uses replacement/truncation semantics
+         * rather than appending to an existing file.
+         */
+        Files.writeString(outputFile, "stale content", StandardCharsets.UTF_8);
+
+        Files.writeString(
+            source,
+            """
+            inject namespace std.file as file
+
+            @init
+            fn launch() -> int
+                if file::write_text("output.txt", "Hola ñ") then
+                    if file::append_text("output.txt", " Sol") then
+                        return 23
+                    else
+                        return 12
+                    end
+                else
+                    return 11
+                end
+            end
+            """
+        );
+
+        var errorBytes = new ByteArrayOutputStream();
+        var exitCode = SolCompiler.run(new String[] {source.toString()}, new PrintStream(errorBytes), new CompilerPipeline()::compile);
+        var executable = temporaryDirectory.resolve(executableName("file-write"));
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), exitCode, errorBytes::toString);
+        assertEquals("", errorBytes.toString());
+        assertTrue(Files.isRegularFile(executable));
+
+        var process = new ProcessBuilder(executable.toString()).directory(temporaryDirectory.toFile()).start();
+        var standardOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        var standardError = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        var processExitCode = process.waitFor();
+
+        assertEquals(23, processExitCode, standardError);
+        assertEquals("", standardOutput);
+        assertEquals("", standardError);
+        assertEquals("Hola ñ Sol", Files.readString(outputFile, StandardCharsets.UTF_8));
+    }
+
     private static void assumeNativeLinkerAvailable() {
         try {
             NativeLinkerDiscovery.discover();

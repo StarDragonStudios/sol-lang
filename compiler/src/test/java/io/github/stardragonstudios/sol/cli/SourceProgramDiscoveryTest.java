@@ -2,6 +2,7 @@ package io.github.stardragonstudios.sol.cli;
 
 import io.github.stardragonstudios.sol.semantics.ModuleName;
 
+import io.github.stardragonstudios.sol.semantics.SourceModule;
 import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,33 +45,11 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var program =
-            SourceProgramDiscovery.discover(
-                temporaryDirectory.resolve(
-                    "main.sol"
-                )
-            );
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
 
         assertEquals(
-            List.of(
-                new ModuleName(
-                    List.of(
-                        "main"
-                    )
-                ),
-                new ModuleName(
-                    List.of(
-                        "helper"
-                    )
-                )
-            ),
-            program.modules()
-                .stream()
-                .map(
-                    module ->
-                        module.name()
-                )
-                .toList()
+            List.of(new ModuleName(List.of("main")), new ModuleName(List.of("helper"))),
+            program.modules().stream().map(SourceModule::name).toList()
         );
     }
 
@@ -90,14 +69,9 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var directory =
-            temporaryDirectory.resolve(
-                "utilities"
-            );
+        var directory = temporaryDirectory.resolve("utilities");
 
-        Files.createDirectories(
-            directory
-        );
+        Files.createDirectories(directory);
 
         Files.writeString(
             directory.resolve(
@@ -110,29 +84,9 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var program =
-            SourceProgramDiscovery.discover(
-                temporaryDirectory.resolve(
-                    "main.sol"
-                )
-            );
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
 
-        assertTrue(
-            program.modules()
-                .stream()
-                .anyMatch(
-                    module ->
-                        module.name()
-                            .equals(
-                                new ModuleName(
-                                    List.of(
-                                        "utilities",
-                                        "math"
-                                    )
-                                )
-                            )
-                )
-        );
+        assertTrue(program.modules().stream().anyMatch(module -> module.name().equals(new ModuleName(List.of("utilities", "math")))));
     }
 
     @Test
@@ -171,18 +125,9 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var program =
-            SourceProgramDiscovery.discover(
-                temporaryDirectory.resolve(
-                    "main.sol"
-                )
-            );
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
 
-        assertEquals(
-            3,
-            program.modules()
-                .size()
-        );
+        assertEquals(3, program.modules().size());
     }
 
     @Test
@@ -212,18 +157,9 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var program =
-            SourceProgramDiscovery.discover(
-                temporaryDirectory.resolve(
-                    "main.sol"
-                )
-            );
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
 
-        assertEquals(
-            2,
-            program.modules()
-                .size()
-        );
+        assertEquals(2, program.modules().size());
     }
 
     @Test
@@ -242,18 +178,9 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var program =
-            SourceProgramDiscovery.discover(
-                temporaryDirectory.resolve(
-                    "main.sol"
-                )
-            );
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
 
-        assertEquals(
-            1,
-            program.modules()
-                .size()
-        );
+        assertEquals(1, program.modules().size());
     }
 
     @Test
@@ -272,30 +199,14 @@ class SourceProgramDiscoveryTest {
             """
         );
 
-        var broken =
-            write(
-                "broken.sol",
-                "$"
-            );
+        var broken = write("broken.sol", "$");
 
-        var exception =
-            assertThrows(
-                FrontendCompilationException.class,
-                () ->
-                    SourceProgramDiscovery.discover(
-                        temporaryDirectory.resolve(
-                            "main.sol"
-                        )
-                    )
-            );
-
-        assertEquals(
-            broken.toAbsolutePath()
-                .normalize(),
-            exception.diagnostics()
-                .getFirst()
-                .sourceFile()
+        var exception = assertThrows(
+            FrontendCompilationException.class,
+            () -> SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"))
         );
+
+        assertEquals(broken.toAbsolutePath().normalize(), exception.diagnostics().getFirst().sourceFile());
     }
 
     @Test
@@ -369,6 +280,99 @@ class SourceProgramDiscoveryTest {
                 .stream()
                 .anyMatch(declaration -> declaration instanceof FunctionDeclaration function && function.name().equals("print_line"))
         );
+    }
+
+    @Test
+    void discoversBundledFileModule()
+        throws IOException {
+
+        write(
+            "main.sol",
+            """
+            inject namespace std.file as file
+
+            @init
+            fn launch() -> int
+                return 0
+            end
+            """
+        );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+
+        var fileModule = program.modules()
+            .stream()
+            .filter(module -> module.name().equals(new ModuleName(List.of("std", "file"))))
+            .findFirst()
+            .orElseThrow();
+
+        var functionNames = fileModule.unit()
+            .declarations()
+            .stream()
+            .map(FunctionDeclaration.class::cast)
+            .map(FunctionDeclaration::name)
+            .toList();
+
+        assertEquals(
+            List.of(
+                "exists",
+                "write_text",
+                "append_text"
+            ),
+            functionNames
+        );
+    }
+
+    @Test
+    void bundledFileModuleTakesPrecedenceOverProjectFile()
+        throws IOException {
+
+        write(
+            "main.sol",
+            """
+            inject namespace std.file as file
+
+            @init
+            fn launch() -> int
+                if file::exists("anything.txt") then
+                    return 1
+                else
+                    return 0
+                end
+            end
+            """
+        );
+
+        var standardDirectory = temporaryDirectory.resolve("std");
+
+        Files.createDirectories(standardDirectory);
+
+        Files.writeString(
+            standardDirectory.resolve("file.sol"),
+            """
+            fn fake() -> int
+                return 42
+            end
+            """
+        );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+
+        var file = program.modules()
+            .stream()
+            .filter(module -> module.name().equals(new ModuleName(List.of("std", "file"))))
+            .findFirst()
+            .orElseThrow();
+
+        var functionNames = file.unit()
+            .declarations()
+            .stream()
+            .filter(FunctionDeclaration.class::isInstance)
+            .map(FunctionDeclaration.class::cast)
+            .map(FunctionDeclaration::name)
+            .toList();
+
+        assertEquals(List.of("exists", "write_text", "append_text"), functionNames);
     }
 
     private Path write(String name, String source) throws IOException {

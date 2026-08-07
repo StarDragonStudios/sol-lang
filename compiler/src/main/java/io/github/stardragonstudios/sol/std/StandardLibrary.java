@@ -15,12 +15,20 @@ import java.util.Optional;
 
 public final class StandardLibrary {
     public static final ModuleName CONSOLE = new ModuleName(List.of("std", "console"));
+    public static final ModuleName FILE = new ModuleName(List.of("std", "file"));
 
     private static final Map<ModuleName, String> SOURCES = Map.of(
         CONSOLE,
         """
         @fn print(value: string) -> void
         @fn print_line(value: string) -> void
+        """,
+
+        FILE,
+        """
+        @fn exists(path: string) -> boolean
+        @fn write_text(path: string, content: string) -> boolean
+        @fn append_text(path: string, content: string) -> boolean
         """
     );
 
