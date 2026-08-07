@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -181,6 +182,47 @@ final class SolCompilerIntegrationTest {
         assertTrue(Files.isRegularFile(executable));
         assertTrue(Files.isRegularFile(objectFile));
         assertTrue(Files.size(objectFile) > 0);
+    }
+
+    @Test
+    void compilesAndRunsProgramUsingBundledConsoleNamespace()
+        throws IOException, InterruptedException {
+
+        assumeNativeLinkerAvailable();
+
+        var source = temporaryDirectory.resolve("console.sol");
+
+        Files.writeString(
+            source,
+            """
+            inject namespace std.console as csl
+
+            @init
+            fn launch() -> int
+                csl::print("Hello ")
+                csl::print_line("Sol ñ")
+                return 23
+            end
+            """
+        );
+
+        var errorBytes = new ByteArrayOutputStream();
+        var exitCode = SolCompiler.run(new String[] {source.toString()}, new PrintStream(errorBytes), new CompilerPipeline()::compile);
+
+        var executable = temporaryDirectory.resolve(executableName("console"));
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), exitCode, errorBytes::toString);
+        assertEquals("", errorBytes.toString());
+        assertTrue(Files.isRegularFile(executable));
+
+        var process = new ProcessBuilder(executable.toString()).start();
+        var standardOutput = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        var standardError = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        var processExitCode = process.waitFor();
+
+        assertEquals(23, processExitCode, standardError);
+        assertEquals("Hello Sol ñ\n", standardOutput);
+        assertEquals("", standardError);
     }
 
     private static void assumeNativeLinkerAvailable() {

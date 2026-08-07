@@ -22,21 +22,12 @@ class LlvmTypeLowererTest {
             assertEquals("double", printType(LlvmTypeLowerer.lower(PrimitiveIrType.FLOAT, module.contextHandle())));
             assertEquals("i1", printType(LlvmTypeLowerer.lower(PrimitiveIrType.BOOLEAN, module.contextHandle())));
             assertEquals("i32", printType(LlvmTypeLowerer.lower(PrimitiveIrType.CHAR, module.contextHandle())));
+            assertEquals("{ ptr, i64 }", printType(LlvmTypeLowerer.lower(PrimitiveIrType.STRING, module.contextHandle())));
             assertEquals("void", printType(LlvmTypeLowerer.lower(PrimitiveIrType.VOID, module.contextHandle())));
         }
     }
 
-    @Test
-    void rejectsStringsExplicitly() {
-        try (var module = LlvmModule.create("sol.strings")) {
-            var exception = assertThrows(
-                LlvmBackendException.class,
-                () -> LlvmTypeLowerer.lower(PrimitiveIrType.STRING, module.contextHandle())
-            );
 
-            assertEquals("Sol IR type 'string' is not supported by the current LLVM backend.", exception.getMessage());
-        }
-    }
 
     @Test
     void rejectsInvalidInputs() {

@@ -32,7 +32,7 @@ final class LlvmTypeLowerer {
             case BOOLEAN -> LLVMInt1TypeInContext(context);
             case CHAR -> LLVMInt32TypeInContext(context);
             case VOID -> LLVMVoidTypeInContext(context);
-            case STRING -> throw new LlvmBackendException("Sol IR type 'string' is not supported by the current LLVM backend.");
+            case STRING -> LlvmStringLowerer.type(context);
         };
 
         if (Pointer.isNull(lowered)) throw new LlvmBackendException("LLVM failed to create a representation for Sol IR type '%s'.".formatted(type.displayName()));

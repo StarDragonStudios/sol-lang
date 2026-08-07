@@ -4,6 +4,7 @@ import io.github.stardragonstudios.sol.ir.IrBooleanConstant;
 import io.github.stardragonstudios.sol.ir.IrCharConstant;
 import io.github.stardragonstudios.sol.ir.IrFloatConstant;
 import io.github.stardragonstudios.sol.ir.IrIntConstant;
+import io.github.stardragonstudios.sol.ir.IrStringConstant;
 import io.github.stardragonstudios.sol.ir.IrValue;
 
 import org.bytedeco.javacpp.Pointer;
@@ -21,15 +22,21 @@ final class LlvmConstantLowerer {
         Objects.requireNonNull(value, "Lowered Sol IR constant must not be null.");
         Objects.requireNonNull(context, "LLVM function lowering context must not be null.");
 
-        var lowered =
-            switch (value) {
-                case IrIntConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value(), 1);
-                case IrFloatConstant constant -> LLVMConstReal(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value());
-                case IrBooleanConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value() ? 1 : 0, 0);
-                case IrCharConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.codePoint(), 0);
+        /*
+         * Strings require module-level byte storage in addition to the
+         * aggregate value, so their lowering is handled by the dedicated
+         * string lowerer.
+         */
+        if (value instanceof IrStringConstant stringConstant) return LlvmStringLowerer.lower(stringConstant, context);
 
-                default -> throw new LlvmBackendException("Sol IR value implementation '%s' is not yet supported by the LLVM backend.".formatted(value.getClass().getSimpleName()));
-            };
+        var lowered = switch (value) {
+            case IrIntConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value(), 1);
+            case IrFloatConstant constant -> LLVMConstReal(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value());
+            case IrBooleanConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value() ? 1 : 0, 0);
+            case IrCharConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.codePoint(), 0);
+
+            default -> throw new LlvmBackendException("Sol IR value implementation '%s' is not yet supported by the LLVM backend.".formatted(value.getClass().getSimpleName()));
+        };
 
         if (Pointer.isNull(lowered)) throw new LlvmBackendException("LLVM failed to lower Sol IR value '%s'.".formatted(value.id()));
 

@@ -2,15 +2,13 @@ package io.github.stardragonstudios.sol.backend.llvm;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 class LlvmTargetMachineTest {
     @Test
     void createsInspectableHostTargetMachine() {
         try (var machine = LlvmTargetMachine.createHost()) {
+            assertEquals(LlvmTargetConfiguration.RelocationModel.POSITION_INDEPENDENT, machine.configuration().relocationModel());
             assertFalse(machine.configuration().triple().isBlank());
             assertFalse(machine.targetName().isBlank());
             assertFalse(machine.dataLayout().isBlank());
@@ -22,7 +20,6 @@ class LlvmTargetMachineTest {
     void configuresModuleTripleAndDataLayout() {
         try (
             var module = LlvmModule.create("sol.target-configuration");
-
             var machine = LlvmTargetMachine.createHost()
         ) {
             machine.configure(module);

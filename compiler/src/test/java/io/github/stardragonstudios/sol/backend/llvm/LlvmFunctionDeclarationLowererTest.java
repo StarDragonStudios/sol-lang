@@ -83,7 +83,7 @@ class LlvmFunctionDeclarationLowererTest {
     }
 
     @Test
-    void rejectsUnsupportedSignatureTypes() {
+    void declaresStringSignatureTypes() {
         var function = IrFunction.declaration(
             new IrFunctionId(0),
             "write",
@@ -91,15 +91,25 @@ class LlvmFunctionDeclarationLowererTest {
             PrimitiveIrType.VOID
         );
 
-        try (var module = LlvmModule.create("sol.unsupported")) {
+        try (var module = LlvmModule.create("sol.strings")) {
             var context = new LlvmProgramLoweringContext(module);
-            var exception = assertThrows(
-                LlvmBackendException.class,
-                () -> LlvmFunctionDeclarationLowerer.lower(function, context)
-            );
+            var lowered = LlvmFunctionDeclarationLowerer.lower(function, context);
 
-            assertEquals("Sol IR type 'string' is not supported by the current LLVM backend.", exception.getMessage());
-            assertEquals(0, context.functionCount());
+            assertSame(lowered, context.function(function.id()));
+            assertEquals(1, context.functionCount());
+            assertEquals("text", parameterName(lowered.value(), 0));
+
+            module.verify();
+
+            assertEquals(
+                """
+                ; ModuleID = 'sol.strings'
+                source_filename = "sol.strings"
+
+                declare void @sol.function0.write({ ptr, i64 })
+                """,
+                normalizeNewlines(module.text())
+            );
         }
     }
 
