@@ -162,13 +162,105 @@ The native executable compiler supports two intermediate-object policies:
 Cleanup failures are either reported directly or attached to the original
 compilation failure as suppressed exceptions.
 
+## Command-line integration
+
+The native executable pipeline is exposed through the bootstrap compiler CLI.
+
+A command equivalent to:
+
+```text
+solc program.sol
+```
+
+performs:
+
+```text
+source discovery
+→ lexical analysis
+→ parsing
+→ semantic analysis
+→ typed Sol IR lowering
+→ LLVM IR generation
+→ native object emission
+→ host linking
+→ native executable
+```
+
+The CLI supports:
+
+```text
+solc program.sol
+solc program.sol -o output
+solc program.sol --output output
+solc program.sol --output=output
+solc --keep-intermediates program.sol
+```
+
+Compilation only creates the executable. It does not execute it.
+
+The directory containing the explicitly supplied source file is currently used
+as the filesystem module root.
+
+For example:
+
+```text
+project/
+├── main.sol
+├── helper.sol
+└── utilities/
+    └── math.sol
+```
+
+the declarations:
+
+```sol
+inject helper
+inject utilities.math
+```
+
+resolve to:
+
+```text
+helper          → project/helper.sol
+utilities.math  → project/utilities/math.sol
+```
+
+Injected modules are discovered recursively. Already discovered modules are not
+loaded again, so cyclic function-level module dependencies are supported.
+
+A missing injected source file remains unresolved during discovery. Semantic
+analysis then reports the normal `SOL-S019` diagnostic at the corresponding
+injection declaration.
+
+The default intermediate-object policy is `DELETE`.
+`--keep-intermediates` selects `KEEP`.
+
+Frontend diagnostics preserve their source file, one-based line and column,
+severity, diagnostic code and message.
+
+Backend failures and native toolchain or linker failures remain distinguishable
+at the CLI boundary.
+
+The compiler process exit codes are:
+
+|  Code | Meaning                               |
+|------:|---------------------------------------|
+|   `0` | successful compilation                |
+|   `2` | invalid command-line arguments        |
+|   `3` | source or filesystem input failure    |
+|   `4` | lexical, parsing, or semantic failure |
+|   `5` | Sol IR lowering failure               |
+|   `6` | LLVM backend failure                  |
+|   `7` | native toolchain or linker failure    |
+
 ## Current limitations
 
-The initial implementation:
+The current implementation:
 
 * compiles only for the compiler host platform;
 * supports only parameterless native entry-point binding;
-* does not yet expose the complete pipeline through the Sol CLI;
+* discovers source modules relative to the entry source file rather than
+  through a package or project manifest;
 * does not provide cross-compilation guarantees;
 * does not require or link a separate general-purpose Sol runtime library.
 
