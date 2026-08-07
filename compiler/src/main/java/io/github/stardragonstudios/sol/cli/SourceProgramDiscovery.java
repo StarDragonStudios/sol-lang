@@ -6,6 +6,7 @@ import io.github.stardragonstudios.sol.parser.Parser;
 import io.github.stardragonstudios.sol.parser.ParsingException;
 import io.github.stardragonstudios.sol.semantics.ModuleName;
 import io.github.stardragonstudios.sol.semantics.SourceModule;
+import io.github.stardragonstudios.sol.std.StandardLibrary;
 import io.github.stardragonstudios.sol.syntax.CompilationUnit;
 import io.github.stardragonstudios.sol.syntax.InjectionDeclaration;
 
@@ -64,23 +65,8 @@ public final class SourceProgramDiscovery {
         }
 
         var unit = parseSource(sourceFile);
-        var module = new SourceModule(moduleName, unit);
 
-        /*
-         * Register before recursing so cyclic injections terminate.
-         */
-        modules.put(moduleName, module);
-        sourceFiles.put(moduleName, sourceFile);
-
-        for (var declaration : unit.declarations()) {
-            if (!(declaration instanceof InjectionDeclaration injection)) continue;
-
-            var injectedName = new ModuleName(injection.modulePath().segments());
-
-            if (modules.containsKey(injectedName)) continue;
-
-            discoverModule(injectedName, sourcePathFor(moduleRoot, injectedName), moduleRoot, false, modules, sourceFiles);
-        }
+        registerModule(new SourceModule(moduleName, unit), sourceFile, moduleRoot, modules, sourceFiles);
     }
 
     private static Path sourcePathFor(Path moduleRoot, ModuleName moduleName) {
@@ -102,6 +88,46 @@ public final class SourceProgramDiscovery {
         }
 
         return getCompilationUnit(sourceFile, source);
+    }
+
+    private static void registerModule(
+        SourceModule module,
+        Path sourceFile,
+        Path moduleRoot,
+        LinkedHashMap<ModuleName, SourceModule> modules,
+        LinkedHashMap<ModuleName, Path> sourceFiles
+    ) {
+        var moduleName = module.name();
+
+        if (modules.containsKey(moduleName)) return;
+
+        /*
+         * Register before recursing so cyclic injections terminate.
+         */
+        modules.put(moduleName, module);
+        sourceFiles.put(moduleName, sourceFile);
+
+        for (var declaration : module.unit().declarations()) {
+            if (!(declaration instanceof InjectionDeclaration injection)) continue;
+
+            var injectedName = new ModuleName(injection.modulePath().segments());
+
+            if (modules.containsKey(injectedName)) continue;
+
+            discoverInjectedModule(injectedName, moduleRoot, modules, sourceFiles);
+        }
+    }
+
+    private static void discoverInjectedModule(ModuleName moduleName, Path moduleRoot, LinkedHashMap<ModuleName, SourceModule> modules, LinkedHashMap<ModuleName, Path> sourceFiles) {
+        var standardModule = StandardLibrary.sourceModule(moduleName);
+
+        if (standardModule.isPresent()) {
+            registerModule(standardModule.orElseThrow(), StandardLibrary.sourcePath(moduleName), moduleRoot, modules, sourceFiles);
+
+            return;
+        }
+
+        discoverModule(moduleName, sourcePathFor(moduleRoot, moduleName), moduleRoot, false, modules, sourceFiles);
     }
 
     static CompilationUnit getCompilationUnit(Path sourceFile, String source) {

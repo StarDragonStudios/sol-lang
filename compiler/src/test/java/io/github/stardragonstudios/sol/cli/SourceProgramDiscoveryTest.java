@@ -2,6 +2,7 @@ package io.github.stardragonstudios.sol.cli;
 
 import io.github.stardragonstudios.sol.semantics.ModuleName;
 
+import io.github.stardragonstudios.sol.syntax.FunctionDeclaration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -297,19 +298,83 @@ class SourceProgramDiscoveryTest {
         );
     }
 
-    private Path write(
-        String name,
-        String source
-    ) throws IOException {
-        var path =
-            temporaryDirectory.resolve(
-                name
-            );
+    @Test
+    void discoversBundledConsoleModule()
+        throws IOException {
+
+        write(
+            "main.sol",
+            """
+            inject std.console only print_line
+
+            @init
+            fn launch() -> int
+                print_line("Hello")
+                return 0
+            end
+            """
+        );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+
+        assertEquals(
+            List.of(new ModuleName(List.of("main")), new ModuleName(List.of("std", "console"))),
+            program.modules().stream().map(module -> module.name()).toList()
+        );
+
+        assertTrue(program.sourceFileOf(new ModuleName(List.of("std", "console"))).endsWith(Path.of(".sol-stdlib", "std", "console.sol")));
+    }
+
+    @Test
+    void bundledConsoleModuleTakesPrecedenceOverProjectFile()
+        throws IOException {
+
+        write(
+            "main.sol",
+            """
+            inject std.console only print_line
+
+            @init
+            fn launch() -> int
+                print_line("Hello")
+                return 0
+            end
+            """
+        );
+
+        var standardDirectory = temporaryDirectory.resolve("std");
+
+        Files.createDirectories(standardDirectory);
 
         Files.writeString(
-            path,
-            source
+            standardDirectory.resolve("console.sol"),
+            """
+            fn fake() -> int
+                return 42
+            end
+            """
         );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+
+        var console = program.modules()
+            .stream()
+            .filter(module -> module.name().equals(new ModuleName(List.of("std", "console"))))
+            .findFirst()
+            .orElseThrow();
+
+        assertTrue(
+            console.unit()
+                .declarations()
+                .stream()
+                .anyMatch(declaration -> declaration instanceof FunctionDeclaration function && function.name().equals("print_line"))
+        );
+    }
+
+    private Path write(String name, String source) throws IOException {
+        var path = temporaryDirectory.resolve(name);
+
+        Files.writeString(path, source);
 
         return path;
     }

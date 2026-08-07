@@ -23,6 +23,8 @@ public final class LlvmBackend {
 
             var context = LlvmProgramPredeclarer.predeclare(program, module);
 
+            LlvmStandardLibraryLowerer.lower(program, context);
+
             for (var irModule : program.modules()) for (var function : irModule.functions()) LlvmFunctionBodyLowerer.lower(function, context);
 
             LlvmEntryPointLowerer.lower(program, context);

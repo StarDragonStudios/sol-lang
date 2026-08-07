@@ -1,10 +1,6 @@
 package io.github.stardragonstudios.sol.lowering;
 
-import io.github.stardragonstudios.sol.ir.IrBooleanConstant;
-import io.github.stardragonstudios.sol.ir.IrCharConstant;
-import io.github.stardragonstudios.sol.ir.IrFloatConstant;
-import io.github.stardragonstudios.sol.ir.IrIntConstant;
-import io.github.stardragonstudios.sol.ir.IrValue;
+import io.github.stardragonstudios.sol.ir.*;
 import io.github.stardragonstudios.sol.syntax.LiteralExpression;
 
 import java.util.Objects;
@@ -21,7 +17,7 @@ final class IrLiteralLowerer {
             case FLOAT -> new IrFloatConstant(context.nextValueId(), parseFloat(expression.lexeme()));
             case BOOLEAN -> new IrBooleanConstant(context.nextValueId(), parseBoolean(expression.lexeme()));
             case CHARACTER -> new IrCharConstant(context.nextValueId(), parseCharacter(expression.lexeme()));
-            case STRING -> throw new IrLoweringException("String literals are not supported by the current Sol IR lowering subset.");
+            case STRING -> new IrStringConstant(context.nextValueId(), parseString(expression.lexeme()));
         };
     }
 
@@ -78,7 +74,47 @@ final class IrLiteralLowerer {
         };
     }
 
+    private static String parseString(String lexeme) {
+        if (lexeme.length() < 2 || lexeme.charAt(0) != '"' || lexeme.charAt(lexeme.length() - 1) != '"') throw invalidString(lexeme);
+
+        var content = lexeme.substring(1, lexeme.length() - 1);
+        var value = new StringBuilder(content.length());
+
+        for (var index = 0; index < content.length(); index++) {
+            var character = content.charAt(index);
+
+            if (character != '\\') {
+                value.append(character);
+
+                continue;
+            }
+
+            if (++index >= content.length()) throw invalidString(lexeme);
+
+            var escaped = content.charAt(index);
+
+            value.append(
+                switch (escaped) {
+                    case 'n' -> '\n';
+                    case 'r' -> '\r';
+                    case 't' -> '\t';
+                    case '\\' -> '\\';
+                    case '"' -> '"';
+                    case '\'' -> '\'';
+
+                    default -> throw invalidString(lexeme);
+                }
+            );
+        }
+
+        return value.toString();
+    }
+
     private static IrLoweringException invalidCharacter(String lexeme) {
         return new IrLoweringException("Invalid character literal '%s' during IR lowering.".formatted(lexeme));
+    }
+
+    private static IrLoweringException invalidString(String lexeme) {
+        return new IrLoweringException("Invalid string literal '%s' during IR lowering.".formatted(lexeme));
     }
 }

@@ -1,11 +1,6 @@
 package io.github.stardragonstudios.sol.lowering;
 
-import io.github.stardragonstudios.sol.ir.IrBooleanConstant;
-import io.github.stardragonstudios.sol.ir.IrCharConstant;
-import io.github.stardragonstudios.sol.ir.IrFloatConstant;
-import io.github.stardragonstudios.sol.ir.IrIntConstant;
-import io.github.stardragonstudios.sol.ir.IrValue;
-import io.github.stardragonstudios.sol.ir.IrValueId;
+import io.github.stardragonstudios.sol.ir.*;
 import io.github.stardragonstudios.sol.lexer.Lexer;
 import io.github.stardragonstudios.sol.parser.Parser;
 import io.github.stardragonstudios.sol.semantics.SemanticAnalyzer;
@@ -67,14 +62,28 @@ class IrExpressionLowererTest {
             ).value()
         );
 
+        var stringValue = assertInstanceOf(
+            IrStringConstant.class,
+            lowerReturnedExpression(
+                """
+                fn value() -> string
+                    return "Sol"
+                end
+                """
+            ).value()
+        );
+
         assertEquals(42L, integer.value());
         assertEquals(12.5, floating.value());
         assertTrue(logical.value());
         assertEquals('S', character.codePoint());
+        assertEquals("Sol", stringValue.value());
+
         assertEquals(new IrValueId(0), integer.id());
         assertEquals(new IrValueId(0), floating.id());
         assertEquals(new IrValueId(0), logical.id());
         assertEquals(new IrValueId(0), character.id());
+        assertEquals(new IrValueId(0), stringValue.id());
     }
 
     @Test
@@ -144,25 +153,6 @@ class IrExpressionLowererTest {
 
         assertSame(lowered.signature().parameters().getFirst(), lowered.value());
         assertEquals(new IrValueId(1), lowered.signature().context().nextValueId());
-    }
-
-    @Test
-    void rejectsStringLiteralsExplicitly() {
-        var exception = assertThrows(
-            IrLoweringException.class,
-            () -> lowerReturnedExpression(
-                """
-                fn value() -> string
-                    return "Sol"
-                end
-                """
-            )
-        );
-
-        assertEquals(
-            "String literals are not supported by the current Sol IR lowering subset.",
-            exception.getMessage()
-        );
     }
 
     @Test

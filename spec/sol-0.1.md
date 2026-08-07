@@ -343,3 +343,57 @@ resolved.
 Sol 0.1 does not reject cyclic module references at the function-declaration
 level. Module-level executable initialization and initialization-cycle
 detection are not defined.
+
+## Standard library
+
+Sol 0.1 includes compiler-provided standard-library modules under the reserved
+`std` module namespace.
+
+Standard-library modules are bundled with the compiler and do not require
+corresponding source files in the user's project.
+
+A bundled standard-library module takes precedence over a project-local module
+with the same name. User code therefore cannot override a compiler-provided
+`std` module by placing a matching file in the filesystem module root.
+
+### Console
+
+The Sol 0.1 console module is:
+
+```sol
+std.console
+```
+
+It currently exports:
+
+```sol
+@fn print(value: string) -> void
+@fn print_line(value: string) -> void
+```
+
+`print` writes the supplied string to the process standard output without
+adding a line terminator.
+
+`print_line` writes the supplied string to the process standard output and then
+writes a newline.
+
+The conventional Sol 0.1 usage is a namespace injection with the alias `csl`:
+
+```sol
+inject namespace std.console as csl
+
+@init
+fn launch() -> int
+    csl::print("Hello ")
+    csl::print_line("Sol")
+    return 0
+end
+```
+
+In Sol 0.1, `csl` in this example is a namespace alias and is not a runtime
+value or object. Console object APIs and member access are outside the Sol 0.1
+procedural bootstrap.
+
+Console strings are written as UTF-8 data.
+
+Console input is not defined in Sol 0.1.

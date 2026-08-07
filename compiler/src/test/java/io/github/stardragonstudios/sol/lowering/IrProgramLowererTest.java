@@ -244,6 +244,31 @@ class IrProgramLowererTest {
         );
     }
 
+    @Test
+    void lowersStringLiteralsWithDecodedEscapes() {
+        var name = new ModuleName(List.of("strings"));
+
+        var semanticProgram = SemanticAnalyzer.analyzeModules(
+            List.of(
+                sourceModule(
+                    name,
+                    """
+                    fn message() -> string
+                        return "Sol ñ\\n"
+                    end
+                    """
+                )
+            )
+        );
+
+        var lowered = IrProgramLowerer.lower(semanticProgram);
+        var function = lowered.modules().getFirst().function("message").orElseThrow();
+        var terminator = assertInstanceOf(IrReturnTerminator.class, function.entryBlock().orElseThrow().terminator());
+        var string = assertInstanceOf(IrStringConstant.class, terminator.value().orElseThrow());
+
+        assertEquals("Sol ñ\n", string.value());
+    }
+
     private static SourceModule sourceModule(ModuleName name, String source) {
         return new SourceModule(name, Parser.parse(Lexer.scan(source)));
     }

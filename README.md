@@ -19,6 +19,7 @@ and its native compilation pipeline:
 * LLVM IR generation;
 * native object-file emission;
 * host-native executable linking.
+* a bundled native console standard-library module.
 
 The compiler is implemented in Java, but generated Sol executables are native
 programs and do not depend on the JVM.
@@ -145,6 +146,27 @@ resolves to:
 helper          → project/helper.sol
 utilities.math  → project/utilities/math.sol
 ```
+
+Compiler-provided standard-library modules under `std` are resolved before
+filesystem modules and do not require project-local source files.
+
+For example:
+
+```sol
+inject namespace std.console as csl
+
+@init
+fn launch() -> int
+    csl::print("Hello ")
+    csl::print_line("Sol")
+    return 0
+end
+```
+
+`std.console` currently provides UTF-8 standard-output operations through
+`print(string)` and `print_line(string)`. The `csl` name above is the
+conventional Sol 0.1 namespace alias for console access.
+
 
 Injected modules are discovered recursively.
 
