@@ -13,7 +13,7 @@ class LlvmTargetConfigurationTest {
         assertFalse(configuration.triple().isBlank());
         assertFalse(configuration.cpu().isBlank());
         assertSame(LlvmTargetConfiguration.OptimizationLevel.DEFAULT, configuration.optimizationLevel());
-        assertSame(LlvmTargetConfiguration.RelocationModel.DEFAULT, configuration.relocationModel());
+        assertSame(LlvmTargetConfiguration.RelocationModel.POSITION_INDEPENDENT, configuration.relocationModel());
         assertSame(LlvmTargetConfiguration.CodeModel.DEFAULT, configuration.codeModel());
     }
 

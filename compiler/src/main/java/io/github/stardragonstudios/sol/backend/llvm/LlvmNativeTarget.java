@@ -46,7 +46,7 @@ final class LlvmNativeTarget {
             copyOwnedString(LLVMGetHostCPUName(), "host CPU name"),
             copyOwnedString(LLVMGetHostCPUFeatures(), "host CPU feature string"),
             LlvmTargetConfiguration.OptimizationLevel.DEFAULT,
-            LlvmTargetConfiguration.RelocationModel.DEFAULT,
+            LlvmTargetConfiguration.RelocationModel.POSITION_INDEPENDENT,
             LlvmTargetConfiguration.CodeModel.DEFAULT
         );
     }
