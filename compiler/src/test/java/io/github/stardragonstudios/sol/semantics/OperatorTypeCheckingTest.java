@@ -18,10 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OperatorTypeCheckingTest {
-    private record TypedExpression(
-        Expression expression,
-        SemanticAnalysisResult result
-    ) {}
+    private record TypedExpression(Expression expression, SemanticAnalysisResult result) {}
 
     @Test
     void acceptsValidUnaryOperators() {
@@ -56,21 +53,11 @@ class OperatorTypeCheckingTest {
     @Test
     void acceptsArithmeticOperators() {
         for (var operator : List.of("*", "/", "+", "-")) {
-            assertExpressionType(
-                "i %s j".formatted(operator),
-                BuiltInTypes.INT
-            );
-
-            assertExpressionType(
-                "f %s g".formatted(operator),
-                BuiltInTypes.FLOAT
-            );
+            assertExpressionType("i %s j".formatted(operator), BuiltInTypes.INT);
+            assertExpressionType("f %s g".formatted(operator), BuiltInTypes.FLOAT);
         }
 
-        assertExpressionType(
-            "i % j",
-            BuiltInTypes.INT
-        );
+        assertExpressionType("i % j", BuiltInTypes.INT);
     }
 
     @Test
@@ -92,6 +79,18 @@ class OperatorTypeCheckingTest {
             "SOL-S005",
             "Binary operator '+' is not defined for types 'string' and 'string'."
         );
+
+        assertInvalidExpression(
+            "s == \"sol\"",
+            "SOL-S005",
+            "Binary operator '==' is not defined for types 'string' and 'string'."
+        );
+
+        assertInvalidExpression(
+            "s != \"sol\"",
+            "SOL-S005",
+            "Binary operator '!=' is not defined for types 'string' and 'string'."
+        );
     }
 
     @Test
@@ -105,7 +104,6 @@ class OperatorTypeCheckingTest {
         assertExpressionType("f != g", BuiltInTypes.BOOLEAN);
         assertExpressionType("b == true", BuiltInTypes.BOOLEAN);
         assertExpressionType("c == 'x'", BuiltInTypes.BOOLEAN);
-        assertExpressionType("s != \"sol\"", BuiltInTypes.BOOLEAN);
 
         assertExpressionType("b && true", BuiltInTypes.BOOLEAN);
         assertExpressionType("b || false", BuiltInTypes.BOOLEAN);
@@ -134,81 +132,26 @@ class OperatorTypeCheckingTest {
 
     @Test
     void typesNestedExpressions() {
-        var typed = analyzeInitializer(
-            "!(i < j && b)",
-            "boolean"
-        );
-
-        var unary = assertInstanceOf(
-            UnaryExpression.class,
-            typed.expression()
-        );
-
-        var parenthesized = assertInstanceOf(
-            ParenthesizedExpression.class,
-            unary.operand()
-        );
-
-        var logical = assertInstanceOf(
-            BinaryExpression.class,
-            parenthesized.expression()
-        );
-
-        var relational = assertInstanceOf(
-            BinaryExpression.class,
-            logical.left()
-        );
-
+        var typed = analyzeInitializer("!(i < j && b)", "boolean");
+        var unary = assertInstanceOf(UnaryExpression.class, typed.expression());
+        var parenthesized = assertInstanceOf(ParenthesizedExpression.class, unary.operand());
+        var logical = assertInstanceOf(BinaryExpression.class, parenthesized.expression());
+        var relational = assertInstanceOf(BinaryExpression.class, logical.left());
         var model = typed.result().model();
 
-        assertSame(
-            BuiltInTypes.BOOLEAN,
-            model.typeOf(relational).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.BOOLEAN,
-            model.typeOf(logical).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.BOOLEAN,
-            model.typeOf(parenthesized).orElseThrow()
-        );
-
-        assertSame(
-            BuiltInTypes.BOOLEAN,
-            model.typeOf(unary).orElseThrow()
-        );
-
-        assertTrue(
-            typed.result().diagnostics().isEmpty()
-        );
+        assertSame(BuiltInTypes.BOOLEAN, model.typeOf(relational).orElseThrow());
+        assertSame(BuiltInTypes.BOOLEAN, model.typeOf(logical).orElseThrow());
+        assertSame(BuiltInTypes.BOOLEAN, model.typeOf(parenthesized).orElseThrow());
+        assertSame(BuiltInTypes.BOOLEAN, model.typeOf(unary).orElseThrow());
+        assertTrue(typed.result().diagnostics().isEmpty());
     }
 
     @Test
     void suppressesCascadingOperatorDiagnostics() {
-        var typed = analyzeInitializer(
-            "missing + 1",
-            "int"
-        );
+        var typed = analyzeInitializer("missing + 1", "int");
 
-        assertSame(
-            BuiltInTypes.ERROR,
-            typed.result()
-                .model()
-                .typeOf(typed.expression())
-                .orElseThrow()
-        );
-
-        assertEquals(
-            List.of("SOL-S002"),
-            typed.result()
-                .diagnostics()
-                .stream()
-                .map(Diagnostic::code)
-                .toList()
-        );
+        assertSame(BuiltInTypes.ERROR, typed.result().model().typeOf(typed.expression()).orElseThrow());
+        assertEquals(List.of("SOL-S002"), typed.result().diagnostics().stream().map(Diagnostic::code).toList());
     }
 
     @Test
@@ -239,21 +182,8 @@ class OperatorTypeCheckingTest {
 
         var result = SemanticAnalyzer.analyze(unit);
 
-        assertEquals(
-            List.of(
-                "SOL-S006",
-                "SOL-S002"
-            ),
-            result.diagnostics()
-                .stream()
-                .map(Diagnostic::code)
-                .toList()
-        );
-
-        assertEquals(
-            "Condition must have type 'boolean', but found 'int'.",
-            result.diagnostics().get(0).message()
-        );
+        assertEquals(List.of("SOL-S006", "SOL-S002"), result.diagnostics().stream().map(Diagnostic::code).toList());
+        assertEquals("Condition must have type 'boolean', but found 'int'.", result.diagnostics().getFirst().message());
     }
 
     @Test
@@ -273,91 +203,32 @@ class OperatorTypeCheckingTest {
             """
         ));
 
-        var function = assertInstanceOf(
-            FunctionDeclaration.class,
-            unit.declarations().getFirst()
-        );
-
-        var statements =
-            function.body().orElseThrow().statements();
-
-        var firstDeclaration = assertInstanceOf(
-            VariableDeclarationStatement.class,
-            statements.get(0)
-        );
-
-        var secondDeclaration = assertInstanceOf(
-            VariableDeclarationStatement.class,
-            statements.get(1)
-        );
-
-        var conditional = assertInstanceOf(
-            ConditionalStatement.class,
-            statements.get(2)
-        );
-
+        var function = assertInstanceOf(FunctionDeclaration.class, unit.declarations().getFirst());
+        var statements = function.body().orElseThrow().statements();
+        var firstDeclaration = assertInstanceOf(VariableDeclarationStatement.class, statements.get(0));
+        var secondDeclaration = assertInstanceOf(VariableDeclarationStatement.class, statements.get(1));
+        var conditional = assertInstanceOf(ConditionalStatement.class, statements.get(2));
         var result = SemanticAnalyzer.analyze(unit);
         var diagnostics = result.diagnostics();
 
-        assertEquals(
-            List.of(
-                "SOL-S004",
-                "SOL-S005",
-                "SOL-S006"
-            ),
-            diagnostics.stream()
-                .map(Diagnostic::code)
-                .toList()
-        );
-
-        assertTrue(
-            diagnostics.stream().allMatch(
-                diagnostic ->
-                    diagnostic.severity()
-                        == DiagnosticSeverity.ERROR
-            )
-        );
-
-        assertEquals(
-            firstDeclaration.initializer().span(),
-            diagnostics.get(0).span()
-        );
-
-        assertEquals(
-            secondDeclaration.initializer().span(),
-            diagnostics.get(1).span()
-        );
-
-        assertEquals(
-            conditional.condition().span(),
-            diagnostics.get(2).span()
-        );
+        assertEquals(List.of("SOL-S004", "SOL-S005", "SOL-S006"), diagnostics.stream().map(Diagnostic::code).toList());
+        assertTrue(diagnostics.stream().allMatch(diagnostic -> diagnostic.severity() == DiagnosticSeverity.ERROR));
+        assertEquals(firstDeclaration.initializer().span(), diagnostics.get(0).span());
+        assertEquals(secondDeclaration.initializer().span(), diagnostics.get(1).span());
+        assertEquals(conditional.condition().span(), diagnostics.get(2).span());
     }
 
     private static void assertExpressionType(String sourceExpression, TypeSymbol expectedType) {
         var typed = analyzeInitializer(sourceExpression, expectedType.name());
 
-        assertSame(
-            expectedType,
-            typed.result()
-                .model()
-                .typeOf(typed.expression())
-                .orElseThrow()
-        );
-
+        assertSame(expectedType, typed.result().model().typeOf(typed.expression()).orElseThrow());
         assertTrue(typed.result().diagnostics().isEmpty());
     }
 
     private static void assertInvalidExpression(String sourceExpression, String expectedCode, String expectedMessage) {
         var typed = analyzeInitializer(sourceExpression, "int");
 
-        assertSame(
-            BuiltInTypes.ERROR,
-            typed.result()
-                .model()
-                .typeOf(typed.expression())
-                .orElseThrow()
-        );
+        assertSame(BuiltInTypes.ERROR, typed.result().model().typeOf(typed.expression()).orElseThrow());
 
         var diagnostic = typed.result().diagnostics().getFirst();
 
@@ -377,16 +248,8 @@ class OperatorTypeCheckingTest {
 
         var unit = Parser.parse(Lexer.scan(source));
         var result = SemanticAnalyzer.analyze(unit);
-
         var function = assertInstanceOf(FunctionDeclaration.class, unit.declarations().getFirst());
-
-        var declaration = assertInstanceOf(
-            VariableDeclarationStatement.class,
-            function.body()
-                .orElseThrow()
-                .statements()
-                .getFirst()
-        );
+        var declaration = assertInstanceOf(VariableDeclarationStatement.class, function.body().orElseThrow().statements().getFirst());
 
         return new TypedExpression(declaration.initializer(), result);
     }
