@@ -109,14 +109,45 @@ solc --keep-intermediates program.sol
 
 The intermediate object is deleted by default.
 
-During bootstrap development, the Gradle application can be invoked directly:
+Compilation does not execute the generated program automatically.
+
+## Command-line execution
+
+Compile and immediately run a Sol program with:
+
+```text
+sol run program.sol
+```
+
+The `run` command performs the normal native compilation pipeline, writes the
+generated executable and intermediate native artifacts to temporary storage,
+executes the resulting program, and removes the temporary files afterwards.
+
+The executed program inherits standard input, standard output and standard
+error from the `sol` process, allowing normal interactive terminal programs.
+
+The program also inherits the current working directory of the `sol` process.
+For example, relative paths passed to `std.file` are resolved from the directory
+where `sol run` was invoked rather than from the temporary directory containing
+the generated executable.
+
+A successfully launched program controls the final process exit code. For
+example, if the Sol entry point returns `23`, `sol run` also exits with `23`.
+
+The Sol 0.1 bootstrap `run` command currently accepts exactly one source file.
+Program command-line arguments are not yet supported. Compiler output options
+such as `-o`, `--output` and `--keep-intermediates` are intentionally not
+available for `run`, because its native artifacts are temporary.
+
+During bootstrap development, the command can be invoked through Gradle with:
 
 ```bash
 cd compiler
-./gradlew run --args="/path/to/program.sol"
+./gradlew run --args="run /path/to/program.sol"
 ```
 
-Compilation does not execute the generated program automatically.
+`solc` remains the direct compile-only command and continues to produce a
+persistent native executable.
 
 ### Source discovery
 
@@ -202,22 +233,27 @@ site.
 This filesystem convention is part of the current bootstrap compiler. A future
 project or package model may define module roots differently.
 
-### Compiler exit codes
+### CLI exit codes
 
-The compiler uses distinct process exit codes for compilation stages:
+Compilation and command infrastructure failures use distinct exit codes:
 
-|  Code | Meaning                               |
-|------:|---------------------------------------|
-|   `0` | successful compilation                |
-|   `2` | invalid command-line arguments        |
-|   `3` | source or filesystem input failure    |
-|   `4` | lexical, parsing, or semantic failure |
-|   `5` | Sol IR lowering failure               |
-|   `6` | LLVM backend failure                  |
-|   `7` | native toolchain or linker failure    |
+| Code | Meaning                                      |
+| ---: | -------------------------------------------- |
+|  `0` | successful compile-only command              |
+|  `2` | invalid command-line arguments               |
+|  `3` | source or filesystem input failure           |
+|  `4` | lexical, parsing, or semantic failure        |
+|  `5` | Sol IR lowering failure                      |
+|  `6` | LLVM backend failure                         |
+|  `7` | native toolchain or linker failure           |
+|  `8` | failed to start or manage a compiled program |
 
-Frontend diagnostics include the source path, one-based line and column,
-severity, diagnostic code and message.
+For `sol run`, these codes describe failures that happen before the compiled
+program successfully takes control. Once the program has been launched
+successfully, its own process exit code is returned unchanged.
+
+Consequently, a successful `sol run` may also return values such as `2`, `4` or
+`8` when those values were deliberately returned by the Sol program itself.
 
 When the corresponding source file is available, the compiler also renders the
 affected source lines and marks the diagnostic span with carets:
