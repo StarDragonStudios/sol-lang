@@ -219,11 +219,25 @@ The compiler uses distinct process exit codes for compilation stages:
 Frontend diagnostics include the source path, one-based line and column,
 severity, diagnostic code and message.
 
-For example:
+When the corresponding source file is available, the compiler also renders the
+affected source lines and marks the diagnostic span with carets:
 
 ```text
-program.sol:3:8: error [SOL-S002]: Unresolved name 'value'.
+program.sol:3:12: error [SOL-S002]: Unresolved name 'missing'.
+  |
+3 |     return missing
+  |            ^^^^^^^
 ```
+
+Multiline spans render every affected source line with its corresponding marked
+range. Empty spans render at least one caret at the diagnostic position.
+
+Source rendering is best-effort. If the source file cannot be read or the
+diagnostic span no longer fits the available source text, the compiler still
+emits the diagnostic header without source context.
+
+Diagnostic rendering does not currently use ANSI colors, keeping compiler
+output deterministic for terminals, CI systems and other tools.
 
 ## Native executables
 
