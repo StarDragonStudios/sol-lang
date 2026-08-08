@@ -50,6 +50,12 @@ public final class Parser {
         }
     }
 
+    private void skipDelimitedNewlines() {
+        while (match(TokenKind.NEWLINE)) {
+            // Newlines are insignificant inside supported delimited lists.
+        }
+    }
+
     private boolean match(TokenKind kind) {
         if (!check(kind)) return false;
 
@@ -290,13 +296,20 @@ public final class Parser {
     private List<Parameter> parseParameterList() {
         var parameters = new ArrayList<Parameter>();
 
+        skipDelimitedNewlines();
+
         if (check(TokenKind.RIGHT_PAREN)) return parameters;
 
         while (true) {
             parameters.add(parseParameter());
 
+            skipDelimitedNewlines();
+
             if (!match(TokenKind.COMMA)) break;
-            if (check(TokenKind.RIGHT_PAREN)) throw expectedToken("a parameter after ','", peek());
+
+            skipDelimitedNewlines();
+
+            if (check(TokenKind.RIGHT_PAREN)) break;
         }
 
         return parameters;
@@ -583,14 +596,20 @@ public final class Parser {
     private List<Expression> parseCallArgumentList() {
         var arguments = new ArrayList<Expression>();
 
+        skipDelimitedNewlines();
+
         if (check(TokenKind.RIGHT_PAREN)) return arguments;
 
         while (true) {
             arguments.add(parseExpression());
 
+            skipDelimitedNewlines();
+
             if (!match(TokenKind.COMMA)) break;
 
-            if (check(TokenKind.RIGHT_PAREN)) throw expectedToken("an argument after ','", peek());
+            skipDelimitedNewlines();
+
+            if (check(TokenKind.RIGHT_PAREN)) break;
         }
 
         return arguments;

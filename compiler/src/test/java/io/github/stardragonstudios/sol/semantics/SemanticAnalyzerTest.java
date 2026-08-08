@@ -411,4 +411,37 @@ class SemanticAnalyzerTest {
         assertEquals("SOL-S005", diagnostic.code());
         assertEquals("Binary operator '!=' is not defined for types 'string' and 'string'.", diagnostic.message());
     }
+
+    @Test
+    void analyzesMultilineFunctionParametersAndCallArguments() {
+        var analysis = analyze(
+            """
+            fn add(
+                left: int,
+                right: int,
+            ) -> int
+                return left + right
+            end
+
+            fn calculate() -> int
+                return add(
+                    1,
+                    2,
+                )
+            end
+            """
+        );
+
+        var add = assertInstanceOf(FunctionDeclaration.class, analysis.unit().declarations().get(0));
+        var calculate = assertInstanceOf(FunctionDeclaration.class, analysis.unit().declarations().get(1));
+        var returnStatement = assertInstanceOf(ReturnStatement.class, calculate.body().orElseThrow().statements().getFirst());
+        var call = assertInstanceOf(CallExpression.class, returnStatement.expression().orElseThrow());
+        var callee = assertInstanceOf(NameExpression.class, call.callee());
+        var model = analysis.result().model();
+
+        assertEquals(2, add.parameters().size());
+        assertEquals(2, call.arguments().size());
+        assertSame(model.symbolOf(add).orElseThrow(), model.symbolOf(callee).orElseThrow());
+        assertTrue(analysis.result().diagnostics().isEmpty());
+    }
 }

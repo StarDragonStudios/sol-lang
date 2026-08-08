@@ -21,83 +21,43 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ParserTest {
     @Test
     void parsesEmptySourceFile() {
-        var unit = Parser.parse(
-            Lexer.scan("")
-        );
+        var unit = Parser.parse(Lexer.scan(""));
 
         assertTrue(unit.declarations().isEmpty());
-
-        assertEquals(
-            new SourceSpan(
-                new SourcePosition(0, 1, 1),
-                new SourcePosition(0, 1, 1)
-            ),
-            unit.span()
-        );
+        assertEquals(new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(0, 1, 1)), unit.span());
     }
 
     @Test
     void parsesSourceFileContainingOnlyNewlines() {
-        var unit = Parser.parse(
-            Lexer.scan("\n\r\n")
-        );
+        var unit = Parser.parse(Lexer.scan("\n\r\n"));
 
         assertTrue(unit.declarations().isEmpty());
-
-        assertEquals(
-            new SourceSpan(
-                new SourcePosition(0, 1, 1),
-                new SourcePosition(3, 3, 1)
-            ),
-            unit.span()
-        );
+        assertEquals(new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(3, 3, 1)), unit.span());
     }
 
     @Test
     void reportsUnexpectedTopLevelToken() {
         var exception = assertThrows(
             ParsingException.class,
-            () -> Parser.parse(
-                Lexer.scan("let")
-            )
+            () -> Parser.parse(Lexer.scan("let"))
         );
 
         var diagnostic = exception.diagnostic();
 
         assertEquals("SOL-P001", diagnostic.code());
-        assertEquals(
-            DiagnosticSeverity.ERROR,
-            diagnostic.severity()
-        );
-        assertEquals(
-            "Unexpected token 'let' at top level.",
-            diagnostic.message()
-        );
-        assertEquals(
-            new SourceSpan(
-                new SourcePosition(0, 1, 1),
-                new SourcePosition(3, 1, 4)
-            ),
-            diagnostic.span()
-        );
+        assertEquals(DiagnosticSeverity.ERROR, diagnostic.severity());
+        assertEquals("Unexpected token 'let' at top level.", diagnostic.message());
+        assertEquals(new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(3, 1, 4)), diagnostic.span());
     }
 
     @Test
     void reportsTokenAfterLeadingNewlines() {
         var exception = assertThrows(
             ParsingException.class,
-            () -> Parser.parse(
-                Lexer.scan("\n\nvalue")
-            )
+            () -> Parser.parse(Lexer.scan("\n\nvalue"))
         );
 
-        assertEquals(
-            new SourceSpan(
-                new SourcePosition(2, 3, 1),
-                new SourcePosition(7, 3, 6)
-            ),
-            exception.diagnostic().span()
-        );
+        assertEquals(new SourceSpan(new SourcePosition(2, 3, 1), new SourcePosition(7, 3, 6)), exception.diagnostic().span());
     }
 
     @Test
@@ -118,47 +78,25 @@ class ParserTest {
 
     @Test
     void rejectsTokenStreamWithoutEof() {
-        var span = new SourceSpan(
-            new SourcePosition(0, 1, 1),
-            new SourcePosition(5, 1, 6)
-        );
+        var span = new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(5, 1, 6));
 
         assertThrows(
             IllegalArgumentException.class,
-            () -> Parser.parse(
-                List.of(
-                    new Token(
-                        TokenKind.IDENTIFIER,
-                        "value",
-                        span
-                    )
-                )
-            )
+            () -> Parser.parse(List.of(new Token(TokenKind.IDENTIFIER, "value", span)))
         );
     }
 
     @Test
     void rejectsEofBeforeEndOfTokenStream() {
         var position = new SourcePosition(0, 1, 1);
-        var emptySpan = new SourceSpan(
-            position,
-            position
-        );
+        var emptySpan = new SourceSpan(position, position);
 
         assertThrows(
             IllegalArgumentException.class,
             () -> Parser.parse(
                 List.of(
-                    new Token(
-                        TokenKind.EOF,
-                        "",
-                        emptySpan
-                    ),
-                    new Token(
-                        TokenKind.EOF,
-                        "",
-                        emptySpan
-                    )
+                    new Token(TokenKind.EOF, "", emptySpan),
+                    new Token(TokenKind.EOF, "", emptySpan)
                 )
             )
         );
@@ -501,25 +439,22 @@ class ParserTest {
     }
 
     @Test
-    void rejectsTrailingParameterComma() {
-        var exception = assertThrows(
-            ParsingException.class,
-            () -> Parser.parse(
-                Lexer.scan(
-                    "fn add(left: int,) -> int\nend"
-                )
+    void acceptsTrailingParameterComma() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                "fn add(left: int,) -> int\nend"
             )
         );
 
-        assertEquals(
-            "SOL-P002",
-            exception.diagnostic().code()
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
         );
 
+        assertEquals(1, function.parameters().size());
         assertEquals(
-            "Expected a parameter after ',', "
-                + "but found ')'.",
-            exception.diagnostic().message()
+            "left",
+            function.parameters().getFirst().name()
         );
     }
 
@@ -1733,26 +1668,36 @@ class ParserTest {
     }
 
     @Test
-    void rejectsTrailingCallArgumentComma() {
-        var exception = assertThrows(
-            ParsingException.class,
-            () -> Parser.parse(
-                Lexer.scan(
-                    "fn value() -> int\nreturn add(1,)\nend"
-                )
+    void acceptsTrailingCallArgumentComma() {
+        var unit = Parser.parse(
+            Lexer.scan(
+                """
+                fn value() -> int
+                    return add(1,)
+                end
+                """
             )
         );
 
-        assertEquals(
-            "SOL-P002",
-            exception.diagnostic().code()
+        var function = assertInstanceOf(
+            FunctionDeclaration.class,
+            unit.declarations().getFirst()
         );
 
-        assertEquals(
-            "Expected an argument after ',', "
-                + "but found ')'.",
-            exception.diagnostic().message()
+        var returnStatement = assertInstanceOf(
+            ReturnStatement.class,
+            function.body()
+                .orElseThrow()
+                .statements()
+                .getFirst()
         );
+
+        var call = assertInstanceOf(
+            CallExpression.class,
+            returnStatement.expression().orElseThrow()
+        );
+
+        assertEquals(1, call.arguments().size());
     }
 
     @Test
@@ -1795,8 +1740,7 @@ class ParserTest {
         );
 
         assertEquals(
-            "Expected ')' after the function call arguments, "
-                + "but found newline.",
+            "Expected ')' after the function call arguments, but found 'end'.",
             exception.diagnostic().message()
         );
     }

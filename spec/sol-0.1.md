@@ -67,6 +67,16 @@ necessary and are otherwise ignored.
 Newlines are syntactically significant. They separate declarations and
 statements and terminate several declaration forms.
 
+Function parameter lists and call argument lists are an explicit exception.
+Within those delimited lists, newlines may appear between the opening
+parenthesis, list elements, commas and the closing parenthesis.
+
+Blank lines are therefore permitted inside parameter and argument lists.
+
+This exception does not provide general implicit line continuation. In
+particular, a newline does not by itself allow an expression to continue across
+source lines.
+
 Both LF and CRLF source line endings are accepted.
 
 Blank lines are permitted between top-level declarations and between
@@ -272,7 +282,46 @@ add(1, 2)
 io::print_line("Hello")
 ```
 
-Trailing commas in argument lists are not supported.
+Parameters are separated by commas:
+
+```sol
+fn add(left: int, right: int) -> int
+```
+
+Parameter lists may span multiple source lines:
+
+```sol
+fn add(
+    left: int,
+    right: int
+) -> int
+    return left + right
+end
+```
+
+Newlines may appear immediately after `(`, after a parameter, after `,`, and
+before `)`.
+
+A single trailing comma is permitted in both single-line and multiline
+parameter lists:
+
+```sol
+fn add(left: int, right: int,) -> int
+    return left + right
+end
+```
+
+```sol
+fn add(
+    left: int,
+    right: int,
+) -> int
+    return left + right
+end
+```
+
+A trailing comma does not introduce an additional parameter. Multiple trailing
+commas and lists containing only a comma are invalid.
 
 ### Operator precedence
 
