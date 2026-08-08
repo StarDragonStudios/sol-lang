@@ -18,11 +18,7 @@ final class OperatorTypeChecker {
 
     private OperatorTypeChecker() {}
 
-    static TypeSymbol checkUnary(
-        UnaryExpression expression,
-        TypeSymbol operandType,
-        List<Diagnostic> diagnostics
-    ) {
+    static TypeSymbol checkUnary(UnaryExpression expression, TypeSymbol operandType, List<Diagnostic> diagnostics) {
         Objects.requireNonNull(expression, "Unary expression must not be null.");
         Objects.requireNonNull(operandType, "Unary operand type must not be null.");
         Objects.requireNonNull(diagnostics, "Diagnostic list must not be null.");
@@ -30,136 +26,71 @@ final class OperatorTypeChecker {
         if (operandType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
 
         return switch (expression.operator()) {
-            case LOGICAL_NOT ->
-                operandType == BuiltInTypes.BOOLEAN
-                    ? BuiltInTypes.BOOLEAN
-                    : reportInvalidUnary(expression, operandType, diagnostics);
-
-            case NEGATE, POSITIVE ->
-                operandType.isNumeric()
-                    ? operandType
-                    : reportInvalidUnary(expression, operandType, diagnostics);
+            case LOGICAL_NOT -> operandType == BuiltInTypes.BOOLEAN ? BuiltInTypes.BOOLEAN : reportInvalidUnary(expression, operandType, diagnostics);
+            case NEGATE, POSITIVE -> operandType.isNumeric() ? operandType : reportInvalidUnary(expression, operandType, diagnostics);
         };
     }
 
-    static TypeSymbol checkBinary(
-        BinaryExpression expression,
-        TypeSymbol leftType,
-        TypeSymbol rightType,
-        List<Diagnostic> diagnostics
-    ) {
+    static TypeSymbol checkBinary(BinaryExpression expression, TypeSymbol leftType, TypeSymbol rightType, List<Diagnostic> diagnostics) {
         Objects.requireNonNull(expression, "Binary expression must not be null.");
         Objects.requireNonNull(leftType, "Left operand type must not be null.");
         Objects.requireNonNull(rightType, "Right operand type must not be null.");
         Objects.requireNonNull(diagnostics, "Diagnostic list must not be null.");
 
-        if (
-            leftType == BuiltInTypes.ERROR
-                || rightType == BuiltInTypes.ERROR
-        ) {
-            return BuiltInTypes.ERROR;
-        }
+        if (leftType == BuiltInTypes.ERROR || rightType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
 
         return switch (expression.operator()) {
-            case MULTIPLY, DIVIDE, ADD, SUBTRACT ->
-                matchingNumericTypes(leftType, rightType)
-                    ? leftType
-                    : reportInvalidBinary(
-                    expression,
-                    leftType,
-                    rightType,
-                    diagnostics
-                );
+            case MULTIPLY, DIVIDE, ADD, SUBTRACT -> matchingNumericTypes(leftType, rightType)
+                ? leftType
+                : reportInvalidBinary(expression, leftType, rightType, diagnostics);
 
-            case REMAINDER ->
-                leftType == BuiltInTypes.INT
-                    && rightType == BuiltInTypes.INT
-                    ? BuiltInTypes.INT
-                    : reportInvalidBinary(
-                    expression,
-                    leftType,
-                    rightType,
-                    diagnostics
-                );
+            case REMAINDER -> leftType == BuiltInTypes.INT && rightType == BuiltInTypes.INT
+                ? BuiltInTypes.INT
+                : reportInvalidBinary(expression, leftType, rightType, diagnostics);
 
-            case LESS_THAN,
-                 LESS_THAN_OR_EQUAL,
-                 GREATER_THAN,
-                 GREATER_THAN_OR_EQUAL ->
-                matchingNumericTypes(leftType, rightType)
-                    ? BuiltInTypes.BOOLEAN
-                    : reportInvalidBinary(
-                    expression,
-                    leftType,
-                    rightType,
-                    diagnostics
-                );
+            case LESS_THAN, LESS_THAN_OR_EQUAL, GREATER_THAN, GREATER_THAN_OR_EQUAL -> matchingNumericTypes(leftType, rightType)
+                ? BuiltInTypes.BOOLEAN
+                : reportInvalidBinary(expression, leftType, rightType, diagnostics);
 
-            case EQUAL, NOT_EQUAL ->
-                leftType == rightType && leftType.isValue()
-                    ? BuiltInTypes.BOOLEAN
-                    : reportInvalidBinary(
-                    expression,
-                    leftType,
-                    rightType,
-                    diagnostics
-                );
+            case EQUAL, NOT_EQUAL -> matchingEqualityTypes(leftType, rightType)
+                ? BuiltInTypes.BOOLEAN
+                : reportInvalidBinary(expression, leftType, rightType, diagnostics);
 
-            case LOGICAL_AND, LOGICAL_OR ->
-                leftType == BuiltInTypes.BOOLEAN
-                    && rightType == BuiltInTypes.BOOLEAN
-                    ? BuiltInTypes.BOOLEAN
-                    : reportInvalidBinary(
-                    expression,
-                    leftType,
-                    rightType,
-                    diagnostics
-                );
+            case LOGICAL_AND, LOGICAL_OR -> leftType == BuiltInTypes.BOOLEAN && rightType == BuiltInTypes.BOOLEAN
+                ? BuiltInTypes.BOOLEAN
+                : reportInvalidBinary(expression, leftType, rightType, diagnostics);
         };
     }
 
-    private static boolean matchingNumericTypes(
-        TypeSymbol leftType,
-        TypeSymbol rightType
-    ) {
-        return leftType == rightType
-            && leftType.isNumeric();
+    private static boolean matchingNumericTypes(TypeSymbol leftType, TypeSymbol rightType) {
+        return leftType == rightType && leftType.isNumeric();
     }
 
-    private static TypeSymbol reportInvalidUnary(
-        UnaryExpression expression,
-        TypeSymbol operandType,
-        List<Diagnostic> diagnostics
-    ) {
+    private static boolean matchingEqualityTypes(TypeSymbol leftType, TypeSymbol rightType) {
+        if (leftType != rightType) return false;
+
+        return leftType == BuiltInTypes.INT
+            || leftType == BuiltInTypes.FLOAT
+            || leftType == BuiltInTypes.BOOLEAN
+            || leftType == BuiltInTypes.CHAR;
+    }
+
+    private static TypeSymbol reportInvalidUnary(UnaryExpression expression, TypeSymbol operandType, List<Diagnostic> diagnostics) {
         diagnostics.add(new Diagnostic(
             INVALID_UNARY_OPERAND_CODE,
             DiagnosticSeverity.ERROR,
-            "Unary operator '%s' is not defined for type '%s'."
-                .formatted(
-                    spelling(expression.operator()),
-                    operandType.name()
-                ),
+            "Unary operator '%s' is not defined for type '%s'.".formatted(spelling(expression.operator()), operandType.name()),
             expression.span()
         ));
 
         return BuiltInTypes.ERROR;
     }
 
-    private static TypeSymbol reportInvalidBinary(
-        BinaryExpression expression,
-        TypeSymbol leftType,
-        TypeSymbol rightType,
-        List<Diagnostic> diagnostics
-    ) {
+    private static TypeSymbol reportInvalidBinary(BinaryExpression expression, TypeSymbol leftType, TypeSymbol rightType, List<Diagnostic> diagnostics) {
         diagnostics.add(new Diagnostic(
             INVALID_BINARY_OPERANDS_CODE,
             DiagnosticSeverity.ERROR,
-            "Binary operator '%s' is not defined for types '%s' and '%s'."
-                .formatted(
-                    spelling(expression.operator()),
-                    leftType.name(),
-                    rightType.name()
-                ),
+            "Binary operator '%s' is not defined for types '%s' and '%s'.".formatted(spelling(expression.operator()), leftType.name(), rightType.name()),
             expression.span()
         ));
 

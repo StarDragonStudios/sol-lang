@@ -198,6 +198,44 @@ solc --keep-intermediates program.sol
 
 Compilation only creates the executable. It does not execute it.
 
+The public `sol` command also supports immediate native compilation and
+execution:
+
+```text
+sol run program.sol
+```
+
+`sol run` performs the normal source-discovery, frontend, Sol IR, LLVM, native
+object and linking pipeline, but places the generated native artifacts in
+temporary storage.
+
+After successful compilation, the resulting executable is launched directly
+without a shell.
+
+The child process inherits:
+
+* standard input;
+* standard output;
+* standard error;
+* the current working directory of the `sol` process.
+
+This allows interactive native programs and preserves the meaning of relative
+filesystem paths.
+
+Temporary native artifacts are removed after execution.
+
+If compilation fails, the program is not launched.
+
+The Sol 0.1 `run` command accepts exactly one source file. Program command-line
+arguments are not yet supported.
+
+Persistent-output options such as `-o`, `--output` and
+`--keep-intermediates` are not accepted by `sol run`, because its generated
+artifacts are temporary.
+
+Once a compiled program has been launched successfully, its process exit code
+is returned unchanged by `sol run`.
+
 The directory containing the explicitly supplied source file is currently used
 as the filesystem module root.
 
@@ -243,22 +281,34 @@ at the CLI boundary.
 
 The compiler process exit codes are:
 
-|  Code | Meaning                               |
-|------:|---------------------------------------|
-|   `0` | successful compilation                |
-|   `2` | invalid command-line arguments        |
-|   `3` | source or filesystem input failure    |
-|   `4` | lexical, parsing, or semantic failure |
-|   `5` | Sol IR lowering failure               |
-|   `6` | LLVM backend failure                  |
-|   `7` | native toolchain or linker failure    |
+The compiler and command infrastructure use the following exit codes:
+
+| Code | Meaning                                      |
+| ---: | -------------------------------------------- |
+|  `0` | successful compile-only command              |
+|  `2` | invalid command-line arguments               |
+|  `3` | source or filesystem input failure           |
+|  `4` | lexical, parsing, or semantic failure        |
+|  `5` | Sol IR lowering failure                      |
+|  `6` | LLVM backend failure                         |
+|  `7` | native toolchain or linker failure           |
+|  `8` | failed to start or manage a compiled program |
+
+For `sol run`, these codes describe command failures that occur before the
+compiled program successfully takes control.
+
+After a successful launch, the child's own process status is returned
+unchanged. A valid Sol program may therefore deliberately cause `sol run` to
+exit with values such as `2`, `4`, `7` or `8`; those values are then program
+results rather than compiler failures.
 
 ## Current limitations
 
 The current implementation:
 
 * compiles only for the compiler host platform;
-* supports only parameterless native entry-point binding;
+* supports only parameterless native entry-point binding and does not yet bind
+  process command-line arguments to Sol entry-point parameters;
 * discovers source modules relative to the entry source file rather than
   through a package or project manifest;
 * does not provide cross-compilation guarantees;
