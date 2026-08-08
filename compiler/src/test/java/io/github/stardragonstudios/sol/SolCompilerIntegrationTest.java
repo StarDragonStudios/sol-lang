@@ -152,7 +152,12 @@ final class SolCompilerIntegrationTest {
 
         assertEquals(CompilerExitCode.FRONTEND_ERROR.value(), exitCode);
         assertFalse(Files.exists(executable));
-        assertTrue(errorBytes.toString().contains("SOL-S002"));
+
+        var diagnosticOutput = errorBytes.toString();
+
+        assertTrue(diagnosticOutput.contains("%s:3:12: error [SOL-S002]: Unresolved name 'missing'.".formatted(source.toAbsolutePath().normalize())), diagnosticOutput);
+        assertTrue(diagnosticOutput.contains("3 |     return missing"), diagnosticOutput);
+        assertTrue(diagnosticOutput.contains("|            ^^^^^^^"), diagnosticOutput);
     }
 
     @Test
