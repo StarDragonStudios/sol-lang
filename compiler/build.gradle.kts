@@ -20,7 +20,7 @@ java {
 }
 
 application {
-    mainClass = "io.github.stardragonstudios.sol.SolCompiler"
+    mainClass = "io.github.stardragonstudios.sol.Sol"
 
     applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }

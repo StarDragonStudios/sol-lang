@@ -7,7 +7,8 @@ public enum CompilerExitCode {
     FRONTEND_ERROR(4),
     LOWERING_ERROR(5),
     BACKEND_ERROR(6),
-    TOOLCHAIN_ERROR(7);
+    TOOLCHAIN_ERROR(7),
+    PROGRAM_EXECUTION_ERROR(8);
 
     private final int value;
 
