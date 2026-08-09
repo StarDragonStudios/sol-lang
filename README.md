@@ -51,7 +51,7 @@ native programs and do not require Java at runtime.
 
 To use the Sol compiler, the host system currently requires:
 
-* Java 26 or newer;
+* Java 25 or newer;
 * a native linker driver available through `PATH`, either `clang` or `cc`.
 
 The linker can also be selected explicitly with the `SOL_LINKER` environment
