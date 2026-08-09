@@ -58,6 +58,27 @@ SOLC=/path/to/sol-0.1.0/bin/solc ./selfhost/bootstrap.sh
 
 Generated bootstrap artifacts under `selfhost/build/` are not committed to the repository.
 
+### Windows
+
+Run:
+
+```bat
+selfhost\bootstrap.bat
+```
+
+An explicit seed compiler can be selected with:
+
+```bat
+set SOLC=C:\path\to\sol-0.1.0\bin\solc.bat
+selfhost\bootstrap.bat
+```
+
+The generated stage 1 executable is written to:
+
+```text
+selfhost\build\stage1\solc.exe
+```
+
 ## Current scope
 
 The current bootstrap establishes only:
