@@ -28,6 +28,11 @@ jobs:
                   test -d runtime-c
                   test -d examples
                   test -d tests
+                  test -d selfhost
+                  test -f selfhost/src/main.sol
+                  test -f selfhost/bootstrap.sh
+                  test -f selfhost/bootstrap.bat
+                  test -f selfhost/README.md
 
     compiler-tests:
         name: Compiler tests
@@ -46,6 +51,83 @@ jobs:
             - name: Run compiler tests
               working-directory: compiler
               run: ./gradlew test
+
+    selfhost-bootstrap:
+        name: Self-host bootstrap (Linux)
+        runs-on: ubuntu-24.04
+
+        steps:
+            -   name: Checkout repository
+                uses: actions/checkout@v6
+
+            -   name: Set up Java 25
+                uses: actions/setup-java@v5
+                with:
+                    distribution: temurin
+                    java-version: "25"
+
+            -   name: Download Sol 0.1.0 seed compiler
+                env:
+                    GH_TOKEN: ${{ github.token }}
+                run: |
+                    mkdir -p .bootstrap
+
+                    gh release download v0.1.0 \
+                        --repo "$GITHUB_REPOSITORY" \
+                        --pattern "sol-0.1.0-linux-x86_64.tar.gz" \
+                        --dir .bootstrap
+
+                    tar -xzf .bootstrap/sol-0.1.0-linux-x86_64.tar.gz \
+                        -C .bootstrap
+
+            -   name: Bootstrap self-hosted compiler
+                env:
+                    SOLC: ${{ github.workspace }}/.bootstrap/sol-0.1.0-linux-x86_64/bin/solc
+                run: ./selfhost/bootstrap.sh
+
+    selfhost-bootstrap-windows:
+        name: Self-host bootstrap (Windows)
+        runs-on: windows-2025
+
+        steps:
+            -   name: Checkout repository
+                uses: actions/checkout@v6
+
+            -   name: Set up Java 25
+                uses: actions/setup-java@v5
+                with:
+                    distribution: temurin
+                    java-version: "25"
+
+            -   name: Download Sol 0.1.0 seed compiler
+                shell: pwsh
+                env:
+                    GH_TOKEN: ${{ github.token }}
+                run: |
+                    New-Item -ItemType Directory -Force .bootstrap | Out-Null
+
+                    gh release download v0.1.0 `
+                        --repo "$env:GITHUB_REPOSITORY" `
+                        --pattern "sol-0.1.0-windows-x86_64.zip" `
+                        --dir .bootstrap
+
+                    Expand-Archive `
+                        -Path .bootstrap/sol-0.1.0-windows-x86_64.zip `
+                        -DestinationPath .bootstrap
+
+            -   name: Verify Windows native linker
+                shell: pwsh
+                run: |
+                    if (-not (Test-Path "C:\Program Files\LLVM\bin\clang.exe")) {
+                        throw "LLVM clang.exe was not found on the Windows runner."
+                    }
+
+            -   name: Bootstrap self-hosted compiler
+                shell: cmd
+                env:
+                    SOLC: ${{ github.workspace }}\.bootstrap\sol-0.1.0-windows-x86_64\bin\solc.bat
+                    SOL_LINKER: C:\Program Files\LLVM\bin\clang.exe
+                run: selfhost\bootstrap.bat
 
     distribution-tests:
         name: Distribution (${{ matrix.platform }})
