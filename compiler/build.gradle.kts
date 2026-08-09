@@ -1,4 +1,5 @@
 import org.gradle.api.tasks.application.CreateStartScripts
+import org.gradle.api.tasks.bundling.Compression
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.jvm.tasks.Jar
@@ -43,6 +44,8 @@ tasks.named<Zip>("distZip") {
 
 tasks.named<Tar>("distTar") {
     archiveClassifier.set(nativePlatform)
+    compression = Compression.GZIP
+    archiveExtension.set("tar.gz")
 }
 
 dependencies {
