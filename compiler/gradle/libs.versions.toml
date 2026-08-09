@@ -2,11 +2,11 @@
 # https://docs.gradle.org/current/userguide/platforms.html#sub::toml-dependencies-format
 
 [versions]
-guava = "33.4.5-jre"
+javacpp = "1.5.13"
 junit-jupiter = "5.12.1"
 llvm = "21.1.8-1.5.13"
 
 [libraries]
-guava = { module = "com.google.guava:guava", version.ref = "guava" }
+javacpp = { module = "org.bytedeco:javacpp", version.ref = "javacpp" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
-llvm-platform = { module = "org.bytedeco:llvm-platform", version.ref = "llvm" }
+llvm = { module = "org.bytedeco:llvm", version.ref = "llvm" }
