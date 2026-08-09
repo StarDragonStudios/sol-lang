@@ -115,10 +115,18 @@ jobs:
                         -Path .bootstrap/sol-0.1.0-windows-x86_64.zip `
                         -DestinationPath .bootstrap
 
+            -   name: Verify Windows native linker
+                shell: pwsh
+                run: |
+                    if (-not (Test-Path "C:\Program Files\LLVM\bin\clang.exe")) {
+                        throw "LLVM clang.exe was not found on the Windows runner."
+                    }
+
             -   name: Bootstrap self-hosted compiler
                 shell: cmd
                 env:
                     SOLC: ${{ github.workspace }}\.bootstrap\sol-0.1.0-windows-x86_64\bin\solc.bat
+                    SOL_LINKER: C:\Program Files\LLVM\bin\clang.exe
                 run: selfhost\bootstrap.bat
 
     distribution-tests:
