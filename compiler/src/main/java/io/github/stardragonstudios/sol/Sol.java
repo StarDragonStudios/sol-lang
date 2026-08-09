@@ -22,6 +22,11 @@ public final class Sol {
     private Sol() {}
 
     public static void main(String[] args) {
+        if (SolVersion.isVersionRequest(args)) {
+            SolVersion.print(System.out);
+            return;
+        }
+
         System.exit(run(args, System.err, new SolProgramRunner()::run));
     }
 

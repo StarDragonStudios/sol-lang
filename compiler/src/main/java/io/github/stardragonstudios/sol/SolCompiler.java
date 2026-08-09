@@ -19,7 +19,12 @@ import java.util.Objects;
 public final class SolCompiler {
     private SolCompiler() {}
 
-    public static void main(String[] args) {
+    static void main(String[] args) {
+        if (SolVersion.isVersionRequest(args)) {
+            SolVersion.print(System.out);
+            return;
+        }
+
         System.exit(run(args, System.err, new CompilerPipeline()::compile));
     }
 

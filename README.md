@@ -41,6 +41,120 @@ Sol source
 The complete host-native compilation pipeline is exposed through the compiler
 command-line interface.
 
+## Installation
+
+Sol 0.1.0 is distributed as a portable, platform-specific archive. The
+compiler itself runs on the JVM, while executables produced from Sol source are
+native programs and do not require Java at runtime.
+
+### Requirements
+
+To use the Sol compiler, the host system currently requires:
+
+* Java 26 or newer;
+* a native linker driver available through `PATH`, either `clang` or `cc`.
+
+The linker can also be selected explicitly with the `SOL_LINKER` environment
+variable.
+
+Download the Sol 0.1.0 archive matching your operating system and architecture
+from the GitHub release and extract it to a directory of your choice.
+
+A distribution has the following layout:
+
+```text
+sol-0.1.0-<platform>/
+├── bin/
+│   ├── sol
+│   ├── solc
+│   ├── sol.bat
+│   └── solc.bat
+├── lib/
+├── LICENSE
+└── README.md
+```
+
+### macOS and Linux
+
+Add the extracted `bin` directory to `PATH`.
+
+For example:
+
+```bash
+export PATH="/path/to/sol-0.1.0-<platform>/bin:$PATH"
+```
+
+Verify the installation with:
+
+```bash
+sol --version
+solc --version
+```
+
+Both commands should report:
+
+```text
+Sol 0.1.0
+```
+
+### Windows
+
+Add the extracted `bin` directory to the user or system `PATH`, then open a new
+terminal and verify the installation with:
+
+```text
+sol --version
+solc --version
+```
+
+Both commands should report:
+
+```text
+Sol 0.1.0
+```
+
+### Compile a program
+
+Given a file named `hello.sol`:
+
+```sol
+inject namespace std.console as csl
+
+@init
+fn launch() -> int
+    csl::print_line("Hello, Sol!")
+    return 0
+end
+```
+
+compile it with:
+
+```text
+solc hello.sol
+```
+
+This produces a native executable for the host platform:
+
+```text
+hello
+```
+
+on Unix-like systems, or:
+
+```text
+hello.exe
+```
+
+on Windows.
+
+The generated executable can then be run directly and does not require the JVM.
+
+Alternatively, compile and execute the source in one step with:
+
+```text
+sol run hello.sol
+```
+
 ## Command-line compilation
 
 Compile an executable Sol program with:
@@ -305,6 +419,18 @@ The compiler test suite can be run with:
 cd compiler
 ./gradlew clean test
 ```
+
+Release distribution changes should additionally pass:
+
+```bash
+cd compiler
+./gradlew clean test distributionSmokeTest assembleDist
+```
+
+This builds the platform-specific distribution and verifies that the installed
+`sol` and `solc` launchers can report their version, compile a native Sol
+program, execute the resulting binary and run the same program through
+`sol run`.
 
 Repository changes should also pass:
 
