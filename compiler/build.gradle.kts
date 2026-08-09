@@ -35,7 +35,7 @@ fun detectNativePlatform(): String {
     return "$platform-$platformArchitecture"
 }
 
-val nativePlatform = providers.gradleProperty("sol.nativePlatform").orElse(detectNativePlatform()).get()
+val nativePlatform = providers.gradleProperty("solNativePlatform").orElse(detectNativePlatform()).get()
 
 tasks.named<Zip>("distZip") {
     archiveClassifier.set(nativePlatform)
@@ -135,18 +135,18 @@ tasks.named<Test>("test") {
 }
 
 val distributionSmokeTest = tasks.register<Test>("distributionSmokeTest") {
-        group = "verification"
-        description = "Smoke-tests the installed Sol distribution."
+    group = "verification"
+    description = "Smoke-tests the installed Sol distribution."
 
-        dependsOn("installDist")
-        useJUnitPlatform()
+    dependsOn("installDist")
+    useJUnitPlatform()
 
-        jvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
+    jvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 
-        systemProperty("sol.distributionDir", layout.buildDirectory.dir("install/sol").get().asFile.absolutePath)
-        systemProperty("sol.expectedVersion", project.version.toString())
+    systemProperty("sol.distributionDir", layout.buildDirectory.dir("install/sol").get().asFile.absolutePath)
+    systemProperty("sol.expectedVersion", project.version.toString())
 
-        filter {
-            includeTestsMatching("io.github.stardragonstudios.sol.SolDistributionSmokeTest")
-        }
+    filter {
+        includeTestsMatching("io.github.stardragonstudios.sol.SolDistributionSmokeTest")
     }
+}
