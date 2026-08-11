@@ -2,7 +2,8 @@
 
 Sol 0.1 defines the procedural bootstrap language implemented by the Java
 bootstrap compiler. Sol 0.1.1 extends the released 0.1.0 language with
-user-defined value-type structs while preserving the procedural model.
+user-defined value-type structs and minimal compile-time generics while
+preserving the procedural model.
 
 This specification describes the source-language behavior of Sol 0.1.
 Backend-specific representation, native executable construction and host
@@ -69,9 +70,10 @@ necessary and are otherwise ignored.
 Newlines are syntactically significant. They separate declarations and
 statements and terminate several declaration forms.
 
-Function parameter lists and call argument lists are an explicit exception.
-Within those delimited lists, newlines may appear between the opening
-parenthesis, list elements, commas and the closing parenthesis.
+Function parameter lists, call argument lists, type-parameter lists and
+type-argument lists are explicit exceptions. Within those delimited lists,
+newlines may appear between the opening delimiter, list elements, commas and
+the closing delimiter.
 
 Blank lines are therefore permitted inside parameter and argument lists.
 
@@ -284,6 +286,7 @@ arguments, and `)`:
 show()
 add(1, 2)
 io::print_line("Hello")
+identity<int>(42)
 ```
 
 Parameters are separated by commas:
@@ -333,7 +336,7 @@ From highest precedence to lowest, Sol 0.1 expressions are grouped as follows:
 
 | Precedence | Operators / form                | Associativity |
 | ---------: |---------------------------------|---------------|
-|          1 | function call `(...)`           | left          |
+|          1 | postfix call, construction, field access | left   |
 |          2 | unary `!`, unary `-`, unary `+` | right         |
 |          3 | `*`, `/`, `%`                   | left          |
 |          4 | `+`, `-`                        | left          |
@@ -678,6 +681,107 @@ for a fixed target ABI.
 Structs do not introduce classes, inheritance, methods, virtual dispatch,
 constructors, destructors or the Sol 0.2 object model.
 
+## Minimal generics
+
+Sol 0.1.1 provides compile-time generics for bootstrap data structures and
+functions. Generic structs and functions declare one or more type parameters
+between `<` and `>`:
+
+```sol
+struct Pair<A, B>
+    first: A
+    second: B
+end
+
+fn identity<T>(value: T) -> T
+    return value
+end
+```
+
+Type parameters are visible only inside their owning struct or function. They
+may appear wherever that declaration accepts a value type, including nested
+generic types:
+
+```sol
+struct Box<T>
+    value: T
+end
+
+struct Envelope<T>
+    payload: Box<T>
+end
+```
+
+Type-parameter names must be unique within one declaration. A type parameter
+does not define operators, methods, constraints or runtime behavior.
+
+### Type application
+
+A generic type must always receive its exact number of explicit type
+arguments:
+
+```sol
+Pair<int, string>
+Box<Pair<int, string>>
+```
+
+Omitting an argument, supplying extra arguments or applying type arguments to
+a non-generic type is invalid. `void` cannot be used as a type argument because
+it is not a value type.
+
+Generic struct construction uses the same explicit type application:
+
+```sol
+let pair: Pair<int, string> = Pair<int, string> {
+    first: 42,
+    second: "Sol",
+}
+```
+
+The field types of a concrete struct are obtained by substituting its type
+arguments for the declaration's type parameters. All normal construction,
+access, mutation and value-semantic rules then apply to the concrete type.
+
+### Generic calls
+
+Generic functions require explicit type arguments at every call site, even
+when those arguments could be inferred from values:
+
+```sol
+identity<int>(42)
+utilities::identity<string>("Sol")
+```
+
+`identity(42)` is invalid when `identity` is generic. Conversely, type
+arguments cannot be supplied to a non-generic function.
+
+Parameter and return types are checked after substituting the explicit type
+arguments. Generic declarations retain their canonical identity across direct
+and namespace injections.
+
+### Compile-time monomorphization
+
+Generics have no runtime representation in Sol 0.1.1. The compiler
+monomorphizes every reachable concrete function and struct instantiation into
+ordinary typed Sol IR. Different concrete argument lists produce distinct,
+deterministically named specializations and layouts.
+
+Unused open generic declarations do not produce open IR functions or runtime
+type metadata. A generic function may recursively call the same concrete
+specialization. A recursive call chain that requests a different specialization
+of a function is rejected because it could require an unbounded set of
+compile-time instantiations.
+
+Sol 0.1.1 does not define:
+
+* implicit generic argument inference;
+* bounds, traits or interfaces on type parameters;
+* variance;
+* higher-kinded types;
+* specialization rules;
+* runtime type reification;
+* generic overload resolution.
+
 ## Declaration visibility
 
 A local variable becomes visible only after its initializer has been analyzed.
@@ -793,6 +897,7 @@ end
 Every function declaration has:
 
 * a name;
+* an optional type-parameter list;
 * a parameter list;
 * an explicit return type.
 
@@ -819,6 +924,14 @@ Parameters are immutable inside the function.
 
 Function names must be unique among functions declared directly in the same
 module. Function overloading is not part of the Sol 0.1 procedural bootstrap.
+
+A generic function places its type parameters after its name:
+
+```sol
+fn choose<T>(value: T) -> T
+    return value
+end
+```
 
 ### Bodyless function declarations
 
@@ -867,6 +980,13 @@ A function call supplies zero or more positional arguments:
 ```sol
 show()
 add(1, 2)
+```
+
+A call to a generic function supplies its explicit type arguments before the
+value argument list:
+
+```sol
+identity<int>(42)
 ```
 
 Namespace-injected functions use the same call syntax after qualification:
@@ -1335,6 +1455,7 @@ do not.
 
 An entry-point function must:
 
+* declare no type parameters;
 * have a Sol function body;
 * return the built-in `int` type.
 
@@ -1684,6 +1805,8 @@ The version includes:
 * primitive static types;
 * primitive literals;
 * user-defined struct value types;
+* minimal generic structs and functions with explicit type arguments;
+* compile-time monomorphization;
 * unary and binary expressions;
 * lexical local scopes;
 * immutable and mutable local variables;
@@ -1702,7 +1825,7 @@ Sol 0.1 does not define:
 * interfaces;
 * arrays;
 * pointers or references;
-* generics;
+* generic inference, bounds, variance or runtime reification;
 * function overloading;
 * closures;
 * first-class functions;

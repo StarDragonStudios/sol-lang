@@ -17,6 +17,8 @@ import io.github.stardragonstudios.sol.semantics.FunctionSymbol;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.StructSymbol;
+import io.github.stardragonstudios.sol.semantics.types.StructType;
+import io.github.stardragonstudios.sol.semantics.types.TypeSubstitution;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.VariableDeclarationKind;
 
@@ -28,7 +30,7 @@ import java.util.Objects;
 import java.util.Set;
 
 final class IrFunctionLoweringContext {
-    private final FunctionSymbol function;
+    private final IrFunctionInstantiation instantiation;
     private final IrProgramLoweringContext programContext;
     private final IdentityHashMap<ParameterSymbol, IrParameter> parameters = new IdentityHashMap<>();
     private final IdentityHashMap<LocalVariableSymbol, IrLocal> locals = new IdentityHashMap<>();
@@ -48,16 +50,28 @@ final class IrFunctionLoweringContext {
     private boolean hasStartedBlock;
 
     IrFunctionLoweringContext(FunctionSymbol function) {
-        this(function, new IrProgramLoweringContext());
+        this(IrFunctionInstantiation.canonical(function), new IrProgramLoweringContext());
     }
 
     IrFunctionLoweringContext(FunctionSymbol function, IrProgramLoweringContext programContext) {
-        this.function = Objects.requireNonNull(function, "Lowered function symbol must not be null.");
+        this(IrFunctionInstantiation.canonical(function), programContext);
+    }
+
+    IrFunctionLoweringContext(IrFunctionInstantiation instantiation, IrProgramLoweringContext programContext) {
+        this.instantiation = Objects.requireNonNull(instantiation, "Lowered function instantiation must not be null.");
         this.programContext = Objects.requireNonNull(programContext, "Program lowering context must not be null.");
     }
 
     FunctionSymbol function() {
-        return function;
+        return instantiation.function();
+    }
+
+    IrFunctionInstantiation instantiation() {
+        return instantiation;
+    }
+
+    String functionName() {
+        return instantiation.irName();
     }
 
     IrFunctionReference functionReference(FunctionSymbol target) {
@@ -66,12 +80,31 @@ final class IrFunctionLoweringContext {
         return programContext.functionReference(target);
     }
 
+    IrFunctionReference functionReference(FunctionSymbol target, List<TypeSymbol> arguments) {
+        Objects.requireNonNull(target, "Queried called-function symbol must not be null.");
+        Objects.requireNonNull(arguments, "Queried called-function type arguments must not be null.");
+
+        var concreteArguments = arguments.stream().map(this::substitute).toList();
+
+        return programContext.functionInstantiationReference(new IrFunctionInstantiation(target, concreteArguments));
+    }
+
     IrType lowerType(TypeSymbol type) {
-        return IrTypeLowerer.lower(type, programContext);
+        return IrTypeLowerer.lower(substitute(type), programContext);
+    }
+
+    TypeSymbol substitute(TypeSymbol type) {
+        Objects.requireNonNull(type, "Substituted semantic type must not be null.");
+
+        return TypeSubstitution.substitute(type, instantiation.substitutions());
     }
 
     IrStructType structType(StructSymbol struct) {
         return programContext.structType(struct);
+    }
+
+    IrStructType structType(StructType struct) {
+        return programContext.structType((StructType) substitute(struct));
     }
 
     IrParameter declareParameter(ParameterSymbol parameter, IrType type) {
@@ -79,10 +112,10 @@ final class IrFunctionLoweringContext {
         Objects.requireNonNull(type, "Lowered parameter type must not be null.");
 
         if (!belongsToFunction(parameter))
-            throw new IrLoweringException("Parameter '%s' does not belong to function '%s'.".formatted(parameter.name(), function.name()));
+            throw new IrLoweringException("Parameter '%s' does not belong to function '%s'.".formatted(parameter.name(), function().name()));
 
         if (parameters.containsKey(parameter))
-            throw new IrLoweringException("Parameter '%s' has already been lowered in function '%s'.".formatted(parameter.name(), function.name()));
+            throw new IrLoweringException("Parameter '%s' has already been lowered in function '%s'.".formatted(parameter.name(), function().name()));
 
         var lowered = new IrParameter(nextValueId(), parameter.name(), type);
 
@@ -97,7 +130,7 @@ final class IrFunctionLoweringContext {
         var lowered = parameters.get(parameter);
 
         if (lowered == null)
-            throw new IrLoweringException("Parameter '%s' has not been lowered in function '%s'.".formatted(parameter.name(), function.name()));
+            throw new IrLoweringException("Parameter '%s' has not been lowered in function '%s'.".formatted(parameter.name(), function().name()));
 
         return lowered;
     }
@@ -107,7 +140,7 @@ final class IrFunctionLoweringContext {
         Objects.requireNonNull(type, "Lowered local variable type must not be null.");
 
         if (locals.containsKey(local))
-            throw new IrLoweringException("Local variable '%s' has already been lowered in function '%s'.".formatted(local.name(), function.name()));
+            throw new IrLoweringException("Local variable '%s' has already been lowered in function '%s'.".formatted(local.name(), function().name()));
 
         var lowered = new IrLocal(nextLocalId(), local.name(), type, lowerLocalKind(local.declarationKind()));
 
@@ -122,7 +155,7 @@ final class IrFunctionLoweringContext {
         var lowered = locals.get(local);
 
         if (lowered == null)
-            throw new IrLoweringException("Local variable '%s' has not been lowered in function '%s'.".formatted(local.name(), function.name()));
+            throw new IrLoweringException("Local variable '%s' has not been lowered in function '%s'.".formatted(local.name(), function().name()));
 
         return lowered;
     }
@@ -145,7 +178,7 @@ final class IrFunctionLoweringContext {
     IrBlockTarget currentBlockTarget() {
         ensureInitialBlock();
 
-        if (currentBlockTarget == null) throw new IrLoweringException("Function '%s' has no active IR basic block.".formatted(function.name()));
+        if (currentBlockTarget == null) throw new IrLoweringException("Function '%s' has no active IR basic block.".formatted(function().name()));
 
         return currentBlockTarget;
     }
@@ -158,13 +191,13 @@ final class IrFunctionLoweringContext {
         Objects.requireNonNull(target, "Started IR block target must not be null.");
 
         if (currentBlockTarget != null)
-            throw new IrLoweringException("Function '%s' cannot begin IR block '%s' before terminating block '%s'.".formatted(function.name(), target.id(), currentBlockTarget.id()));
+            throw new IrLoweringException("Function '%s' cannot begin IR block '%s' before terminating block '%s'.".formatted(function().name(), target.id(), currentBlockTarget.id()));
 
         if (!allocatedBlockTargets.contains(target))
-            throw new IrLoweringException("IR block target '%s' was not allocated by function '%s'.".formatted(target.id(), function.name()));
+            throw new IrLoweringException("IR block target '%s' was not allocated by function '%s'.".formatted(target.id(), function().name()));
 
         if (!startedBlockTargets.add(target))
-            throw new IrLoweringException("IR block target '%s' has already been started in function '%s'.".formatted(target.id(), function.name()));
+            throw new IrLoweringException("IR block target '%s' has already been started in function '%s'.".formatted(target.id(), function().name()));
 
         currentBlockTarget = target;
         instructions = new ArrayList<>();
@@ -226,11 +259,11 @@ final class IrFunctionLoweringContext {
         ensureInitialBlock();
 
         if (currentBlockTarget == null)
-            throw new IrLoweringException("Function '%s' has no active IR basic block. Begin a block before emitting instructions or a terminator.".formatted(function.name()));
+            throw new IrLoweringException("Function '%s' has no active IR basic block. Begin a block before emitting instructions or a terminator.".formatted(function().name()));
     }
 
     private boolean belongsToFunction(ParameterSymbol parameter) {
-        return function.declaration().parameters().stream().anyMatch(declaration -> declaration == parameter.declaration());
+        return function().declaration().parameters().stream().anyMatch(declaration -> declaration == parameter.declaration());
     }
 
     private static IrLocalKind lowerLocalKind(VariableDeclarationKind kind) {

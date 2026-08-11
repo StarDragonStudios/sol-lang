@@ -15,13 +15,23 @@ final class IrFunctionSignatureLowerer {
     private IrFunctionSignatureLowerer() {}
 
     static IrFunctionSignature lower(FunctionSymbol function, SemanticModel model, IrProgramLoweringContext programContext) {
-        Objects.requireNonNull(function, "Lowered function symbol must not be null.");
+        return lowerInstantiation(IrFunctionInstantiation.canonical(function), model, programContext);
+    }
+
+    static IrFunctionSignature lowerInstantiation(
+        IrFunctionInstantiation instantiation,
+        SemanticModel model,
+        IrProgramLoweringContext programContext
+    ) {
+        Objects.requireNonNull(instantiation, "Lowered function instantiation must not be null.");
         Objects.requireNonNull(model, "Semantic model must not be null.");
         Objects.requireNonNull(programContext, "Program lowering context must not be null.");
 
+        var function = instantiation.function();
+
         validateCanonicalFunction(function, model);
 
-        var functionContext = new IrFunctionLoweringContext(function, programContext);
+        var functionContext = new IrFunctionLoweringContext(instantiation, programContext);
         var loweredParameters = new ArrayList<IrParameter>();
 
         for (var parameterDeclaration : function.declaration().parameters()) {
@@ -44,7 +54,7 @@ final class IrFunctionSignatureLowerer {
 
         return new IrFunctionSignature(
             function,
-            programContext.functionId(function),
+            programContext.functionInstantiationId(instantiation),
             loweredParameters,
             functionContext.lowerType(returnType),
             functionContext

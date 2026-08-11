@@ -15,11 +15,12 @@ and its native compilation pipeline:
 * variables and constants;
 * conditions and loops;
 * value-type structs on the Sol 0.1.1 development branch;
+* minimal monomorphized generics on the Sol 0.1.1 development branch;
 * a Java bootstrap compiler;
 * a typed, compiler-independent Sol IR;
 * LLVM IR generation;
 * native object-file emission;
-* host-native executable linking.
+* host-native executable linking;
 * bundled native console and file standard-library modules.
 
 The compiler is implemented in Java, but generated Sol executables are native

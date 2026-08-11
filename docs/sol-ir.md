@@ -62,6 +62,11 @@ Field order is canonical and every field has an exact value type. Struct types
 are non-numeric first-class values and may appear in locals, parameters, return
 types and fields of other non-recursive structs.
 
+Source-level generic parameters never appear as open Sol IR types.
+Semantic-to-IR lowering monomorphizes every reachable concrete generic function and struct
+application. Each concrete struct application becomes its own `IrStructType`,
+with type parameters substituted recursively through its ordered fields.
+
 ## Identity
 
 Identifiers are deterministic objects rather than source names.
@@ -84,7 +89,8 @@ A program may represent:
 
 Module names use value equality and preserve their ordered segments.
 
-Functions preserve declaration order inside each module.
+Non-generic functions preserve declaration order inside each module. Reachable
+generic specializations follow them in deterministic call-discovery order.
 
 Function identifiers are globally unique across the program.
 
@@ -411,13 +417,19 @@ identity.
 
 ### Deterministic lowering
 
-Lowering performs two program-level passes.
+Lowering first discovers reachable concrete generic instantiations from every
+non-generic function, following module, declaration and source call order. It
+rejects recursive expansion into a different specialization before IR is
+created.
 
-The first pass assigns every semantic function a globally unique
-`IrFunctionId`, following module and declaration order.
+It then materializes concrete struct layouts, assigns every ordinary function
+or generic specialization a globally unique `IrFunctionId`, creates canonical
+typed call references, and finally lowers modules and function bodies.
 
-The second pass lowers modules and functions using those preassigned
-identifiers.
+Generic specialization names encode their concrete type arguments. Struct
+arguments include their declaring module in that encoding, so distinct
+same-named types cannot collide. The ordering, names and identifiers are stable
+for the same semantic program.
 
 Inside each function:
 
@@ -448,11 +460,13 @@ The current lowering subset supports:
 * ordered call arguments;
 * calls returning values;
 * calls returning `void`;
-* primitive parameter and return types;
+* primitive and struct parameter and return types;
+* generic function specializations with explicit concrete type arguments;
 * `const` local declarations;
 * immutable `let` declarations;
 * mutable `@mut let` declarations;
 * assignment statements targeting mutable locals;
+* direct and nested struct field mutation;
 * bare returns;
 * value returns;
 * conditional statements;
@@ -486,6 +500,7 @@ The initial expression subset supports:
 * floating-point literals;
 * boolean literals;
 * character literals;
+* string literals;
 * parameter references;
 * local-variable references;
 * parenthesized expressions;
@@ -494,7 +509,8 @@ The initial expression subset supports:
 * arithmetic binary operators;
 * relational operators;
 * equality and inequality;
-* logical conjunction and disjunction.
+* logical conjunction and disjunction;
+* struct construction and field access.
 
 Primitive literal lexemes are decoded during lowering after lexical and
 semantic validation.
@@ -513,8 +529,10 @@ A local-variable reference resolves through its canonical
 An assignment resolves through the canonical assignment-target symbol, lowers
 the assigned expression, and emits an `IrLocalStoreInstruction`.
 
-A call resolves exclusively through the canonical `FunctionSymbol` associated
-with its `CallExpression` by semantic analysis. Lowering does not inspect the
+A call resolves exclusively through the canonical `FunctionSymbol` and
+semantic type arguments associated with its `CallExpression`. The current
+function specialization substitutes its own concrete arguments before the
+canonical target specialization is selected. Lowering does not inspect the
 source spelling of a direct, injected or namespace-qualified callee.
 
 Arguments are lowered from left to right before the call instruction is
@@ -533,8 +551,6 @@ resolution, mutability checking or assignment type checking.
 
 The following constructs are not lowered by the current layer:
 
-* string literals;
-* structs;
 * references;
 * global variables;
 * `break`;
@@ -577,7 +593,6 @@ through the Sol IR package boundary.
 The current design must permit later representation of:
 
 * global storage;
-* structs;
 * references;
 * ownership operations;
 * destruction;

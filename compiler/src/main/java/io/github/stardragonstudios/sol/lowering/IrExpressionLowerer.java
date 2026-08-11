@@ -7,6 +7,7 @@ import io.github.stardragonstudios.sol.ir.IrValue;
 import io.github.stardragonstudios.sol.ir.IrValueCallInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructConstructInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructFieldExtractInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
@@ -58,7 +59,15 @@ final class IrExpressionLowerer {
         var struct = model.constructedStructOf(expression).orElseThrow(() -> new IrLoweringException(
             "Struct construction '%s' has no resolved semantic struct.".formatted(expression.type().name())
         ));
-        var type = context.structType(struct);
+        var semanticType = model.typeOf(expression).orElseThrow(() -> new IrLoweringException(
+            "Struct construction '%s' has no resolved semantic type.".formatted(expression.type().name())
+        ));
+        var loweredType = context.lowerType(semanticType);
+
+        if (!(loweredType instanceof IrStructType type)) throw new IrLoweringException(
+            "Struct construction '%s' lowered to non-struct type '%s'."
+                .formatted(struct.name(), loweredType.displayName())
+        );
         var valuesByFieldIndex = new HashMap<Integer, IrValue>();
 
         /* Lower in source order so initializer side effects retain source evaluation order. */
@@ -98,7 +107,12 @@ final class IrExpressionLowerer {
         var semanticField = model.accessedFieldOf(expression).orElseThrow(() -> new IrLoweringException(
             "Field access '%s' has no resolved semantic field.".formatted(expression.fieldName())
         ));
-        var field = context.structType(semanticField.owner()).fields().get(semanticField.index());
+        if (!(target.type() instanceof IrStructType targetType)) throw new IrLoweringException(
+            "Field access '%s' lowered a non-struct target type '%s'."
+                .formatted(expression.fieldName(), target.type().displayName())
+        );
+
+        var field = targetType.fields().get(semanticField.index());
         var instruction = new IrStructFieldExtractInstruction(context.nextValueId(), target, field);
 
         context.emit(instruction);

@@ -145,6 +145,10 @@ the canonical declaration order. Structs are passed to functions and returned
 by value. Nested structs lower recursively; semantic analysis rejects recursive
 by-value layouts before backend generation.
 
+Source generics require no LLVM runtime mechanism. Sol IR contains only the
+concrete function and struct specializations produced by monomorphization, so
+the backend lowers them through the ordinary function and aggregate paths.
+
 `char` stores a Unicode code point.
 
 `string` is deliberately unsupported by the current backend. Attempting to

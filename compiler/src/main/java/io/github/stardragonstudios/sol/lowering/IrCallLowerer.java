@@ -16,7 +16,7 @@ final class IrCallLowerer {
         Objects.requireNonNull(context, "Function lowering context must not be null.");
 
         var function = model.calledFunctionOf(expression).orElseThrow(() -> new IrLoweringException("Call expression has no resolved canonical function symbol."));
-        var target = context.functionReference(function);
+        var target = context.functionReference(function, model.typeArgumentsOf(expression));
 
         validateReturnType(expression, target.returnType(), model, context);
 

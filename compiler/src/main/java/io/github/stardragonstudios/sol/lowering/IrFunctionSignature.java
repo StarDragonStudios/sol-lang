@@ -31,7 +31,7 @@ record IrFunctionSignature(
     }
 
     String name() {
-        return symbol.name();
+        return context.functionName();
     }
 
     IrFunction declaration() {

@@ -6,6 +6,7 @@ public enum SymbolKind {
     LOCAL_VARIABLE,
     STRUCT,
     STRUCT_FIELD,
+    TYPE_PARAMETER,
     IMPORTED_NAME,
     MODULE_NAMESPACE
 }

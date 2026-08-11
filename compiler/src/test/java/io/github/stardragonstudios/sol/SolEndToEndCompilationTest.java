@@ -77,6 +77,28 @@ final class SolEndToEndCompilationTest {
     }
 
     @Test
+    void compilesAndExecutesCrossModuleGenericFixture() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(
+            temporaryDirectory,
+            "generic-multi-module",
+            "main.sol",
+            "helper.sol"
+        );
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+        assertEquals("", compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(42, result.exitCode(), result.standardError());
+        assertEquals("", result.standardOutput());
+        assertEquals("", result.standardError());
+    }
+
+    @Test
     void compilesAndExecutesConsoleFixture() throws Exception {
 
         EndToEndTestSupport.assumeNativeLinkerAvailable();

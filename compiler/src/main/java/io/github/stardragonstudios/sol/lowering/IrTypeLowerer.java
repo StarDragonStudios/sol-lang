@@ -28,7 +28,7 @@ final class IrTypeLowerer {
         Objects.requireNonNull(type, "Lowered semantic type must not be null.");
         Objects.requireNonNull(context, "IR program lowering context must not be null.");
 
-        if (type instanceof StructType structType) return context.structType(structType.symbol());
+        if (type instanceof StructType structType) return context.structType(structType);
 
         return lower(type);
     }
