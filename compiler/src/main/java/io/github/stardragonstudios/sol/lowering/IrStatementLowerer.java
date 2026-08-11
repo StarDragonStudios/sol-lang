@@ -4,6 +4,7 @@ import io.github.stardragonstudios.sol.ir.IrLocalInitializeInstruction;
 import io.github.stardragonstudios.sol.ir.IrLocalStoreInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructField;
 import io.github.stardragonstudios.sol.ir.IrStructFieldStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.syntax.AssignmentStatement;
@@ -98,7 +99,17 @@ final class IrStatementLowerer {
             "Field assignment path '%s' has no resolved semantic field.".formatted(access.fieldName())
         ));
 
-        path.add(context.structType(semanticField.owner()).fields().get(semanticField.index()));
+        var semanticTargetType = model.typeOf(access.target()).orElseThrow(() -> new IrLoweringException(
+            "Field assignment path '%s' has no resolved semantic target type.".formatted(access.fieldName())
+        ));
+        var targetType = context.lowerType(semanticTargetType);
+
+        if (!(targetType instanceof IrStructType structType)) throw new IrLoweringException(
+            "Field assignment path '%s' lowered a non-struct target type '%s'."
+                .formatted(access.fieldName(), targetType.displayName())
+        );
+
+        path.add(structType.fields().get(semanticField.index()));
     }
 
     private static void lowerAssignment(AssignmentStatement assignment, SemanticModel model, IrFunctionLoweringContext context) {

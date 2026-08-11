@@ -4,6 +4,8 @@ import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
 import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
 import io.github.stardragonstudios.sol.semantics.types.StructType;
+import io.github.stardragonstudios.sol.semantics.types.TypeParameterType;
+import io.github.stardragonstudios.sol.semantics.types.TypeSubstitution;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
@@ -47,6 +49,10 @@ public final class SemanticAnalyzer {
     private static final String UNKNOWN_FIELD_CODE = "SOL-S036";
     private static final String INVALID_FIELD_ASSIGNMENT_TARGET_CODE = "SOL-S037";
     private static final String RESERVED_STRUCT_NAME_CODE = "SOL-S038";
+    private static final String DUPLICATE_TYPE_PARAMETER_CODE = "SOL-S039";
+    private static final String GENERIC_ARITY_CODE = "SOL-S040";
+    private static final String INVALID_TYPE_ARGUMENT_CODE = "SOL-S041";
+    private static final String RECURSIVE_GENERIC_INSTANTIATION_CODE = "SOL-S042";
 
     private static final ModuleName ISOLATED_MODULE_NAME = new ModuleName(List.of("<isolated>"));
     private static final SourceSpan PROGRAM_DIAGNOSTIC_SPAN = new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(0, 1, 1));
@@ -113,6 +119,7 @@ public final class SemanticAnalyzer {
             var entryPoint = resolveEntryPoint(programDiagnostics);
 
             binders.values().forEach(Binder::bindFunctionBodies);
+            validateGenericInstantiations();
 
             var analyses = new LinkedHashMap<ModuleName, SemanticAnalysisResult>();
 
@@ -121,73 +128,180 @@ public final class SemanticAnalyzer {
             return new SemanticProgramAnalysisResult(modules, analyses, entryPoint, programDiagnostics);
         }
 
+        private void validateGenericInstantiations() {
+            var owners = new IdentityHashMap<FunctionSymbol, Binder>();
+            var roots = new ArrayList<GenericFunctionInstantiation>();
+
+            for (var binder : binders.values()) {
+                for (var function : binder.module.exportedFunctions()) {
+                    owners.put(function, binder);
+
+                    if (function.typeParameters().isEmpty())
+                        roots.add(new GenericFunctionInstantiation(function, List.of()));
+                }
+            }
+
+            var completed = new HashSet<GenericFunctionInstantiation>();
+            var active = new ArrayList<GenericFunctionInstantiation>();
+            var reported = Collections.newSetFromMap(new IdentityHashMap<CallExpression, Boolean>());
+
+            for (var root : roots) validateGenericInstantiation(root, owners, completed, active, reported);
+        }
+
+        private void validateGenericInstantiation(
+            GenericFunctionInstantiation current,
+            IdentityHashMap<FunctionSymbol, Binder> owners,
+            Set<GenericFunctionInstantiation> completed,
+            List<GenericFunctionInstantiation> active,
+            Set<CallExpression> reported
+        ) {
+            if (completed.contains(current)) return;
+
+            var binder = owners.get(current.function());
+
+            if (binder == null) throw new IllegalStateException(
+                "Function '%s' has no semantic binder during generic-instantiation validation."
+                    .formatted(current.function().name())
+            );
+
+            var body = current.function().declaration().body();
+
+            if (body.isEmpty()) {
+                completed.add(current);
+                return;
+            }
+
+            active.add(current);
+
+            for (var expression : SyntaxExpressions.in(body.orElseThrow())) {
+                if (!(expression instanceof CallExpression call)) continue;
+
+                var target = binder.calledFunctions.get(call);
+
+                if (target == null) continue;
+
+                var openArguments = binder.calledFunctionTypeArguments.getOrDefault(call, List.of());
+
+                if (openArguments.size() != target.typeParameters().size()) continue;
+
+                var concreteArguments = openArguments.stream()
+                    .map(argument -> TypeSubstitution.substitute(argument, current.substitutions()))
+                    .toList();
+
+                if (concreteArguments.stream().anyMatch(ProgramBinder::containsUnresolvedType)) continue;
+
+                var called = new GenericFunctionInstantiation(target, concreteArguments);
+                var recursive = false;
+
+                for (var ancestor : active) {
+                    if (ancestor.function() != called.function()) continue;
+
+                    recursive = true;
+
+                    if (!ancestor.equals(called) && reported.add(call)) binder.diagnostics.add(new Diagnostic(
+                        RECURSIVE_GENERIC_INSTANTIATION_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Generic function '%s' recursively requests a different specialization '%s'."
+                            .formatted(target.name(), called.displayName()),
+                        call.span()
+                    ));
+
+                    break;
+                }
+
+                if (!recursive) validateGenericInstantiation(called, owners, completed, active, reported);
+            }
+
+            active.removeLast();
+            completed.add(current);
+        }
+
+        private static boolean containsUnresolvedType(TypeSymbol type) {
+            if (type == BuiltInTypes.ERROR || type instanceof TypeParameterType) return true;
+            if (type instanceof StructType struct)
+                return struct.arguments().stream().anyMatch(ProgramBinder::containsUnresolvedType);
+
+            return false;
+        }
+
         private void validateStructLayouts() {
             var owners = new IdentityHashMap<StructSymbol, Binder>();
 
             for (var binder : binders.values())
                 for (var struct : binder.module.exportedStructs()) owners.put(struct, binder);
 
-            var checked = Collections.newSetFromMap(new IdentityHashMap<StructSymbol, Boolean>());
-            var invalid = Collections.newSetFromMap(new IdentityHashMap<StructSymbol, Boolean>());
+            var checked = new HashSet<StructType>();
+            var invalid = new HashSet<StructType>();
+            var reportedFields = Collections.newSetFromMap(new IdentityHashMap<StructFieldSymbol, Boolean>());
 
             for (var binder : binders.values())
                 for (var struct : binder.module.exportedStructs()) validateStructLayout(
-                    struct,
+                    struct.type(),
                     owners,
                     checked,
                     invalid,
-                    Collections.newSetFromMap(new IdentityHashMap<>())
+                    new ArrayList<>(),
+                    reportedFields
                 );
         }
 
         private boolean validateStructLayout(
-            StructSymbol struct,
+            StructType instance,
             IdentityHashMap<StructSymbol, Binder> owners,
-            Set<StructSymbol> checked,
-            Set<StructSymbol> invalid,
-            Set<StructSymbol> visiting
+            Set<StructType> checked,
+            Set<StructType> invalid,
+            List<StructType> visiting,
+            Set<StructFieldSymbol> reportedFields
         ) {
-            if (checked.contains(struct)) return !invalid.contains(struct);
+            if (checked.contains(instance)) return !invalid.contains(instance);
 
-            visiting.add(struct);
+            var struct = instance.symbol();
+            var substitutions = new IdentityHashMap<TypeParameterSymbol, TypeSymbol>();
+
+            for (var index = 0; index < struct.typeParameters().size(); index++)
+                substitutions.put(struct.typeParameters().get(index), instance.arguments().get(index));
+
+            visiting.add(instance);
 
             for (var field : struct.fields()) {
-                var fieldType = programResolvedTypes.getOrDefault(field.type(), BuiltInTypes.ERROR);
+                var openFieldType = programResolvedTypes.getOrDefault(field.type(), BuiltInTypes.ERROR);
+                var fieldType = TypeSubstitution.substitute(openFieldType, substitutions);
 
                 if (!(fieldType instanceof StructType nestedType)) continue;
 
-                var nested = nestedType.symbol();
+                var recursive = visiting.stream().anyMatch(active -> active.symbol() == nestedType.symbol());
 
-                if (visiting.contains(nested)) {
+                if (recursive) {
                     var owner = owners.get(struct);
 
                     if (owner == null) throw new IllegalStateException("Struct '%s' has no semantic binder.".formatted(struct.name()));
 
-                    owner.diagnostics.add(new Diagnostic(
+                    if (reportedFields.add(field)) owner.diagnostics.add(new Diagnostic(
                         CYCLIC_STRUCT_LAYOUT_CODE,
                         DiagnosticSeverity.ERROR,
-                        "Struct '%s' has a recursive value layout through field '%s'.".formatted(struct.name(), field.name()),
+                        "Struct type '%s' has a recursive value layout through field '%s'."
+                            .formatted(instance.name(), field.name()),
                         field.type().span()
                     ));
 
-                    invalid.add(struct);
-                    visiting.remove(struct);
-                    checked.add(struct);
+                    invalid.add(instance);
+                    visiting.removeLast();
+                    checked.add(instance);
 
                     return false;
                 }
 
-                if (!validateStructLayout(nested, owners, checked, invalid, visiting)) {
-                    invalid.add(struct);
-                    visiting.remove(struct);
-                    checked.add(struct);
+                if (!validateStructLayout(nestedType, owners, checked, invalid, visiting, reportedFields)) {
+                    invalid.add(instance);
+                    visiting.removeLast();
+                    checked.add(instance);
 
                     return false;
                 }
             }
 
-            visiting.remove(struct);
-            checked.add(struct);
+            visiting.removeLast();
+            checked.add(instance);
 
             return true;
         }
@@ -233,6 +347,33 @@ public final class SemanticAnalyzer {
         }
     }
 
+    private record GenericFunctionInstantiation(FunctionSymbol function, List<TypeSymbol> arguments) {
+        private GenericFunctionInstantiation {
+            Objects.requireNonNull(function, "Generic function instantiation must not be null.");
+            Objects.requireNonNull(arguments, "Generic function arguments must not be null.");
+            arguments = List.copyOf(arguments);
+        }
+
+        private Map<TypeParameterSymbol, TypeSymbol> substitutions() {
+            var substitutions = new IdentityHashMap<TypeParameterSymbol, TypeSymbol>();
+
+            for (var index = 0; index < arguments.size(); index++)
+                substitutions.put(function.typeParameters().get(index), arguments.get(index));
+
+            return substitutions;
+        }
+
+        private String displayName() {
+            if (arguments.isEmpty()) return function.name();
+
+            var text = new StringJoiner(", ", function.name() + "<", ">");
+
+            arguments.forEach(argument -> text.add(argument.name()));
+
+            return text.toString();
+        }
+    }
+
     private record EntryPointCandidate(Binder binder, ModuleSymbol module, FunctionDeclaration declaration, FunctionSymbol function, Annotation annotation) {
         private EntryPointCandidate {
             Objects.requireNonNull(binder, "Entry point candidate binder must not be null.");
@@ -254,6 +395,7 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<FunctionDeclaration, FunctionSymbol> functionSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<StructDeclaration, StructSymbol> structSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<StructFieldDeclaration, StructFieldSymbol> structFieldSymbols = new IdentityHashMap<>();
+        private final IdentityHashMap<TypeParameter, TypeParameterSymbol> typeParameterSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<Parameter, ParameterSymbol> parameterSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<NameExpression, Symbol> resolvedNames = new IdentityHashMap<>();
@@ -267,6 +409,7 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
         private final IdentityHashMap<Expression, TypeSymbol> expressionTypes = new IdentityHashMap<>();
         private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions = new IdentityHashMap<>();
+        private final IdentityHashMap<CallExpression, List<TypeSymbol>> calledFunctionTypeArguments = new IdentityHashMap<>();
         private final IdentityHashMap<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<InjectionDeclaration, ModuleSymbol> injectedModules = new IdentityHashMap<>();
         private final IdentityHashMap<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions = new IdentityHashMap<>();
@@ -274,6 +417,10 @@ public final class SemanticAnalyzer {
         private final ModuleSymbol module;
         private final Map<ModuleName, ModuleSymbol> modules;
         private final IdentityHashMap<TypeReference, TypeSymbol> programResolvedTypes;
+        private final IdentityHashMap<StructSymbol, Map<String, TypeParameterType>> structTypeEnvironments = new IdentityHashMap<>();
+        private final IdentityHashMap<FunctionSymbol, Map<String, TypeParameterType>> functionTypeEnvironments = new IdentityHashMap<>();
+
+        private Map<String, TypeParameterType> activeTypeEnvironment = Map.of();
 
         private Binder(SourceModule sourceModule, ModuleSymbol module, Map<ModuleName, ModuleSymbol> modules, IdentityHashMap<TypeReference, TypeSymbol> programResolvedTypes) {
             Objects.requireNonNull(sourceModule, "Source module must not be null.");
@@ -298,6 +445,7 @@ public final class SemanticAnalyzer {
                 functionSymbols,
                 structSymbols,
                 structFieldSymbols,
+                typeParameterSymbols,
                 parameterSymbols,
                 localVariableSymbols,
                 resolvedNames,
@@ -307,6 +455,7 @@ public final class SemanticAnalyzer {
                 initializedStructFields,
                 accessedStructFields,
                 calledFunctions,
+                calledFunctionTypeArguments,
                 qualifiedNameSymbols,
                 injectedModules,
                 directlyInjectedFunctions,
@@ -327,9 +476,12 @@ public final class SemanticAnalyzer {
             for (var declaration : unit.declarations()) {
                 if (!(declaration instanceof StructDeclaration struct)) continue;
 
-                var symbol = new StructSymbol(struct);
+                var symbol = new StructSymbol(struct, module.name());
 
                 structSymbols.put(struct, symbol);
+                structTypeEnvironments.put(symbol, createTypeEnvironment(symbol.typeParameters()));
+
+                for (var parameter : symbol.typeParameters()) typeParameterSymbols.put(parameter.declaration(), parameter);
 
                 for (var field : symbol.fields()) structFieldSymbols.put(field.declaration(), field);
 
@@ -348,9 +500,20 @@ public final class SemanticAnalyzer {
                     var symbol = new FunctionSymbol(function);
 
                     functionSymbols.put(function, symbol);
+                    functionTypeEnvironments.put(symbol, createTypeEnvironment(symbol.typeParameters()));
+
+                    for (var parameter : symbol.typeParameters()) typeParameterSymbols.put(parameter.declaration(), parameter);
 
                     if (!module.declareExport(symbol)) duplicateFunctions.put(function, true);
                 }
+        }
+
+        private Map<String, TypeParameterType> createTypeEnvironment(List<TypeParameterSymbol> parameters) {
+            var environment = new LinkedHashMap<String, TypeParameterType>();
+
+            for (var parameter : parameters) environment.putIfAbsent(parameter.name(), parameter.type());
+
+            return Map.copyOf(environment);
         }
 
         private void bindStructDeclarations() {
@@ -367,7 +530,10 @@ public final class SemanticAnalyzer {
                 ));
                 else if (duplicateStructs.containsKey(struct)) reportDuplicate(symbol);
 
+                validateTypeParameters(symbol.typeParameters(), "struct '%s'".formatted(symbol.name()));
+
                 var fieldNames = new HashSet<String>();
+                var typeEnvironment = structTypeEnvironments.get(symbol);
 
                 for (var field : symbol.fields()) {
                     if (!fieldNames.add(field.name())) diagnostics.add(new Diagnostic(
@@ -377,7 +543,7 @@ public final class SemanticAnalyzer {
                         field.span()
                     ));
 
-                    var fieldType = resolveTypeReference(field.type());
+                    var fieldType = resolveTypeReference(field.type(), typeEnvironment);
 
                     if (fieldType != BuiltInTypes.ERROR && !fieldType.isValue()) diagnostics.add(new Diagnostic(
                         INVALID_STRUCT_FIELD_TYPE_CODE,
@@ -410,6 +576,17 @@ public final class SemanticAnalyzer {
 
         private boolean validateEntryPointCandidate(FunctionDeclaration function) {
             var valid = !duplicateFunctions.containsKey(function);
+
+            if (!function.typeParameters().isEmpty()) {
+                diagnostics.add(new Diagnostic(
+                    GENERIC_ARITY_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Entry point '%s' cannot declare type parameters.".formatted(function.name()),
+                    function.span()
+                ));
+
+                valid = false;
+            }
 
             if (function.body().isEmpty()) {
                 diagnostics.add(new Diagnostic(
@@ -460,12 +637,16 @@ public final class SemanticAnalyzer {
 
             if (duplicateFunctions.containsKey(function)) reportDuplicate(functionSymbol);
 
+            validateTypeParameters(functionSymbol.typeParameters(), "function '%s'".formatted(functionSymbol.name()));
+
+            var typeEnvironment = functionTypeEnvironments.get(functionSymbol);
+
             var functionScope = createChildScope(ScopeKind.FUNCTION, moduleScope);
 
             functionScopes.put(function, functionScope);
 
             for (var parameter : function.parameters()) {
-                var parameterType = resolveTypeReference(parameter.type());
+                var parameterType = resolveTypeReference(parameter.type(), typeEnvironment);
 
                 validateParameterType(function, parameter, parameterType);
 
@@ -476,7 +657,7 @@ public final class SemanticAnalyzer {
                 declareOrReport(functionScope, parameterSymbol);
             }
 
-            resolveTypeReference(function.returnType());
+            resolveTypeReference(function.returnType(), typeEnvironment);
         }
 
         private void bindFunctionBodies() {
@@ -484,13 +665,31 @@ public final class SemanticAnalyzer {
         }
 
         private void bindFunctionBody(FunctionDeclaration function) {
-            function.body().ifPresent(body -> {
-                var functionScope = functionScopes.get(function);
+            if (function.body().isEmpty()) return;
 
+            var body = function.body().orElseThrow();
+            var functionScope = functionScopes.get(function);
+            var previousTypeEnvironment = activeTypeEnvironment;
+
+            activeTypeEnvironment = functionTypeEnvironments.get(functionSymbols.get(function));
+
+            try {
                 blockScopes.put(body, functionScope);
-
                 bindBlock(body, functionScope, function);
-            });
+            } finally {
+                activeTypeEnvironment = previousTypeEnvironment;
+            }
+        }
+
+        private void validateTypeParameters(List<TypeParameterSymbol> parameters, String ownerDescription) {
+            var names = new HashSet<String>();
+
+            for (var parameter : parameters) if (!names.add(parameter.name())) diagnostics.add(new Diagnostic(
+                DUPLICATE_TYPE_PARAMETER_CODE,
+                DiagnosticSeverity.ERROR,
+                "Type parameter '%s' is declared more than once on %s.".formatted(parameter.name(), ownerDescription),
+                parameter.span()
+            ));
         }
 
         private void bindBlock(Block block, Scope scope, FunctionDeclaration function) {
@@ -599,7 +798,7 @@ public final class SemanticAnalyzer {
         }
 
         private void validateVariableInitializer(VariableDeclarationStatement declaration, TypeSymbol declaredType, TypeSymbol initializerType) {
-            if (declaredType == BuiltInTypes.ERROR || initializerType == BuiltInTypes.ERROR || !declaredType.isValue() || declaredType == initializerType) return;
+            if (declaredType == BuiltInTypes.ERROR || initializerType == BuiltInTypes.ERROR || !declaredType.isValue() || sameType(declaredType, initializerType)) return;
 
             diagnostics.add(new Diagnostic(
                 INCOMPATIBLE_INITIALIZER_CODE,
@@ -732,10 +931,10 @@ public final class SemanticAnalyzer {
                     continue;
                 }
 
-                var expectedType = resolvedTypeOf(resolvedField.type());
+                var expectedType = fieldTypeOf(structType, resolvedField);
                 var actualType = initializerTypes.get(initializer);
 
-                if (expectedType != BuiltInTypes.ERROR && actualType != BuiltInTypes.ERROR && expectedType != actualType) diagnostics.add(new Diagnostic(
+                if (expectedType != BuiltInTypes.ERROR && actualType != BuiltInTypes.ERROR && !sameType(expectedType, actualType)) diagnostics.add(new Diagnostic(
                     INCOMPATIBLE_STRUCT_INITIALIZER_CODE,
                     DiagnosticSeverity.ERROR,
                     "Field '%s' of struct '%s' expects type '%s', but found '%s'.".formatted(
@@ -788,7 +987,20 @@ public final class SemanticAnalyzer {
 
             accessedStructFields.put(expression, resolvedField);
 
-            return resolvedTypeOf(resolvedField.type());
+            return fieldTypeOf(structType, resolvedField);
+        }
+
+        private TypeSymbol fieldTypeOf(StructType instance, StructFieldSymbol field) {
+            if (instance.symbol() != field.owner()) throw new IllegalArgumentException(
+                "Field '%s' does not belong to struct type '%s'.".formatted(field.name(), instance.name())
+            );
+
+            var substitutions = new IdentityHashMap<TypeParameterSymbol, TypeSymbol>();
+            var parameters = instance.symbol().typeParameters();
+
+            for (var index = 0; index < parameters.size(); index++) substitutions.put(parameters.get(index), instance.arguments().get(index));
+
+            return TypeSubstitution.substitute(resolvedTypeOf(field.type()), substitutions);
         }
 
         private Symbol rootSymbolOf(FieldAccessExpression expression) {
@@ -862,8 +1074,10 @@ public final class SemanticAnalyzer {
         private TypeSymbol bindCallExpression(CallExpression call, Scope scope) {
             var calleeType = bindExpression(call.callee(), scope);
             var argumentTypes = new ArrayList<TypeSymbol>(call.arguments().size());
+            var typeArguments = new ArrayList<TypeSymbol>(call.typeArguments().size());
 
             for (var argument : call.arguments()) argumentTypes.add(bindExpression(argument, scope));
+            for (var typeArgument : call.typeArguments()) typeArguments.add(resolveTypeReference(typeArgument));
 
             var resolvedFunction = resolvedFunctionOf(call.callee());
 
@@ -881,11 +1095,62 @@ public final class SemanticAnalyzer {
             var function = resolvedFunction.orElseThrow();
 
             calledFunctions.put(call, function);
+            calledFunctionTypeArguments.put(call, List.copyOf(typeArguments));
 
             validateArgumentCount(call, function);
-            validateArgumentTypes(call, function, argumentTypes);
 
-            return resolvedTypeOf(function.declaration().returnType());
+            if (!validateCallTypeArguments(call, function, typeArguments)) return BuiltInTypes.ERROR;
+
+            var substitutions = functionSubstitutions(function, typeArguments);
+
+            validateArgumentTypes(call, function, argumentTypes, substitutions);
+
+            return TypeSubstitution.substitute(resolvedTypeOf(function.declaration().returnType()), substitutions);
+        }
+
+        private boolean validateCallTypeArguments(CallExpression call, FunctionSymbol function, List<TypeSymbol> arguments) {
+            var expected = function.typeParameters().size();
+
+            if (arguments.size() != expected) {
+                diagnostics.add(new Diagnostic(
+                    GENERIC_ARITY_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Function '%s' expects %d type arguments, but received %d.".formatted(function.name(), expected, arguments.size()),
+                    call.span()
+                ));
+
+                return false;
+            }
+
+            var valid = true;
+
+            for (var index = 0; index < arguments.size(); index++) {
+                var argument = arguments.get(index);
+
+                if (argument == BuiltInTypes.VOID) {
+                    diagnostics.add(new Diagnostic(
+                        INVALID_TYPE_ARGUMENT_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Type argument %d of function '%s' cannot be 'void'.".formatted(index + 1, function.name()),
+                        call.typeArguments().get(index).span()
+                    ));
+
+                    valid = false;
+                } else if (argument == BuiltInTypes.ERROR) valid = false;
+            }
+
+            return valid;
+        }
+
+        private IdentityHashMap<TypeParameterSymbol, TypeSymbol> functionSubstitutions(
+            FunctionSymbol function,
+            List<TypeSymbol> arguments
+        ) {
+            var substitutions = new IdentityHashMap<TypeParameterSymbol, TypeSymbol>();
+
+            for (var index = 0; index < arguments.size(); index++) substitutions.put(function.typeParameters().get(index), arguments.get(index));
+
+            return substitutions;
         }
 
         private void bindReturn(ReturnStatement statement, Scope scope, FunctionDeclaration function) {
@@ -916,7 +1181,7 @@ public final class SemanticAnalyzer {
                 return;
             }
 
-            if (returnType == BuiltInTypes.ERROR || expressionType == BuiltInTypes.ERROR || returnType == expressionType) return;
+            if (returnType == BuiltInTypes.ERROR || expressionType == BuiltInTypes.ERROR || sameType(returnType, expressionType)) return;
 
             diagnostics.add(new Diagnostic(
                 INCOMPATIBLE_RETURN_CODE,
@@ -971,38 +1236,89 @@ public final class SemanticAnalyzer {
         }
 
         private TypeSymbol resolveTypeReference(TypeReference reference) {
+            return resolveTypeReference(reference, activeTypeEnvironment);
+        }
+
+        private TypeSymbol resolveTypeReference(TypeReference reference, Map<String, TypeParameterType> typeEnvironment) {
+            var arguments = new ArrayList<TypeSymbol>(reference.arguments().size());
+
+            for (var argument : reference.arguments()) arguments.add(resolveTypeReference(argument, typeEnvironment));
+
+            var parameter = typeEnvironment.get(reference.name());
+
+            if (parameter != null) {
+                if (!arguments.isEmpty()) return reportGenericArity(reference, "type parameter '%s'".formatted(reference.name()), 0, arguments.size());
+
+                return recordResolvedType(reference, parameter);
+            }
+
             var primitive = BuiltInTypes.lookup(reference.name());
 
             if (primitive.isPresent()) {
                 var type = primitive.orElseThrow();
 
-                resolvedTypes.put(reference, type);
+                if (!arguments.isEmpty()) return reportGenericArity(reference, "built-in type '%s'".formatted(reference.name()), 0, arguments.size());
 
-                programResolvedTypes.put(reference, type);
-
-                return type;
+                return recordResolvedType(reference, type);
             }
 
             var declared = moduleScope.lookupLocal(reference.name()).filter(StructSymbol.class::isInstance).map(StructSymbol.class::cast);
 
             if (declared.isPresent()) {
-                var type = declared.orElseThrow().type();
+                var struct = declared.orElseThrow();
+                var expected = struct.typeParameters().size();
 
-                resolvedTypes.put(reference, type);
-                programResolvedTypes.put(reference, type);
+                if (arguments.size() != expected) return reportGenericArity(reference, "struct '%s'".formatted(struct.name()), expected, arguments.size());
 
-                return type;
+                var validArguments = true;
+
+                for (var index = 0; index < arguments.size(); index++) {
+                    var argument = arguments.get(index);
+
+                    if (argument == BuiltInTypes.VOID) {
+                        diagnostics.add(new Diagnostic(
+                            INVALID_TYPE_ARGUMENT_CODE,
+                            DiagnosticSeverity.ERROR,
+                            "Type argument %d of struct '%s' cannot be 'void'.".formatted(index + 1, struct.name()),
+                            reference.arguments().get(index).span()
+                        ));
+
+                        validArguments = false;
+                    } else if (argument == BuiltInTypes.ERROR) validArguments = false;
+                }
+
+                if (!validArguments) return recordResolvedType(reference, BuiltInTypes.ERROR);
+
+                var type = arguments.equals(struct.type().arguments()) ? struct.type() : new StructType(struct, arguments);
+
+                return recordResolvedType(reference, type);
             }
 
-            resolvedTypes.put(reference, BuiltInTypes.ERROR);
-            programResolvedTypes.put(reference, BuiltInTypes.ERROR);
             diagnostics.add(new Diagnostic(
                 UNKNOWN_TYPE_CODE,
                 DiagnosticSeverity.ERROR,
                 "Unknown type '%s'.".formatted(reference.name()), reference.span()
             ));
 
-            return BuiltInTypes.ERROR;
+            return recordResolvedType(reference, BuiltInTypes.ERROR);
+        }
+
+        private TypeSymbol reportGenericArity(TypeReference reference, String target, int expected, int actual) {
+            diagnostics.add(new Diagnostic(
+                GENERIC_ARITY_CODE,
+                DiagnosticSeverity.ERROR,
+                "%s expects %d type arguments, but received %d.".formatted(target, expected, actual),
+                reference.span()
+            ));
+
+            return recordResolvedType(reference, BuiltInTypes.ERROR);
+        }
+
+        private TypeSymbol recordResolvedType(TypeReference reference, TypeSymbol type) {
+            resolvedTypes.put(reference, type);
+            programResolvedTypes.put(reference, type);
+
+            return type;
         }
 
         private TypeSymbol resolvedTypeOf(TypeReference reference) {
@@ -1095,7 +1411,7 @@ public final class SemanticAnalyzer {
                 ));
             }
 
-            if (targetType == BuiltInTypes.ERROR || valueType == BuiltInTypes.ERROR || targetType == valueType) return;
+            if (targetType == BuiltInTypes.ERROR || valueType == BuiltInTypes.ERROR || sameType(targetType, valueType)) return;
 
             diagnostics.add(new Diagnostic(
                 INCOMPATIBLE_ASSIGNMENT_CODE,
@@ -1128,7 +1444,7 @@ public final class SemanticAnalyzer {
         }
 
         private void validateAssignmentType(AssignmentStatement assignment, String targetName, TypeSymbol targetType, TypeSymbol valueType) {
-            if (targetType == BuiltInTypes.ERROR || valueType == BuiltInTypes.ERROR || targetType == valueType) return;
+            if (targetType == BuiltInTypes.ERROR || valueType == BuiltInTypes.ERROR || sameType(targetType, valueType)) return;
 
             diagnostics.add(new Diagnostic(
                 INCOMPATIBLE_ASSIGNMENT_CODE,
@@ -1154,16 +1470,21 @@ public final class SemanticAnalyzer {
             ));
         }
 
-        private void validateArgumentTypes(CallExpression call, FunctionSymbol function, List<TypeSymbol> argumentTypes) {
+        private void validateArgumentTypes(
+            CallExpression call,
+            FunctionSymbol function,
+            List<TypeSymbol> argumentTypes,
+            Map<TypeParameterSymbol, TypeSymbol> substitutions
+        ) {
             var parameters = function.declaration().parameters();
             var comparableCount = Math.min(parameters.size(), argumentTypes.size());
 
             for (var index = 0; index < comparableCount; index++) {
                 var parameter = parameters.get(index);
-                var expectedType = resolvedTypeOf(parameter.type());
+                var expectedType = TypeSubstitution.substitute(resolvedTypeOf(parameter.type()), substitutions);
                 var actualType = argumentTypes.get(index);
 
-                if (expectedType == BuiltInTypes.ERROR || actualType == BuiltInTypes.ERROR || !expectedType.isValue() || expectedType == actualType) continue;
+                if (expectedType == BuiltInTypes.ERROR || actualType == BuiltInTypes.ERROR || !expectedType.isValue() || sameType(expectedType, actualType)) continue;
 
                 diagnostics.add(new Diagnostic(
                     INCOMPATIBLE_ARGUMENT_CODE,
@@ -1180,6 +1501,10 @@ public final class SemanticAnalyzer {
 
         private TypeSymbol resolvedTypeOf(ParameterSymbol parameter) {
             return resolvedTypeOf(parameter.type());
+        }
+
+        private boolean sameType(TypeSymbol left, TypeSymbol right) {
+            return left == right || left.equals(right);
         }
 
         private void resolveInjections() {

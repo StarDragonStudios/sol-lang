@@ -142,6 +142,7 @@ public final class Parser {
     private StructDeclaration parseStructDeclaration() {
         var structToken = consume(TokenKind.STRUCT, "'struct'");
         var nameToken = consume(TokenKind.IDENTIFIER, "a struct name after 'struct'");
+        var typeParameters = parseTypeParameterList();
 
         consume(TokenKind.NEWLINE, "a newline after the struct declaration header");
 
@@ -154,13 +155,12 @@ public final class Parser {
 
             consume(TokenKind.COLON, "':' after the struct field name");
 
-            var fieldType = consume(TokenKind.IDENTIFIER, "a struct field type after ':'");
-            var type = new TypeReference(fieldType.lexeme(), fieldType.span());
+            var type = parseTypeReference("a struct field type after ':'");
 
             fields.add(new StructFieldDeclaration(
                 fieldName.lexeme(),
                 type,
-                new SourceSpan(fieldName.span().start(), fieldType.span().end())
+                new SourceSpan(fieldName.span().start(), type.span().end())
             ));
 
             if (match(TokenKind.NEWLINE)) skipNewlines();
@@ -171,6 +171,7 @@ public final class Parser {
 
         return new StructDeclaration(
             nameToken.lexeme(),
+            typeParameters,
             fields,
             new SourceSpan(structToken.span().start(), endToken.span().end())
         );
@@ -212,6 +213,7 @@ public final class Parser {
 
     private FunctionDeclaration parseFunctionDeclarationAfterMarker(List<Annotation> annotations, Token declarationStartToken, boolean bodyless) {
         var nameToken = consume(TokenKind.IDENTIFIER, bodyless ? "a function name after '@fn'" : "a function name after 'fn'");
+        var typeParameters = parseTypeParameterList();
 
         consume(TokenKind.LEFT_PAREN, "'(' after the function name");
 
@@ -220,8 +222,7 @@ public final class Parser {
         consume(TokenKind.RIGHT_PAREN, "')' after the function parameter list");
         consume(TokenKind.ARROW, "'->' before the function return type");
 
-        var returnTypeToken = consume(TokenKind.IDENTIFIER, "a return type after '->'");
-        var returnType = new TypeReference(returnTypeToken.lexeme(), returnTypeToken.span());
+        var returnType = parseTypeReference("a return type after '->'");
 
         if (bodyless) {
             requireBodylessFunctionTerminator();
@@ -229,10 +230,11 @@ public final class Parser {
             return new FunctionDeclaration(
                 annotations,
                 nameToken.lexeme(),
+                typeParameters,
                 parameters,
                 returnType,
                 Optional.empty(),
-                new SourceSpan(declarationStartToken.span().start(), returnTypeToken.span().end())
+                new SourceSpan(declarationStartToken.span().start(), returnType.span().end())
             );
         }
 
@@ -244,6 +246,7 @@ public final class Parser {
         return new FunctionDeclaration(
             annotations,
             nameToken.lexeme(),
+            typeParameters,
             parameters,
             returnType,
             Optional.of(body),
@@ -354,6 +357,107 @@ public final class Parser {
         return parameters;
     }
 
+    private List<TypeParameter> parseTypeParameterList() {
+        if (!match(TokenKind.LESS)) return List.of();
+
+        var parameters = new ArrayList<TypeParameter>();
+
+        skipDelimitedNewlines();
+
+        while (true) {
+            var name = consume(TokenKind.IDENTIFIER, "a type parameter name after '<'");
+
+            parameters.add(new TypeParameter(name.lexeme(), name.span()));
+
+            skipDelimitedNewlines();
+
+            if (!match(TokenKind.COMMA)) break;
+
+            skipDelimitedNewlines();
+
+            if (check(TokenKind.GREATER)) break;
+        }
+
+        consume(TokenKind.GREATER, "'>' after the type parameter list");
+
+        return List.copyOf(parameters);
+    }
+
+    private TypeReference parseTypeReference(String expectation) {
+        var name = consume(TokenKind.IDENTIFIER, expectation);
+
+        if (!check(TokenKind.LESS)) return new TypeReference(name.lexeme(), name.span());
+
+        var arguments = parseExplicitTypeArguments();
+
+        return new TypeReference(
+            name.lexeme(),
+            arguments.arguments(),
+            new SourceSpan(name.span().start(), arguments.closingToken().span().end())
+        );
+    }
+
+    private ParsedTypeArguments parseExplicitTypeArguments() {
+        consume(TokenKind.LESS, "'<' before the explicit type arguments");
+
+        var arguments = new ArrayList<TypeReference>();
+
+        skipDelimitedNewlines();
+
+        while (true) {
+            arguments.add(parseTypeReference("a type argument after '<'"));
+
+            skipDelimitedNewlines();
+
+            if (!match(TokenKind.COMMA)) break;
+
+            skipDelimitedNewlines();
+
+            if (check(TokenKind.GREATER)) break;
+        }
+
+        var closingToken = consume(TokenKind.GREATER, "'>' after the explicit type arguments");
+
+        return new ParsedTypeArguments(arguments, closingToken);
+    }
+
+    private boolean looksLikeExplicitTypeArguments() {
+        if (!check(TokenKind.LESS)) return false;
+
+        var depth = 0;
+
+        for (var index = current; index < tokens.size(); index++) {
+            var kind = tokens.get(index).kind();
+
+            if (kind == TokenKind.LESS) {
+                depth++;
+                continue;
+            }
+
+            if (kind == TokenKind.GREATER) {
+                depth--;
+
+                if (depth < 0) return false;
+
+                if (depth == 0) {
+                    var nextIndex = index + 1;
+
+                    if (nextIndex >= tokens.size()) return false;
+
+                    var next = tokens.get(nextIndex).kind();
+
+                    return next == TokenKind.LEFT_PAREN || next == TokenKind.LEFT_BRACE;
+                }
+
+                continue;
+            }
+
+            if (kind != TokenKind.IDENTIFIER && kind != TokenKind.COMMA && kind != TokenKind.NEWLINE) return false;
+        }
+
+        return false;
+    }
+
     private List<Statement> parseFunctionBodyStatements() {
         return parseStatementsUntil("a newline or 'end' after the statement", TokenKind.END);
     }
@@ -461,7 +565,7 @@ public final class Parser {
          * Everything else follows the assignment path so malformed
          * assignments retain their specific missing-'=' diagnostic.
          */
-        if (!checkNext(TokenKind.LEFT_PAREN) && !checkNext(TokenKind.DOUBLE_COLON)) return parseAssignmentStatement();
+        if (!checkNext(TokenKind.LEFT_PAREN) && !checkNext(TokenKind.DOUBLE_COLON) && !checkNext(TokenKind.LESS)) return parseAssignmentStatement();
 
         var expression = parseExpression();
 
@@ -511,12 +615,11 @@ public final class Parser {
 
         consume(TokenKind.COLON, "':' after the variable name");
 
-        var typeToken = consume(TokenKind.IDENTIFIER, "a variable type after ':'");
+        var type = parseTypeReference("a variable type after ':'");
 
         consume(TokenKind.ASSIGN, "'=' after the variable type");
 
         var initializer = parseExpression();
-        var type = new TypeReference(typeToken.lexeme(), typeToken.span());
 
         return new VariableDeclarationStatement(kind, nameToken.lexeme(), type, initializer, new SourceSpan(startToken.span().start(), initializer.span().end()));
     }
@@ -557,10 +660,9 @@ public final class Parser {
 
         consume(TokenKind.COLON, "':' after the parameter name");
 
-        var typeToken = consume(TokenKind.IDENTIFIER, "a parameter type after ':'");
-        var type = new TypeReference(typeToken.lexeme(), typeToken.span());
+        var type = parseTypeReference("a parameter type after ':'");
 
-        return new Parameter(nameToken.lexeme(), type, new SourceSpan(nameToken.span().start(), typeToken.span().end()));
+        return new Parameter(nameToken.lexeme(), type, new SourceSpan(nameToken.span().start(), type.span().end()));
     }
 
     private Expression parseExpression() {
@@ -640,8 +742,35 @@ public final class Parser {
         var expression = parsePrimaryExpression();
 
         while (true) {
+            if (check(TokenKind.LESS) && looksLikeExplicitTypeArguments()) {
+                var parsedArguments = parseExplicitTypeArguments();
+
+                if (check(TokenKind.LEFT_BRACE) && expression instanceof NameExpression name) {
+                    var type = new TypeReference(
+                        name.name(),
+                        parsedArguments.arguments(),
+                        new SourceSpan(name.span().start(), parsedArguments.closingToken().span().end())
+                    );
+
+                    expression = parseStructConstructionExpression(type);
+                    continue;
+                }
+
+                if (check(TokenKind.LEFT_PAREN)) {
+                    expression = parseCallExpression(expression, parsedArguments.arguments());
+                    continue;
+                }
+
+                throw new IllegalStateException("Explicit type-argument lookahead accepted an unsupported postfix expression.");
+            }
+
+            if (check(TokenKind.LEFT_BRACE) && expression instanceof NameExpression name) {
+                expression = parseStructConstructionExpression(new TypeReference(name.name(), name.span()));
+                continue;
+            }
+
             if (check(TokenKind.LEFT_PAREN)) {
-                expression = parseCallExpression(expression);
+                expression = parseCallExpression(expression, List.of());
                 continue;
             }
 
@@ -664,13 +793,13 @@ public final class Parser {
         return expression;
     }
 
-    private CallExpression parseCallExpression(Expression callee) {
+    private CallExpression parseCallExpression(Expression callee, List<TypeReference> typeArguments) {
         consume(TokenKind.LEFT_PAREN, "'(' after the called expression");
 
         var arguments = parseCallArgumentList();
         var rightParenthesis = consume(TokenKind.RIGHT_PAREN, "')' after the function call arguments");
 
-        return new CallExpression(callee, arguments, new SourceSpan(callee.span().start(), rightParenthesis.span().end()));
+        return new CallExpression(callee, typeArguments, arguments, new SourceSpan(callee.span().start(), rightParenthesis.span().end()));
     }
 
     private List<Expression> parseCallArgumentList() {
@@ -704,17 +833,15 @@ public final class Parser {
                  CHAR_LITERAL,
                  STRING_LITERAL -> parseLiteralExpression();
 
-            case IDENTIFIER -> parseNameQualifiedOrStructConstructionExpression();
+            case IDENTIFIER -> parseNameOrQualifiedNameExpression();
             case LEFT_PAREN -> parseParenthesizedExpression();
 
             default -> throw expectedToken("an expression", peek());
         };
     }
 
-    private Expression parseNameQualifiedOrStructConstructionExpression() {
+    private Expression parseNameOrQualifiedNameExpression() {
         var name = parseNameExpression();
-
-        if (check(TokenKind.LEFT_BRACE)) return parseStructConstructionExpression(name);
 
         if (!match(TokenKind.DOUBLE_COLON)) return name;
 
@@ -725,7 +852,7 @@ public final class Parser {
         return new QualifiedNameExpression(name, member, new SourceSpan(name.span().start(), member.span().end()));
     }
 
-    private StructConstructionExpression parseStructConstructionExpression(NameExpression typeName) {
+    private StructConstructionExpression parseStructConstructionExpression(TypeReference type) {
         consume(TokenKind.LEFT_BRACE, "'{' after the struct type name");
 
         var fields = new ArrayList<StructFieldInitializer>();
@@ -757,12 +884,11 @@ public final class Parser {
         }
 
         var rightBrace = consume(TokenKind.RIGHT_BRACE, "'}' after the struct field initializers");
-        var type = new TypeReference(typeName.name(), typeName.span());
 
         return new StructConstructionExpression(
             type,
             fields,
-            new SourceSpan(typeName.span().start(), rightBrace.span().end())
+            new SourceSpan(type.span().start(), rightBrace.span().end())
         );
     }
 
@@ -770,6 +896,13 @@ public final class Parser {
         var token = consume(TokenKind.IDENTIFIER, "an identifier");
 
         return new NameExpression(token.lexeme(), token.span());
+    }
+
+    private record ParsedTypeArguments(List<TypeReference> arguments, Token closingToken) {
+        private ParsedTypeArguments {
+            arguments = List.copyOf(arguments);
+            Objects.requireNonNull(closingToken, "Explicit type-argument closing token must not be null.");
+        }
     }
 
     private ParenthesizedExpression

@@ -1,6 +1,7 @@
 package io.github.stardragonstudios.sol.semantics;
 
 import io.github.stardragonstudios.sol.semantics.types.StructType;
+import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.source.SourceSpan;
 import io.github.stardragonstudios.sol.syntax.StructDeclaration;
 
@@ -12,13 +13,21 @@ import java.util.Optional;
 
 public final class StructSymbol implements Symbol {
     private final StructDeclaration declaration;
+    private final Optional<ModuleName> moduleName;
     private final StructType type;
+    private final List<TypeParameterSymbol> typeParameters;
     private final List<StructFieldSymbol> fields;
     private final LinkedHashMap<String, StructFieldSymbol> fieldsByName = new LinkedHashMap<>();
 
     public StructSymbol(StructDeclaration declaration) {
+        this(declaration, null);
+    }
+
+    StructSymbol(StructDeclaration declaration, ModuleName moduleName) {
         this.declaration = Objects.requireNonNull(declaration, "Struct symbol declaration must not be null.");
-        type = new StructType(this);
+        this.moduleName = Optional.ofNullable(moduleName);
+        typeParameters = declaration.typeParameters().stream().map(parameter -> new TypeParameterSymbol(parameter, this)).toList();
+        type = new StructType(this, typeParameters.stream().<TypeSymbol>map(TypeParameterSymbol::type).toList());
 
         var declaredFields = new ArrayList<StructFieldSymbol>();
 
@@ -36,8 +45,16 @@ public final class StructSymbol implements Symbol {
         return declaration;
     }
 
+    public Optional<ModuleName> moduleName() {
+        return moduleName;
+    }
+
     public StructType type() {
         return type;
+    }
+
+    public List<TypeParameterSymbol> typeParameters() {
+        return typeParameters;
     }
 
     public List<StructFieldSymbol> fields() {

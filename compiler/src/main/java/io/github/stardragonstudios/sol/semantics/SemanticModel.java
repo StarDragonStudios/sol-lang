@@ -12,6 +12,7 @@ public final class SemanticModel {
     private final IdentityHashMap<FunctionDeclaration, FunctionSymbol> functionSymbols;
     private final IdentityHashMap<StructDeclaration, StructSymbol> structSymbols;
     private final IdentityHashMap<StructFieldDeclaration, StructFieldSymbol> structFieldSymbols;
+    private final IdentityHashMap<TypeParameter, TypeParameterSymbol> typeParameterSymbols;
     private final IdentityHashMap<Parameter, ParameterSymbol> parameterSymbols;
     private final IdentityHashMap<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols;
     private final IdentityHashMap<NameExpression, Symbol> resolvedNames;
@@ -23,6 +24,7 @@ public final class SemanticModel {
     private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes;
     private final IdentityHashMap<Expression, TypeSymbol> expressionTypes;
     private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions;
+    private final IdentityHashMap<CallExpression, List<TypeSymbol>> calledFunctionTypeArguments;
     private final IdentityHashMap<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols;
     private final IdentityHashMap<InjectionDeclaration, ModuleSymbol> injectedModules;
     private final IdentityHashMap<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions;
@@ -35,6 +37,7 @@ public final class SemanticModel {
         Map<FunctionDeclaration, FunctionSymbol> functionSymbols,
         Map<StructDeclaration, StructSymbol> structSymbols,
         Map<StructFieldDeclaration, StructFieldSymbol> structFieldSymbols,
+        Map<TypeParameter, TypeParameterSymbol> typeParameterSymbols,
         Map<Parameter, ParameterSymbol> parameterSymbols,
         Map<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols,
         Map<NameExpression, Symbol> resolvedNames,
@@ -44,6 +47,7 @@ public final class SemanticModel {
         Map<StructFieldInitializer, StructFieldSymbol> initializedStructFields,
         Map<FieldAccessExpression, StructFieldSymbol> accessedStructFields,
         Map<CallExpression, FunctionSymbol> calledFunctions,
+        Map<CallExpression, List<TypeSymbol>> calledFunctionTypeArguments,
         Map<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols,
         Map<InjectionDeclaration, ModuleSymbol> injectedModules,
         Map<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions,
@@ -57,6 +61,7 @@ public final class SemanticModel {
         this.functionSymbols = copyIdentityMap(functionSymbols, "Function symbol associations");
         this.structSymbols = copyIdentityMap(structSymbols, "Struct symbol associations");
         this.structFieldSymbols = copyIdentityMap(structFieldSymbols, "Struct field symbol associations");
+        this.typeParameterSymbols = copyIdentityMap(typeParameterSymbols, "Type parameter symbol associations");
         this.parameterSymbols = copyIdentityMap(parameterSymbols, "Parameter symbol associations");
         this.localVariableSymbols = copyIdentityMap(localVariableSymbols, "Local variable symbol associations");
         this.resolvedNames = copyIdentityMap(resolvedNames, "Resolved name associations");
@@ -68,6 +73,7 @@ public final class SemanticModel {
         this.resolvedTypes = copyIdentityMap(resolvedTypes, "Resolved type associations");
         this.expressionTypes = copyIdentityMap(expressionTypes, "Expression type associations");
         this.calledFunctions = copyIdentityMap(calledFunctions, "Called function associations");
+        this.calledFunctionTypeArguments = copyIdentityListMap(calledFunctionTypeArguments, "Called function type-argument associations");
         this.qualifiedNameSymbols = copyIdentityMap(qualifiedNameSymbols, "Qualified name associations");
         this.injectedModules = copyIdentityMap(injectedModules, "Injected module associations");
         this.directlyInjectedFunctions = copyIdentityListMap(directlyInjectedFunctions, "Directly injected function associations");
@@ -81,6 +87,12 @@ public final class SemanticModel {
     public Optional<FunctionSymbol> calledFunctionOf(CallExpression call) {
         Objects.requireNonNull(call, "Call expression must not be null.");
         return Optional.ofNullable(calledFunctions.get(call));
+    }
+
+    public List<TypeSymbol> typeArgumentsOf(CallExpression call) {
+        Objects.requireNonNull(call, "Call expression must not be null.");
+
+        return calledFunctionTypeArguments.getOrDefault(call, List.of());
     }
 
     public Optional<Scope> scopeOf(FunctionDeclaration declaration) {
@@ -111,6 +123,12 @@ public final class SemanticModel {
         Objects.requireNonNull(declaration, "Struct field declaration must not be null.");
 
         return Optional.ofNullable(structFieldSymbols.get(declaration));
+    }
+
+    public Optional<TypeParameterSymbol> symbolOf(TypeParameter declaration) {
+        Objects.requireNonNull(declaration, "Type parameter declaration must not be null.");
+
+        return Optional.ofNullable(typeParameterSymbols.get(declaration));
     }
 
     public Optional<ParameterSymbol> symbolOf(Parameter parameter) {

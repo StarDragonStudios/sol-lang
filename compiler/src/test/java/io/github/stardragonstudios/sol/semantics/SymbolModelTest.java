@@ -112,6 +112,7 @@ class SymbolModelTest {
                 SymbolKind.LOCAL_VARIABLE,
                 SymbolKind.STRUCT,
                 SymbolKind.STRUCT_FIELD,
+                SymbolKind.TYPE_PARAMETER,
                 SymbolKind.IMPORTED_NAME,
                 SymbolKind.MODULE_NAMESPACE
             ),

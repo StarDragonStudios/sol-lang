@@ -6,7 +6,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-public record FunctionDeclaration(List<Annotation> annotations, String name, List<Parameter> parameters, TypeReference returnType, Optional<Block> body, SourceSpan span) implements Declaration {
+public record FunctionDeclaration(
+    List<Annotation> annotations,
+    String name,
+    List<TypeParameter> typeParameters,
+    List<Parameter> parameters,
+    TypeReference returnType,
+    Optional<Block> body,
+    SourceSpan span
+) implements Declaration {
     public FunctionDeclaration {
         Objects.requireNonNull(
             annotations,
@@ -16,6 +24,11 @@ public record FunctionDeclaration(List<Annotation> annotations, String name, Lis
         Objects.requireNonNull(
             name,
             "Function name must not be null."
+        );
+
+        Objects.requireNonNull(
+            typeParameters,
+            "Function type parameters must not be null."
         );
 
         Objects.requireNonNull(
@@ -45,6 +58,20 @@ public record FunctionDeclaration(List<Annotation> annotations, String name, Lis
         }
 
         annotations = List.copyOf(annotations);
+        typeParameters = List.copyOf(typeParameters);
         parameters = List.copyOf(parameters);
+
+        typeParameters.forEach(parameter -> Objects.requireNonNull(parameter, "Function type parameters must not contain null values."));
+    }
+
+    public FunctionDeclaration(
+        List<Annotation> annotations,
+        String name,
+        List<Parameter> parameters,
+        TypeReference returnType,
+        Optional<Block> body,
+        SourceSpan span
+    ) {
+        this(annotations, name, List.of(), parameters, returnType, body, span);
     }
 }
