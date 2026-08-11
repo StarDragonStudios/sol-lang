@@ -8,6 +8,10 @@ import io.github.stardragonstudios.sol.ir.IrValueCallInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructConstructInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructFieldExtractInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructType;
+import io.github.stardragonstudios.sol.ir.IrNullConstant;
+import io.github.stardragonstudios.sol.ir.IrPointerType;
+import io.github.stardragonstudios.sol.ir.IrPointerLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerIndexLoadInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
@@ -20,6 +24,9 @@ import io.github.stardragonstudios.sol.syntax.ParenthesizedExpression;
 import io.github.stardragonstudios.sol.syntax.UnaryExpression;
 import io.github.stardragonstudios.sol.syntax.StructConstructionExpression;
 import io.github.stardragonstudios.sol.syntax.FieldAccessExpression;
+import io.github.stardragonstudios.sol.syntax.NullExpression;
+import io.github.stardragonstudios.sol.syntax.PointerDereferenceExpression;
+import io.github.stardragonstudios.sol.syntax.PointerIndexExpression;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,6 +42,7 @@ final class IrExpressionLowerer {
 
         final IrValue lowered = switch (expression) {
             case LiteralExpression literal -> IrLiteralLowerer.lower(literal, context);
+            case NullExpression nullExpression -> lowerNull(nullExpression, model, context);
             case NameExpression name -> lowerName(name, model, context);
             case ParenthesizedExpression parenthesized -> lower(parenthesized.expression(), model, context);
             case UnaryExpression unary -> lowerUnary(unary, model, context);
@@ -42,6 +50,8 @@ final class IrExpressionLowerer {
             case CallExpression call -> lowerCall(call, model, context);
             case StructConstructionExpression construction -> lowerStructConstruction(construction, model, context);
             case FieldAccessExpression fieldAccess -> lowerFieldAccess(fieldAccess, model, context);
+            case PointerDereferenceExpression dereference -> lowerPointerDereference(dereference, model, context);
+            case PointerIndexExpression index -> lowerPointerIndex(index, model, context);
 
             default -> throw new IrLoweringException("Unsupported expression syntax '%s' during IR lowering.".formatted(expression.getClass().getSimpleName()));
         };
@@ -49,6 +59,50 @@ final class IrExpressionLowerer {
         validateSemanticType(expression, lowered, model, context);
 
         return lowered;
+    }
+
+    private static IrValue lowerNull(
+        NullExpression expression,
+        SemanticModel model,
+        IrFunctionLoweringContext context
+    ) {
+        var semanticType = model.typeOf(expression).orElseThrow(() -> new IrLoweringException(
+            "Null expression has no contextual semantic pointer type."
+        ));
+        var loweredType = context.lowerType(semanticType);
+
+        if (!(loweredType instanceof IrPointerType pointerType)) throw new IrLoweringException(
+            "Null expression lowered to non-pointer type '%s'.".formatted(loweredType.displayName())
+        );
+
+        return new IrNullConstant(context.nextValueId(), pointerType);
+    }
+
+    private static IrValue lowerPointerDereference(
+        PointerDereferenceExpression expression,
+        SemanticModel model,
+        IrFunctionLoweringContext context
+    ) {
+        var pointer = lower(expression.pointer(), model, context);
+        var instruction = new IrPointerLoadInstruction(context.nextValueId(), pointer);
+
+        context.emit(instruction);
+
+        return instruction;
+    }
+
+    private static IrValue lowerPointerIndex(
+        PointerIndexExpression expression,
+        SemanticModel model,
+        IrFunctionLoweringContext context
+    ) {
+        var pointer = lower(expression.pointer(), model, context);
+        var index = lower(expression.index(), model, context);
+        var instruction = new IrPointerIndexLoadInstruction(context.nextValueId(), pointer, index);
+
+        context.emit(instruction);
+
+        return instruction;
     }
 
     private static IrValue lowerStructConstruction(

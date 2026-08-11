@@ -99,6 +99,23 @@ final class SolEndToEndCompilationTest {
     }
 
     @Test
+    void compilesAndExecutesRawMemoryFixture() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "raw-memory", "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+        assertEquals("", compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(42, result.exitCode(), result.standardError());
+        assertEquals("", result.standardOutput());
+        assertEquals("", result.standardError());
+    }
+
+    @Test
     void compilesAndExecutesConsoleFixture() throws Exception {
 
         EndToEndTestSupport.assumeNativeLinkerAvailable();

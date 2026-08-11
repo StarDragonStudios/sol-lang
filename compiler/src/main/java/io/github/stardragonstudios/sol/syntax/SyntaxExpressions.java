@@ -30,6 +30,10 @@ public final class SyntaxExpressions {
                 collect(assignment.target(), expressions);
                 collect(assignment.value(), expressions);
             }
+            case PointerAssignmentStatement assignment -> {
+                collect(assignment.target(), expressions);
+                collect(assignment.value(), expressions);
+            }
             case CallStatement call -> collect(call.call(), expressions);
             case ConditionalStatement conditional -> {
                 collect(conditional.condition(), expressions);
@@ -58,6 +62,11 @@ public final class SyntaxExpressions {
             case UnaryExpression unary -> collect(unary.operand(), expressions);
             case ParenthesizedExpression parenthesized -> collect(parenthesized.expression(), expressions);
             case FieldAccessExpression access -> collect(access.target(), expressions);
+            case PointerDereferenceExpression dereference -> collect(dereference.pointer(), expressions);
+            case PointerIndexExpression index -> {
+                collect(index.pointer(), expressions);
+                collect(index.index(), expressions);
+            }
             case StructConstructionExpression construction -> {
                 for (var field : construction.fields()) collect(field.value(), expressions);
             }
@@ -66,6 +75,7 @@ public final class SyntaxExpressions {
                 for (var argument : call.arguments()) collect(argument, expressions);
             }
             case LiteralExpression ignored -> {}
+            case NullExpression ignored -> {}
             case NameExpression ignored -> {}
             case QualifiedNameExpression qualified -> {
                 collect(qualified.qualifier(), expressions);

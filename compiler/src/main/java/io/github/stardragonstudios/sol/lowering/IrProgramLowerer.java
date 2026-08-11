@@ -18,6 +18,7 @@ import io.github.stardragonstudios.sol.semantics.SemanticProgramAnalysisResult;
 import io.github.stardragonstudios.sol.semantics.StructSymbol;
 import io.github.stardragonstudios.sol.semantics.TypeParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.types.StructType;
+import io.github.stardragonstudios.sol.semantics.types.PointerType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSubstitution;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.Expression;
@@ -128,10 +129,7 @@ public final class IrProgramLowerer {
         Set<StructType> lowered,
         Set<StructType> visiting
     ) {
-        if (lowered.contains(instance)) return context.structType(instance);
-        if (!visiting.add(instance)) throw new IrLoweringException(
-            "Struct type '%s' has a recursive value layout during IR lowering.".formatted(instance.name())
-        );
+        if (lowered.contains(instance) || visiting.contains(instance)) return context.structType(instance);
 
         var struct = instance.symbol();
         var module = owners.structs().get(struct);
@@ -141,30 +139,52 @@ public final class IrProgramLowerer {
         var model = requireAnalysis(program, module.name()).model();
         var substitutions = structSubstitutions(instance);
         var fields = new ArrayList<IrStructField>();
+        var qualifiedName = qualifiedTypeName(instance, owners);
+        var type = new IrStructType(qualifiedName);
+
+        context.assignStructType(instance, type);
+        visiting.add(instance);
 
         for (var field : struct.fields()) {
             var openType = requireType(model, field.type(), "field '%s' of struct '%s'".formatted(field.name(), struct.name()));
             var semanticType = TypeSubstitution.substitute(openType, substitutions);
             IrType fieldType;
 
-            if (semanticType instanceof StructType nested) {
-                fieldType = lowerStructType(program, nested, owners, context, lowered, visiting);
-            } else {
-                fieldType = IrTypeLowerer.lower(semanticType);
-            }
+            fieldType = lowerReachableType(program, semanticType, owners, context, lowered, visiting);
 
             fields.add(new IrStructField(field.name(), fieldType, field.index()));
         }
 
         visiting.remove(instance);
 
-        var qualifiedName = qualifiedTypeName(instance, owners);
-        var type = new IrStructType(qualifiedName, fields);
-
-        context.assignStructType(instance, type);
+        type.defineFields(fields);
         lowered.add(instance);
 
         return type;
+    }
+
+    private static IrType lowerReachableType(
+        SemanticProgramAnalysisResult program,
+        TypeSymbol semanticType,
+        SemanticOwners owners,
+        IrProgramLoweringContext context,
+        Set<StructType> lowered,
+        Set<StructType> visiting
+    ) {
+        if (semanticType instanceof StructType struct)
+            return lowerStructType(program, struct, owners, context, lowered, visiting);
+
+        if (semanticType instanceof PointerType pointer)
+            return new io.github.stardragonstudios.sol.ir.IrPointerType(lowerReachableType(
+                program,
+                pointer.elementType(),
+                owners,
+                context,
+                lowered,
+                visiting
+            ));
+
+        return IrTypeLowerer.lower(semanticType);
     }
 
     private static void assignFunctionReferences(
@@ -295,9 +315,16 @@ public final class IrProgramLowerer {
     }
 
     private static void addStructType(TypeSymbol type, Set<StructType> known, List<StructType> ordered) {
+        if (type instanceof PointerType pointer) {
+            addStructType(pointer.elementType(), known, ordered);
+            return;
+        }
+
         if (!(type instanceof StructType struct) || !known.add(struct)) return;
 
         ordered.add(struct);
+
+        for (var argument : struct.arguments()) addStructType(argument, known, ordered);
     }
 
     private static IdentityHashMap<TypeParameterSymbol, TypeSymbol> structSubstitutions(StructType instance) {
@@ -322,10 +349,17 @@ public final class IrProgramLowerer {
 
         var arguments = new StringJoiner(", ", "<", ">");
 
-        for (var argument : type.arguments())
-            arguments.add(argument instanceof StructType nested ? qualifiedTypeName(nested, owners) : argument.name());
+        for (var argument : type.arguments()) arguments.add(qualifiedTypeName(argument, owners));
 
         return "%s::%s%s".formatted(module.name().qualifiedName(), type.symbol().name(), arguments);
+    }
+
+    private static String qualifiedTypeName(TypeSymbol type, SemanticOwners owners) {
+        if (type instanceof StructType struct) return qualifiedTypeName(struct, owners);
+        if (type instanceof PointerType pointer)
+            return "pointer<%s>".formatted(qualifiedTypeName(pointer.elementType(), owners));
+
+        return type.name();
     }
 
     private record SemanticOwners(

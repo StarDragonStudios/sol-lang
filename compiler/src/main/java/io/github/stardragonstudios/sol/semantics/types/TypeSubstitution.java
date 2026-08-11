@@ -16,6 +16,12 @@ public final class TypeSubstitution {
         if (type instanceof TypeParameterType parameter)
             return substitutions.getOrDefault(parameter.symbol(), parameter);
 
+        if (type instanceof PointerType pointer) {
+            var elementType = substitute(pointer.elementType(), substitutions);
+
+            return elementType == pointer.elementType() ? pointer : new PointerType(elementType);
+        }
+
         if (!(type instanceof StructType struct) || struct.arguments().isEmpty()) return type;
 
         var arguments = new ArrayList<TypeSymbol>(struct.arguments().size());

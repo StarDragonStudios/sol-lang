@@ -253,6 +253,83 @@ class LlvmBackendTest {
         }
     }
 
+    @Test
+    void lowersTypedPointerLoadsStoresAndIndexingThroughOpaqueNativePointers() {
+        var pointerType = new IrPointerType(PrimitiveIrType.INT);
+        var pointer = new IrParameter(new IrValueId(0), "pointer", pointerType);
+        var index = new IrParameter(new IrValueId(1), "index", PrimitiveIrType.INT);
+        var indexed = new IrPointerIndexLoadInstruction(new IrValueId(2), pointer, index);
+        var direct = new IrPointerLoadInstruction(new IrValueId(3), pointer);
+        var function = IrFunction.definition(
+            new IrFunctionId(0),
+            "read_and_store",
+            List.of(pointer, index),
+            PrimitiveIrType.INT,
+            List.of(new IrBasicBlock(
+                new IrBlockId(0),
+                List.of(
+                    indexed,
+                    new IrPointerIndexStoreInstruction(pointer, index, indexed),
+                    direct,
+                    new IrPointerStoreInstruction(pointer, direct)
+                ),
+                IrReturnTerminator.returning(indexed)
+            ))
+        );
+        var program = IrProgram.library(List.of(new IrModule(
+            new IrModuleName(List.of("memory")),
+            List.of(function)
+        )));
+
+        try (var module = LlvmBackend.generate(program, "sol.pointer-operations")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("define i64 @sol.function0.read_and_store(ptr %pointer, i64 %index)"));
+            assertTrue(text.contains("getelementptr i64, ptr %pointer, i64 %index"));
+            assertTrue(text.contains("load i64, ptr"));
+            assertTrue(text.contains("store i64"));
+            module.verify();
+        }
+    }
+
+    @Test
+    void lowersStandardMemorySpecializationsToCheckedHostAllocationCalls() {
+        var pointerType = new IrPointerType(PrimitiveIrType.INT);
+        var allocateCount = new IrParameter(new IrValueId(0), "count", PrimitiveIrType.INT);
+        var allocate = IrFunction.declaration(
+            new IrFunctionId(0), "allocate$int", List.of(allocateCount), pointerType
+        );
+        var reallocatePointer = new IrParameter(new IrValueId(0), "value", pointerType);
+        var reallocateCount = new IrParameter(new IrValueId(1), "count", PrimitiveIrType.INT);
+        var reallocate = IrFunction.declaration(
+            new IrFunctionId(1), "reallocate$int", List.of(reallocatePointer, reallocateCount), pointerType
+        );
+        var freePointer = new IrParameter(new IrValueId(0), "value", pointerType);
+        var free = IrFunction.declaration(
+            new IrFunctionId(2), "free$int", List.of(freePointer), PrimitiveIrType.VOID
+        );
+        var program = IrProgram.library(List.of(new IrModule(
+            new IrModuleName(List.of("std", "memory")),
+            List.of(allocate, reallocate, free)
+        )));
+
+        try (var module = LlvmBackend.generate(program, "sol.memory")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("declare ptr @malloc(i64)"));
+            assertTrue(text.contains("declare ptr @realloc(ptr, i64)"));
+            assertTrue(text.contains("declare void @free(ptr)"));
+            assertTrue(text.contains("allocate$int") && text.contains("i64 %count"));
+            assertTrue(text.contains("reallocate$int") && text.contains("ptr %value, i64 %count"));
+            assertTrue(text.contains("free$int") && text.contains("ptr %value"));
+            assertTrue(text.contains("memory.size_check:"));
+            assertTrue(text.contains("allocation_fits"));
+            assertTrue(text.contains("reallocation_fits"));
+            assertTrue(text.contains("ret ptr null"));
+            module.verify();
+        }
+    }
+
     private static IrFunction constantFunction(IrFunctionId identifier, String name, PrimitiveIrType returnType, IrValue value) {
         return IrFunction.definition(identifier, name, List.of(), returnType, List.of(new IrBasicBlock(new IrBlockId(0), List.of(), IrReturnTerminator.returning(value))));
     }

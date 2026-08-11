@@ -7,6 +7,7 @@ import java.util.Objects;
 final class LlvmStandardLibraryLowerer {
     private static final String CONSOLE_MODULE = "std.console";
     private static final String FILE_MODULE = "std.file";
+    private static final String MEMORY_MODULE = "std.memory";
 
     private LlvmStandardLibraryLowerer() {}
 
@@ -18,6 +19,7 @@ final class LlvmStandardLibraryLowerer {
             switch (module.name().qualifiedName()) {
                 case CONSOLE_MODULE -> LlvmConsoleLowerer.lower(module, context);
                 case FILE_MODULE -> LlvmFileLowerer.lower(module, context);
+                case MEMORY_MODULE -> LlvmMemoryLowerer.lower(module, context);
 
                 default -> {
                     /*

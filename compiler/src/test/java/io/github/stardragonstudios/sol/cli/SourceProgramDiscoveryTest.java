@@ -324,6 +324,29 @@ class SourceProgramDiscoveryTest {
     }
 
     @Test
+    void discoversBundledMemoryModule() throws IOException {
+        write(
+            "main.sol",
+            """
+            inject namespace std.memory as memory
+
+            @init
+            fn launch() -> int
+                let values: pointer<int> = memory::allocate<int>(1)
+                memory::free<int>(values)
+                return 0
+            end
+            """
+        );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+        var memoryName = new ModuleName(List.of("std", "memory"));
+
+        assertTrue(program.modules().stream().anyMatch(module -> module.name().equals(memoryName)));
+        assertTrue(program.sourceFileOf(memoryName).endsWith(Path.of(".sol-stdlib", "std", "memory.sol")));
+    }
+
+    @Test
     void bundledFileModuleTakesPrecedenceOverProjectFile()
         throws IOException {
 

@@ -488,6 +488,7 @@ public final class Parser {
             case RETURN -> parseReturnStatement();
             case CONST, LET, AT -> parseVariableDeclarationStatement();
             case IDENTIFIER -> parseIdentifierStartedStatement();
+            case STAR -> parsePointerAssignmentStatement();
             case IF -> parseConditionalStatement();
             case WHILE -> parseWhileStatement();
 
@@ -535,27 +536,6 @@ public final class Parser {
     }
 
     private Statement parseIdentifierStartedStatement() {
-        if (checkNext(TokenKind.DOT)) {
-            var target = parseExpression();
-
-            if (match(TokenKind.ASSIGN)) {
-                if (!(target instanceof FieldAccessExpression fieldAccess))
-                    throw expectedToken("a field access before '='", peek());
-
-                var value = parseExpression();
-
-                return new FieldAssignmentStatement(
-                    fieldAccess,
-                    value,
-                    new SourceSpan(fieldAccess.span().start(), value.span().end())
-                );
-            }
-
-            if (target instanceof CallExpression call) return new CallStatement(call, call.span());
-
-            throw expectedToken("'=' after the field assignment target", peek());
-        }
-
         if (checkNext(TokenKind.ASSIGN)) return parseAssignmentStatement();
 
         /*
@@ -565,13 +545,49 @@ public final class Parser {
          * Everything else follows the assignment path so malformed
          * assignments retain their specific missing-'=' diagnostic.
          */
-        if (!checkNext(TokenKind.LEFT_PAREN) && !checkNext(TokenKind.DOUBLE_COLON) && !checkNext(TokenKind.LESS)) return parseAssignmentStatement();
+        if (
+            !checkNext(TokenKind.LEFT_PAREN)
+            && !checkNext(TokenKind.DOUBLE_COLON)
+            && !checkNext(TokenKind.LESS)
+            && !checkNext(TokenKind.DOT)
+            && !checkNext(TokenKind.LEFT_BRACKET)
+        ) return parseAssignmentStatement();
 
         var expression = parseExpression();
+
+        if (match(TokenKind.ASSIGN)) {
+            var value = parseExpression();
+            var span = new SourceSpan(expression.span().start(), value.span().end());
+
+            if (expression instanceof FieldAccessExpression fieldAccess)
+                return new FieldAssignmentStatement(fieldAccess, value, span);
+
+            if (expression instanceof PointerIndexExpression)
+                return new PointerAssignmentStatement(expression, value, span);
+
+            throw expectedToken("a field access or pointer index before '='", peek());
+        }
 
         if (!(expression instanceof CallExpression call)) throw expectedToken("a function call statement", peek());
 
         return new CallStatement(call, call.span());
+    }
+
+    private PointerAssignmentStatement parsePointerAssignmentStatement() {
+        var target = parseUnaryExpression();
+
+        if (!(target instanceof PointerDereferenceExpression))
+            throw expectedToken("a pointer dereference assignment target", peek());
+
+        consume(TokenKind.ASSIGN, "'=' after the pointer dereference target");
+
+        var value = parseExpression();
+
+        return new PointerAssignmentStatement(
+            target,
+            value,
+            new SourceSpan(target.span().start(), value.span().end())
+        );
     }
 
     private AssignmentStatement parseAssignmentStatement() {
@@ -719,6 +735,16 @@ public final class Parser {
     }
 
     private Expression parseUnaryExpression() {
+        if (check(TokenKind.STAR)) {
+            var operatorToken = advance();
+            var pointer = parseUnaryExpression();
+
+            return new PointerDereferenceExpression(
+                pointer,
+                new SourceSpan(operatorToken.span().start(), pointer.span().end())
+            );
+        }
+
         if (check(TokenKind.BANG) || check(TokenKind.MINUS) || check(TokenKind.PLUS)) {
             var operatorToken = advance();
 
@@ -787,6 +813,19 @@ public final class Parser {
                 continue;
             }
 
+            if (match(TokenKind.LEFT_BRACKET)) {
+                var index = parseExpression();
+                var rightBracket = consume(TokenKind.RIGHT_BRACKET, "']' after the pointer index");
+
+                expression = new PointerIndexExpression(
+                    expression,
+                    index,
+                    new SourceSpan(expression.span().start(), rightBracket.span().end())
+                );
+
+                continue;
+            }
+
             break;
         }
 
@@ -832,6 +871,12 @@ public final class Parser {
                  FALSE,
                  CHAR_LITERAL,
                  STRING_LITERAL -> parseLiteralExpression();
+
+            case NULL -> {
+                var token = advance();
+
+                yield new NullExpression(token.span());
+            }
 
             case IDENTIFIER -> parseNameOrQualifiedNameExpression();
             case LEFT_PAREN -> parseParenthesizedExpression();

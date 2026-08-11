@@ -2,6 +2,7 @@ package io.github.stardragonstudios.sol.backend.llvm;
 
 import io.github.stardragonstudios.sol.ir.IrType;
 import io.github.stardragonstudios.sol.ir.IrStructType;
+import io.github.stardragonstudios.sol.ir.IrPointerType;
 import io.github.stardragonstudios.sol.ir.PrimitiveIrType;
 
 import org.bytedeco.javacpp.Pointer;
@@ -17,6 +18,7 @@ import static org.bytedeco.llvm.global.LLVM.LLVMInt32TypeInContext;
 import static org.bytedeco.llvm.global.LLVM.LLVMInt64TypeInContext;
 import static org.bytedeco.llvm.global.LLVM.LLVMVoidTypeInContext;
 import static org.bytedeco.llvm.global.LLVM.LLVMStructTypeInContext;
+import static org.bytedeco.llvm.global.LLVM.LLVMPointerTypeInContext;
 
 final class LlvmTypeLowerer {
     private LlvmTypeLowerer() {}
@@ -28,6 +30,10 @@ final class LlvmTypeLowerer {
         if (Pointer.isNull(context)) throw new LlvmBackendException("LLVM type-lowering context must not be a null native pointer.");
 
         if (type instanceof IrStructType structType) return lowerStruct(structType, context);
+        if (type instanceof IrPointerType) return requireType(
+            LLVMPointerTypeInContext(context, 0),
+            type
+        );
 
         if (!(type instanceof PrimitiveIrType primitive)) throw new LlvmBackendException("Unsupported Sol IR type implementation '%s'.".formatted(type.getClass().getName()));
 
@@ -41,6 +47,14 @@ final class LlvmTypeLowerer {
         };
 
         if (Pointer.isNull(lowered)) throw new LlvmBackendException("LLVM failed to create a representation for Sol IR type '%s'.".formatted(type.displayName()));
+
+        return lowered;
+    }
+
+    private static LLVMTypeRef requireType(LLVMTypeRef lowered, IrType source) {
+        if (Pointer.isNull(lowered)) throw new LlvmBackendException(
+            "LLVM failed to create a representation for Sol IR type '%s'.".formatted(source.displayName())
+        );
 
         return lowered;
     }

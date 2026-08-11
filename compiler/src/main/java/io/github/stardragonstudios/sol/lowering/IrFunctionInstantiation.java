@@ -3,6 +3,7 @@ package io.github.stardragonstudios.sol.lowering;
 import io.github.stardragonstudios.sol.semantics.FunctionSymbol;
 import io.github.stardragonstudios.sol.semantics.TypeParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.types.StructType;
+import io.github.stardragonstudios.sol.semantics.types.PointerType;
 import io.github.stardragonstudios.sol.semantics.types.TypeParameterType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 
@@ -56,12 +57,14 @@ record IrFunctionInstantiation(FunctionSymbol function, List<TypeSymbol> argumen
 
     private static boolean containsTypeParameter(TypeSymbol type) {
         if (type instanceof TypeParameterType) return true;
+        if (type instanceof PointerType pointer) return containsTypeParameter(pointer.elementType());
         if (type instanceof StructType struct) return struct.arguments().stream().anyMatch(IrFunctionInstantiation::containsTypeParameter);
 
         return false;
     }
 
     private static String encode(TypeSymbol type) {
+        if (type instanceof PointerType pointer) return "p_" + encode(pointer.elementType()) + "_e";
         if (!(type instanceof StructType struct)) return escape(type.name());
 
         var text = new StringBuilder("s");
