@@ -110,6 +110,11 @@ class IrValueTest {
             NullPointerException.class,
             () -> new IrStringConstant(new IrValueId(0), null)
         );
+
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new IrStringConstant(new IrValueId(0), "\uD800")
+        );
     }
 
     @Test

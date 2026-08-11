@@ -17,6 +17,7 @@ public final class StandardLibrary {
     public static final ModuleName CONSOLE = new ModuleName(List.of("std", "console"));
     public static final ModuleName FILE = new ModuleName(List.of("std", "file"));
     public static final ModuleName MEMORY = new ModuleName(List.of("std", "memory"));
+    public static final ModuleName STRING = new ModuleName(List.of("std", "string"));
 
     private static final Map<ModuleName, String> SOURCES = Map.of(
         CONSOLE,
@@ -37,6 +38,13 @@ public final class StandardLibrary {
         @fn allocate<T>(count: int) -> pointer<T>
         @fn reallocate<T>(value: pointer<T>, count: int) -> pointer<T>
         @fn free<T>(value: pointer<T>) -> void
+        """,
+
+        STRING,
+        """
+        @fn length(value: string) -> int
+        @fn slice(value: string, start: int, end_index: int) -> string
+        @fn substring(value: string, start: int, count: int) -> string
         """
     );
 

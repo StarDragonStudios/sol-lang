@@ -10,6 +10,7 @@ import java.util.Objects;
 final class LlvmProgramLoweringContext {
     private final LlvmModule module;
     private final Map<IrFunctionId, LlvmFunctionHandle> functions = new HashMap<>();
+    private LlvmStringRuntime stringRuntime;
 
     LlvmProgramLoweringContext(LlvmModule module) {
         this.module = Objects.requireNonNull(module, "LLVM lowering module must not be null.");
@@ -50,6 +51,12 @@ final class LlvmProgramLoweringContext {
         if (lowered == null) throw new LlvmBackendException("Sol IR function '%s' has no LLVM declaration.".formatted(identifier));
 
         return lowered;
+    }
+
+    LlvmStringRuntime stringRuntime() {
+        if (stringRuntime == null) stringRuntime = new LlvmStringRuntime(this);
+
+        return stringRuntime;
     }
 
     int functionCount() {

@@ -905,6 +905,22 @@ final class LexerTest {
         );
     }
 
+    @Test
+    void scansSupplementaryUnicodeScalarCharacterLiteral() {
+        var tokens = Lexer.scan("'🐉'");
+
+        assertEquals(TokenKind.CHAR_LITERAL, tokens.getFirst().kind());
+        assertEquals("'🐉'", tokens.getFirst().lexeme());
+    }
+
+    @Test
+    void rejectsUnpairedUnicodeSurrogates() {
+        var exception = assertThrows(LexicalException.class, () -> Lexer.scan("\"\uD800\""));
+
+        assertEquals("SOL-L006", exception.diagnostic().code());
+        assertEquals("Source text contains an invalid Unicode scalar sequence.", exception.diagnostic().message());
+    }
+
     private static List<TokenKind> kindsOf(List<Token> tokens) {
         return tokens.stream()
             .map(Token::kind)

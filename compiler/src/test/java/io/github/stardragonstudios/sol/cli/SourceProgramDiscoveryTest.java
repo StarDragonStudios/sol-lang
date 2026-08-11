@@ -347,6 +347,43 @@ class SourceProgramDiscoveryTest {
     }
 
     @Test
+    void discoversBundledStringModule() throws IOException {
+        write(
+            "main.sol",
+            """
+            inject namespace std.string as strings
+
+            @init
+            fn launch() -> int
+                return strings::length("Sol")
+            end
+            """
+        );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+        var stringName = new ModuleName(List.of("std", "string"));
+        var strings = program.modules().stream().filter(module -> module.name().equals(stringName)).findFirst().orElseThrow();
+
+        assertEquals(
+            List.of("length", "slice", "substring"),
+            strings.unit().declarations().stream().map(FunctionDeclaration.class::cast).map(FunctionDeclaration::name).toList()
+        );
+        assertTrue(program.sourceFileOf(stringName).endsWith(Path.of(".sol-stdlib", "std", "string.sol")));
+    }
+
+    @Test
+    void rejectsSourceFilesThatAreNotValidUtf8() throws IOException {
+        var source = temporaryDirectory.resolve("main.sol");
+
+        Files.write(source, new byte[] {(byte) 0xC3, (byte) 0x28});
+
+        var exception = assertThrows(FrontendCompilationException.class, () -> SourceProgramDiscovery.discover(source));
+
+        assertEquals("SOL-L006", exception.diagnostics().getFirst().diagnostic().code());
+        assertEquals("Source file is not valid UTF-8.", exception.diagnostics().getFirst().diagnostic().message());
+    }
+
+    @Test
     void bundledFileModuleTakesPrecedenceOverProjectFile()
         throws IOException {
 

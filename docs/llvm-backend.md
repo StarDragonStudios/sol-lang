@@ -138,6 +138,7 @@ The initial Sol IR primitive representations are:
 | `float`     | `double`  |
 | `boolean`   | `i1`      |
 | `char`      | `i32`     |
+| `string`    | `{ ptr, i64, i64 }` |
 | `void`      | `void`    |
 | `pointer<T>` | opaque `ptr` |
 
@@ -154,8 +155,10 @@ the backend lowers them through the ordinary function and aggregate paths.
 
 `char` stores a Unicode code point.
 
-`string` is deliberately unsupported by the current backend. Attempting to
-lower it produces an explicit `LlvmBackendException`.
+`string` stores a pointer to valid UTF-8 bytes, the byte length and the Unicode
+scalar length. Neither length includes an implementation NUL terminator.
+Static literals have module lifetime; runtime concatenations use
+process-lifetime storage in the 0.1.1 bootstrap.
 
 ## Program generation
 
@@ -210,6 +213,7 @@ The backend supports:
 * floating-point constants;
 * boolean constants;
 * character constants;
+* UTF-8 string constants;
 * typed null pointer constants;
 * unary instructions;
 * binary instructions;
@@ -222,6 +226,7 @@ The backend supports:
 * pointer loads and stores;
 * indexed pointer address calculation with `getelementptr` followed by a typed
   load or store.
+* Unicode-scalar string indexing through the shared string runtime.
 
 Unary positive reuses the operand's LLVM value and does not emit a redundant
 instruction.
@@ -243,6 +248,17 @@ Floating-point inequality uses unordered-or-not-equal semantics, so NaN remains
 different from every value, including itself.
 
 Boolean conjunction and disjunction operate directly on `i1`.
+
+String concatenation adds checked byte and scalar lengths, allocates bounded
+UTF-8 storage, copies both byte sequences and stores a trailing interoperability
+NUL outside the Sol byte length. String equality rejects unequal byte lengths
+before calling `memcmp`; valid UTF-8 makes exact byte equality equivalent to
+exact scalar-sequence equality. Inequality negates that content result and
+never compares data pointers.
+
+String indexing first checks the scalar index and then walks UTF-8 leading-byte
+widths to the selected scalar. The decoder returns the complete Unicode code
+point as `i32`, including four-byte supplementary values.
 
 ## Local storage
 
@@ -301,6 +317,28 @@ The backend does not:
 * infer argument conversions.
 
 Those properties have already been established and validated by Sol IR.
+
+## Standard string lowering
+
+Bodyless declarations from `std.string` receive compiler-supplied LLVM bodies:
+
+* `length` extracts the cached Unicode scalar count;
+* `slice` maps end-exclusive scalar boundaries to UTF-8 byte offsets and
+  returns an immutable view;
+* `substring` validates its scalar start and count before delegating to the
+  same slice operation.
+
+The backend emits shared internal helpers only when a program uses the
+corresponding operation. They centralize UTF-8 offset walking, scalar decoding,
+content comparison, concatenation and deterministic failure handling. Negative,
+reversed, overflowing or out-of-bounds requests print a stable runtime
+diagnostic and call the portable host `exit(70)` boundary.
+
+The runtime invariant is that every native Sol string contains valid UTF-8.
+Source decoding enforces it for literals, concatenation preserves it by joining
+complete strings, and slicing computes only scalar boundaries. Future console
+and file input lowerers must validate bytes before constructing this native
+aggregate.
 
 ## Standard raw-memory lowering
 

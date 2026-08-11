@@ -56,8 +56,9 @@ public final class SemanticAnalyzer {
     private static final String RECURSIVE_GENERIC_INSTANTIATION_CODE = "SOL-S042";
     private static final String UNTYPED_NULL_CODE = "SOL-S043";
     private static final String DEREFERENCE_NON_POINTER_CODE = "SOL-S044";
-    private static final String INDEX_NON_POINTER_CODE = "SOL-S045";
-    private static final String INVALID_POINTER_INDEX_CODE = "SOL-S046";
+    private static final String INDEX_NON_INDEXABLE_CODE = "SOL-S045";
+    private static final String INVALID_INDEX_CODE = "SOL-S046";
+    private static final String IMMUTABLE_STRING_INDEX_CODE = "SOL-S047";
 
     private static final ModuleName ISOLATED_MODULE_NAME = new ModuleName(List.of("<isolated>"));
     private static final SourceSpan PROGRAM_DIAGNOSTIC_SPAN = new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(0, 1, 1));
@@ -805,6 +806,20 @@ public final class SemanticAnalyzer {
             var valueType = bindExpression(assignment.value(), scope, targetType);
 
             if (
+                assignment.target() instanceof PointerIndexExpression index
+                && expressionTypes.get(index.pointer()) == BuiltInTypes.STRING
+            ) {
+                diagnostics.add(new Diagnostic(
+                    IMMUTABLE_STRING_INDEX_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "String values are immutable and cannot be assigned through indexing.",
+                    assignment.target().span()
+                ));
+
+                return;
+            }
+
+            if (
                 targetType == BuiltInTypes.ERROR
                 || valueType == BuiltInTypes.ERROR
                 || sameType(targetType, valueType)
@@ -965,19 +980,22 @@ public final class SemanticAnalyzer {
             var indexType = bindExpression(expression.index(), scope);
 
             if (indexType != BuiltInTypes.INT && indexType != BuiltInTypes.ERROR) diagnostics.add(new Diagnostic(
-                INVALID_POINTER_INDEX_CODE,
+                INVALID_INDEX_CODE,
                 DiagnosticSeverity.ERROR,
-                "Pointer index must have type 'int', but found '%s'.".formatted(indexType.name()),
+                "Index must have type 'int', but found '%s'.".formatted(indexType.name()),
                 expression.index().span()
             ));
 
             if (pointerType == BuiltInTypes.ERROR || indexType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
 
+            if (pointerType == BuiltInTypes.STRING)
+                return indexType == BuiltInTypes.INT ? BuiltInTypes.CHAR : BuiltInTypes.ERROR;
+
             if (!(pointerType instanceof PointerType pointer)) {
                 diagnostics.add(new Diagnostic(
-                    INDEX_NON_POINTER_CODE,
+                    INDEX_NON_INDEXABLE_CODE,
                     DiagnosticSeverity.ERROR,
-                    "Cannot index value of non-pointer type '%s'.".formatted(pointerType.name()),
+                    "Cannot index value of type '%s'; only strings and pointers are indexable.".formatted(pointerType.name()),
                     expression.pointer().span()
                 ));
 

@@ -60,7 +60,9 @@ final class IrLiteralLowerer {
 
         var content = lexeme.substring(1, lexeme.length() - 1);
 
-        if (content.length() == 1) return content.charAt(0);
+        if (content.codePointCount(0, content.length()) == 1 && content.charAt(0) != '\\')
+            return content.codePointAt(0);
+
         if (content.length() != 2 || content.charAt(0) != '\\') throw invalidCharacter(lexeme);
 
         return switch (content.charAt(1)) {

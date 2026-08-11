@@ -106,9 +106,9 @@ class IrOperatorTest {
             () -> IrBinaryOperator.ADD.resultType(PrimitiveIrType.INT, PrimitiveIrType.FLOAT)
         );
 
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> IrBinaryOperator.ADD.resultType(PrimitiveIrType.STRING, PrimitiveIrType.STRING)
+        assertSame(
+            PrimitiveIrType.STRING,
+            IrBinaryOperator.ADD.resultType(PrimitiveIrType.STRING, PrimitiveIrType.STRING)
         );
 
         assertThrows(

@@ -9,6 +9,12 @@
   element indexing.
 * Added `std.memory.allocate<T>`, `reallocate<T>` and `free<T>` with explicit
   zero-count, overflow and allocation-failure behavior.
+* Added immutable UTF-8 string indexing by Unicode scalar value,
+  concatenation, exact equality and inequality.
+* Added `std.string.length`, `slice` and `substring`, with deterministic
+  bounds failures and valid-UTF-8 results.
+* Added supplementary Unicode scalar character literals and deterministic
+  `SOL-L006` diagnostics for invalid Unicode source input.
 
 The Sol 0.1.1 memory model is deliberately unsafe and manual. Bounds,
 liveness, aliasing, leaks, double-free and use-after-free are programmer

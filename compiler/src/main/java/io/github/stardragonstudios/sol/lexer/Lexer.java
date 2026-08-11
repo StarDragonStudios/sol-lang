@@ -38,6 +38,7 @@ public final class Lexer {
     private static final String INVALID_ESCAPE_CODE = "SOL-L003";
     private static final String INVALID_CHARACTER_LITERAL_CODE = "SOL-L004";
     private static final String UNTERMINATED_BLOCK_COMMENT_CODE = "SOL-L005";
+    private static final String INVALID_UNICODE_CODE = "SOL-L006";
 
     private final String source;
 
@@ -54,6 +55,8 @@ public final class Lexer {
     }
 
     public List<Token> scan() {
+        validateUnicodeScalars();
+
         var tokens = new ArrayList<Token>();
 
         while (!isAtEnd()) scanNextToken(tokens);
@@ -373,7 +376,11 @@ public final class Lexer {
         }
 
         if (peek() == '\\') scanEscapeSequence();
-        else advanceCharacter();
+        else {
+            var first = advanceCharacter();
+
+            if (Character.isHighSurrogate(first)) advanceCharacter();
+        }
 
         if (!isAtEnd() && peek() == '\'') {
             advanceCharacter();
@@ -560,6 +567,53 @@ public final class Lexer {
 
     private static boolean isDigit(char character) {
         return character >= '0' && character <= '9';
+    }
+
+    private void validateUnicodeScalars() {
+        var checkedOffset = 0;
+        var checkedLine = 1;
+        var checkedColumn = 1;
+
+        while (checkedOffset < source.length()) {
+            var current = source.charAt(checkedOffset);
+
+            if (Character.isHighSurrogate(current)) {
+                if (checkedOffset + 1 >= source.length() || !Character.isLowSurrogate(source.charAt(checkedOffset + 1)))
+                    throw invalidUnicodeScalar(checkedOffset, checkedLine, checkedColumn);
+
+                checkedOffset += 2;
+                checkedColumn += 2;
+                continue;
+            }
+
+            if (Character.isLowSurrogate(current))
+                throw invalidUnicodeScalar(checkedOffset, checkedLine, checkedColumn);
+
+            checkedOffset++;
+
+            if (current == '\r') {
+                if (checkedOffset < source.length() && source.charAt(checkedOffset) == '\n') checkedOffset++;
+
+                checkedLine++;
+                checkedColumn = 1;
+            } else if (current == '\n') {
+                checkedLine++;
+                checkedColumn = 1;
+            } else {
+                checkedColumn++;
+            }
+        }
+    }
+
+    private LexicalException invalidUnicodeScalar(int invalidOffset, int invalidLine, int invalidColumn) {
+        var start = new SourcePosition(invalidOffset, invalidLine, invalidColumn);
+        var end = new SourcePosition(invalidOffset + 1, invalidLine, invalidColumn + 1);
+
+        return lexicalError(
+            INVALID_UNICODE_CODE,
+            "Source text contains an invalid Unicode scalar sequence.",
+            new SourceSpan(start, end)
+        );
     }
 
     private LexicalException lexicalError(String code, String message, SourcePosition start) {

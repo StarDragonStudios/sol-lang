@@ -58,6 +58,7 @@ class OperatorTypeCheckingTest {
         }
 
         assertExpressionType("i % j", BuiltInTypes.INT);
+        assertExpressionType("s + \"sol\"", BuiltInTypes.STRING);
     }
 
     @Test
@@ -74,23 +75,6 @@ class OperatorTypeCheckingTest {
             "Binary operator '%' is not defined for types 'float' and 'float'."
         );
 
-        assertInvalidExpression(
-            "s + s",
-            "SOL-S005",
-            "Binary operator '+' is not defined for types 'string' and 'string'."
-        );
-
-        assertInvalidExpression(
-            "s == \"sol\"",
-            "SOL-S005",
-            "Binary operator '==' is not defined for types 'string' and 'string'."
-        );
-
-        assertInvalidExpression(
-            "s != \"sol\"",
-            "SOL-S005",
-            "Binary operator '!=' is not defined for types 'string' and 'string'."
-        );
     }
 
     @Test
@@ -104,6 +88,8 @@ class OperatorTypeCheckingTest {
         assertExpressionType("f != g", BuiltInTypes.BOOLEAN);
         assertExpressionType("b == true", BuiltInTypes.BOOLEAN);
         assertExpressionType("c == 'x'", BuiltInTypes.BOOLEAN);
+        assertExpressionType("s == \"sol\"", BuiltInTypes.BOOLEAN);
+        assertExpressionType("s != \"sol\"", BuiltInTypes.BOOLEAN);
 
         assertExpressionType("b && true", BuiltInTypes.BOOLEAN);
         assertExpressionType("b || false", BuiltInTypes.BOOLEAN);

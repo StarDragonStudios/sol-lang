@@ -361,7 +361,7 @@ class SemanticAnalyzerTest {
     }
 
     @Test
-    void rejectsStringEquality() {
+    void acceptsStringEquality() {
         var analysis = analyze(
             """
             fn compare(left: string, right: string) -> boolean
@@ -370,30 +370,11 @@ class SemanticAnalyzerTest {
             """
         );
 
-        var diagnostics =
-            analysis.result().diagnostics();
-
-        assertEquals(
-            1,
-            diagnostics.size()
-        );
-
-        var diagnostic =
-            diagnostics.getFirst();
-
-        assertEquals(
-            "SOL-S005",
-            diagnostic.code()
-        );
-
-        assertEquals(
-            "Binary operator '==' is not defined for types 'string' and 'string'.",
-            diagnostic.message()
-        );
+        assertTrue(analysis.result().diagnostics().isEmpty());
     }
 
     @Test
-    void rejectsStringInequality() {
+    void acceptsStringInequality() {
         var analysis = analyze(
             """
             fn compare(left: string, right: string) -> boolean
@@ -402,14 +383,7 @@ class SemanticAnalyzerTest {
             """
         );
 
-        var diagnostics = analysis.result().diagnostics();
-
-        assertEquals(1, diagnostics.size());
-
-        var diagnostic = diagnostics.getFirst();
-
-        assertEquals("SOL-S005", diagnostic.code());
-        assertEquals("Binary operator '!=' is not defined for types 'string' and 'string'.", diagnostic.message());
+        assertTrue(analysis.result().diagnostics().isEmpty());
     }
 
     @Test

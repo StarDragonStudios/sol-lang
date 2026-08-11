@@ -116,6 +116,47 @@ final class SolEndToEndCompilationTest {
     }
 
     @Test
+    void compilesAndExecutesBootstrapStringOperations() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "bootstrap-strings", "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+        assertEquals("", compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(42, result.exitCode(), result.standardOutput() + result.standardError());
+        assertEquals("", result.standardOutput());
+        assertEquals("", result.standardError());
+    }
+
+    @Test
+    void stringIndexBoundsFailureIsDeterministicAndDiagnosed() throws Exception {
+        assertStringRuntimeFailure(
+            "string-index-bounds",
+            "Sol runtime error: string index out of bounds."
+        );
+    }
+
+    @Test
+    void stringSliceBoundsFailureIsDeterministicAndDiagnosed() throws Exception {
+        assertStringRuntimeFailure(
+            "string-slice-bounds",
+            "Sol runtime error: invalid string slice range."
+        );
+    }
+
+    @Test
+    void stringSubstringBoundsFailureIsDeterministicAndDiagnosed() throws Exception {
+        assertStringRuntimeFailure(
+            "string-substring-bounds",
+            "Sol runtime error: invalid string substring range."
+        );
+    }
+
+    @Test
     void compilesAndExecutesConsoleFixture() throws Exception {
 
         EndToEndTestSupport.assumeNativeLinkerAvailable();
@@ -188,5 +229,20 @@ final class SolEndToEndCompilationTest {
         assertTrue(diagnostics.contains("%s:3:12: error [SOL-S002]: Unresolved name 'missing'.".formatted(source.toAbsolutePath().normalize())), diagnostics);
         assertTrue(diagnostics.contains("3 |     return missing"), diagnostics);
         assertTrue(diagnostics.contains("|            ^^^^^^^"), diagnostics);
+    }
+
+    private void assertStringRuntimeFailure(String fixture, String diagnostic) throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, fixture, "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(70, result.exitCode(), result.standardOutput() + result.standardError());
+        assertEquals(diagnostic + System.lineSeparator(), result.standardOutput());
+        assertEquals("", result.standardError());
     }
 }

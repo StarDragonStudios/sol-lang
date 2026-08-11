@@ -102,6 +102,12 @@ final class LlvmFunctionLoweringContext
         return builder;
     }
 
+    LlvmStringRuntime stringRuntime() {
+        ensureOpen();
+
+        return programContext.stringRuntime();
+    }
+
     void positionAtEnd(IrBasicBlock block) {
         Objects.requireNonNull(block, "Positioned Sol IR basic block must not be null.");
 

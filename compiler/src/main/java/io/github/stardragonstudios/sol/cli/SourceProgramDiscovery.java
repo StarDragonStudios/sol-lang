@@ -2,6 +2,8 @@ package io.github.stardragonstudios.sol.cli;
 
 import io.github.stardragonstudios.sol.lexer.Lexer;
 import io.github.stardragonstudios.sol.lexer.LexicalException;
+import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
+import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.parser.Parser;
 import io.github.stardragonstudios.sol.parser.ParsingException;
 import io.github.stardragonstudios.sol.semantics.ModuleName;
@@ -9,8 +11,11 @@ import io.github.stardragonstudios.sol.semantics.SourceModule;
 import io.github.stardragonstudios.sol.std.StandardLibrary;
 import io.github.stardragonstudios.sol.syntax.CompilationUnit;
 import io.github.stardragonstudios.sol.syntax.InjectionDeclaration;
+import io.github.stardragonstudios.sol.source.SourcePosition;
+import io.github.stardragonstudios.sol.source.SourceSpan;
 
 import java.io.IOException;
+import java.nio.charset.CharacterCodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -83,6 +88,16 @@ public final class SourceProgramDiscovery {
 
         try {
             source = Files.readString(sourceFile);
+        } catch (CharacterCodingException exception) {
+            var position = new SourcePosition(0, 1, 1);
+            var diagnostic = new Diagnostic(
+                "SOL-L006",
+                DiagnosticSeverity.ERROR,
+                "Source file is not valid UTF-8.",
+                new SourceSpan(position, position)
+            );
+
+            throw new FrontendCompilationException(List.of(new SourceDiagnostic(sourceFile, diagnostic)));
         } catch (IOException exception) {
             throw new CompilerPipelineException("Failed to read Sol source file '%s'.".formatted(sourceFile), exception);
         }
