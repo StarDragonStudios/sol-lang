@@ -8,14 +8,21 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-public record IrModule(IrModuleName name, List<IrFunction> functions) {
+public record IrModule(IrModuleName name, List<IrStructType> structs, List<IrFunction> functions) {
     public IrModule {
         Objects.requireNonNull(name, "IR module name must not be null.");
+        Objects.requireNonNull(structs, "IR module structs must not be null.");
         Objects.requireNonNull(functions, "IR module functions must not be null.");
 
+        validateStructs(structs);
         validateFunctions(functions);
 
+        structs = List.copyOf(structs);
         functions = List.copyOf(functions);
+    }
+
+    public IrModule(IrModuleName name, List<IrFunction> functions) {
+        this(name, List.of(), functions);
     }
 
     public Optional<IrFunction> function(IrFunctionId id) {
@@ -34,6 +41,17 @@ public record IrModule(IrModuleName name, List<IrFunction> functions) {
         return functions.stream()
             .filter(function -> function.name().equals(name))
             .findFirst();
+    }
+
+    private static void validateStructs(List<IrStructType> structs) {
+        var names = new HashSet<String>();
+
+        for (var struct : structs) {
+            Objects.requireNonNull(struct, "IR module structs must not contain null values.");
+
+            if (!names.add(struct.displayName()))
+                throw new IllegalArgumentException("IR module must not contain duplicate struct type '%s'.".formatted(struct.displayName()));
+        }
     }
 
     private static void validateFunctions(List<IrFunction> functions) {

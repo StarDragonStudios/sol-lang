@@ -133,8 +133,47 @@ public final class Parser {
 
             case INJECT -> parseInjectionDeclaration();
 
+            case STRUCT -> parseStructDeclaration();
+
             default -> throw unexpectedTopLevelToken(peek());
         };
+    }
+
+    private StructDeclaration parseStructDeclaration() {
+        var structToken = consume(TokenKind.STRUCT, "'struct'");
+        var nameToken = consume(TokenKind.IDENTIFIER, "a struct name after 'struct'");
+
+        consume(TokenKind.NEWLINE, "a newline after the struct declaration header");
+
+        var fields = new ArrayList<StructFieldDeclaration>();
+
+        skipNewlines();
+
+        while (!check(TokenKind.END) && !isAtEnd()) {
+            var fieldName = consume(TokenKind.IDENTIFIER, "a struct field name");
+
+            consume(TokenKind.COLON, "':' after the struct field name");
+
+            var fieldType = consume(TokenKind.IDENTIFIER, "a struct field type after ':'");
+            var type = new TypeReference(fieldType.lexeme(), fieldType.span());
+
+            fields.add(new StructFieldDeclaration(
+                fieldName.lexeme(),
+                type,
+                new SourceSpan(fieldName.span().start(), fieldType.span().end())
+            ));
+
+            if (match(TokenKind.NEWLINE)) skipNewlines();
+            else if (!check(TokenKind.END)) throw expectedToken("a newline or 'end' after the struct field", peek());
+        }
+
+        var endToken = consume(TokenKind.END, "'end' to close the struct declaration");
+
+        return new StructDeclaration(
+            nameToken.lexeme(),
+            fields,
+            new SourceSpan(structToken.span().start(), endToken.span().end())
+        );
     }
 
     private FunctionDeclaration parseFunctionDeclaration() {
@@ -392,6 +431,27 @@ public final class Parser {
     }
 
     private Statement parseIdentifierStartedStatement() {
+        if (checkNext(TokenKind.DOT)) {
+            var target = parseExpression();
+
+            if (match(TokenKind.ASSIGN)) {
+                if (!(target instanceof FieldAccessExpression fieldAccess))
+                    throw expectedToken("a field access before '='", peek());
+
+                var value = parseExpression();
+
+                return new FieldAssignmentStatement(
+                    fieldAccess,
+                    value,
+                    new SourceSpan(fieldAccess.span().start(), value.span().end())
+                );
+            }
+
+            if (target instanceof CallExpression call) return new CallStatement(call, call.span());
+
+            throw expectedToken("'=' after the field assignment target", peek());
+        }
+
         if (checkNext(TokenKind.ASSIGN)) return parseAssignmentStatement();
 
         /*
@@ -579,7 +639,27 @@ public final class Parser {
     private Expression parsePostfixExpression() {
         var expression = parsePrimaryExpression();
 
-        while (check(TokenKind.LEFT_PAREN)) expression = parseCallExpression(expression);
+        while (true) {
+            if (check(TokenKind.LEFT_PAREN)) {
+                expression = parseCallExpression(expression);
+                continue;
+            }
+
+            if (match(TokenKind.DOT)) {
+                var field = consume(TokenKind.IDENTIFIER, "a field name after '.'");
+
+                expression = new FieldAccessExpression(
+                    expression,
+                    field.lexeme(),
+                    field.span(),
+                    new SourceSpan(expression.span().start(), field.span().end())
+                );
+
+                continue;
+            }
+
+            break;
+        }
 
         return expression;
     }
@@ -624,23 +704,66 @@ public final class Parser {
                  CHAR_LITERAL,
                  STRING_LITERAL -> parseLiteralExpression();
 
-            case IDENTIFIER -> parseNameOrQualifiedNameExpression();
+            case IDENTIFIER -> parseNameQualifiedOrStructConstructionExpression();
             case LEFT_PAREN -> parseParenthesizedExpression();
 
             default -> throw expectedToken("an expression", peek());
         };
     }
 
-    private Expression parseNameOrQualifiedNameExpression() {
-        var qualifier = parseNameExpression();
+    private Expression parseNameQualifiedOrStructConstructionExpression() {
+        var name = parseNameExpression();
 
-        if (!match(TokenKind.DOUBLE_COLON)) return qualifier;
+        if (check(TokenKind.LEFT_BRACE)) return parseStructConstructionExpression(name);
+
+        if (!match(TokenKind.DOUBLE_COLON)) return name;
 
         var member = parseNameExpression();
 
         if (check(TokenKind.DOUBLE_COLON)) throw expectedToken("a call or expression operator after the namespace-qualified name", peek());
 
-        return new QualifiedNameExpression(qualifier, member, new SourceSpan(qualifier.span().start(), member.span().end()));
+        return new QualifiedNameExpression(name, member, new SourceSpan(name.span().start(), member.span().end()));
+    }
+
+    private StructConstructionExpression parseStructConstructionExpression(NameExpression typeName) {
+        consume(TokenKind.LEFT_BRACE, "'{' after the struct type name");
+
+        var fields = new ArrayList<StructFieldInitializer>();
+
+        skipDelimitedNewlines();
+
+        if (!check(TokenKind.RIGHT_BRACE)) {
+            while (true) {
+                var fieldName = consume(TokenKind.IDENTIFIER, "a struct field initializer name");
+
+                consume(TokenKind.COLON, "':' after the struct field initializer name");
+
+                var value = parseExpression();
+
+                fields.add(new StructFieldInitializer(
+                    fieldName.lexeme(),
+                    value,
+                    new SourceSpan(fieldName.span().start(), value.span().end())
+                ));
+
+                skipDelimitedNewlines();
+
+                if (!match(TokenKind.COMMA)) break;
+
+                skipDelimitedNewlines();
+
+                if (check(TokenKind.RIGHT_BRACE)) break;
+            }
+        }
+
+        var rightBrace = consume(TokenKind.RIGHT_BRACE, "'}' after the struct field initializers");
+        var type = new TypeReference(typeName.name(), typeName.span());
+
+        return new StructConstructionExpression(
+            type,
+            fields,
+            new SourceSpan(typeName.span().start(), rightBrace.span().end())
+        );
     }
 
     private NameExpression parseNameExpression() {

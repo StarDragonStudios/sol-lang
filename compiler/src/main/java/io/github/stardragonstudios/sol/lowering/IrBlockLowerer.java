@@ -11,6 +11,7 @@ import io.github.stardragonstudios.sol.syntax.ReturnStatement;
 import io.github.stardragonstudios.sol.syntax.Statement;
 import io.github.stardragonstudios.sol.syntax.VariableDeclarationStatement;
 import io.github.stardragonstudios.sol.syntax.WhileStatement;
+import io.github.stardragonstudios.sol.syntax.FieldAssignmentStatement;
 
 import java.util.Objects;
 
@@ -38,6 +39,7 @@ final class IrBlockLowerer {
         switch (statement) {
             case VariableDeclarationStatement declaration -> IrStatementLowerer.lower(declaration, model, context);
             case AssignmentStatement assignment -> IrStatementLowerer.lower(assignment, model, context);
+            case FieldAssignmentStatement fieldAssignment -> IrStatementLowerer.lower(fieldAssignment, model, context);
             case ReturnStatement returnStatement -> lowerReturn(returnStatement, model, context);
             case ConditionalStatement conditional -> lowerConditional(conditional, model, context);
             case WhileStatement whileStatement -> lowerWhile(whileStatement, model, context);

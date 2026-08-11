@@ -10,10 +10,16 @@ public final class SemanticModel {
     private final IdentityHashMap<FunctionDeclaration, Scope> functionScopes;
     private final IdentityHashMap<Block, Scope> blockScopes;
     private final IdentityHashMap<FunctionDeclaration, FunctionSymbol> functionSymbols;
+    private final IdentityHashMap<StructDeclaration, StructSymbol> structSymbols;
+    private final IdentityHashMap<StructFieldDeclaration, StructFieldSymbol> structFieldSymbols;
     private final IdentityHashMap<Parameter, ParameterSymbol> parameterSymbols;
     private final IdentityHashMap<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols;
     private final IdentityHashMap<NameExpression, Symbol> resolvedNames;
     private final IdentityHashMap<AssignmentStatement, Symbol> assignmentTargets;
+    private final IdentityHashMap<FieldAssignmentStatement, Symbol> fieldAssignmentTargets;
+    private final IdentityHashMap<StructConstructionExpression, StructSymbol> constructedStructs;
+    private final IdentityHashMap<StructFieldInitializer, StructFieldSymbol> initializedStructFields;
+    private final IdentityHashMap<FieldAccessExpression, StructFieldSymbol> accessedStructFields;
     private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes;
     private final IdentityHashMap<Expression, TypeSymbol> expressionTypes;
     private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions;
@@ -27,11 +33,18 @@ public final class SemanticModel {
         Map<FunctionDeclaration, Scope> functionScopes,
         Map<Block, Scope> blockScopes,
         Map<FunctionDeclaration, FunctionSymbol> functionSymbols,
+        Map<StructDeclaration, StructSymbol> structSymbols,
+        Map<StructFieldDeclaration, StructFieldSymbol> structFieldSymbols,
         Map<Parameter, ParameterSymbol> parameterSymbols,
         Map<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols,
         Map<NameExpression, Symbol> resolvedNames,
         Map<AssignmentStatement, Symbol> assignmentTargets,
-        Map<CallExpression, FunctionSymbol> calledFunctions,Map<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols,
+        Map<FieldAssignmentStatement, Symbol> fieldAssignmentTargets,
+        Map<StructConstructionExpression, StructSymbol> constructedStructs,
+        Map<StructFieldInitializer, StructFieldSymbol> initializedStructFields,
+        Map<FieldAccessExpression, StructFieldSymbol> accessedStructFields,
+        Map<CallExpression, FunctionSymbol> calledFunctions,
+        Map<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols,
         Map<InjectionDeclaration, ModuleSymbol> injectedModules,
         Map<InjectionDeclaration, List<FunctionSymbol>> directlyInjectedFunctions,
         Map<InjectionDeclaration, NamespaceSymbol> injectedNamespaces,
@@ -42,10 +55,16 @@ public final class SemanticModel {
         this.functionScopes = copyIdentityMap(functionScopes, "Function scope associations");
         this.blockScopes = copyIdentityMap(blockScopes, "Block scope associations");
         this.functionSymbols = copyIdentityMap(functionSymbols, "Function symbol associations");
+        this.structSymbols = copyIdentityMap(structSymbols, "Struct symbol associations");
+        this.structFieldSymbols = copyIdentityMap(structFieldSymbols, "Struct field symbol associations");
         this.parameterSymbols = copyIdentityMap(parameterSymbols, "Parameter symbol associations");
         this.localVariableSymbols = copyIdentityMap(localVariableSymbols, "Local variable symbol associations");
         this.resolvedNames = copyIdentityMap(resolvedNames, "Resolved name associations");
         this.assignmentTargets = copyIdentityMap(assignmentTargets, "Assignment target associations");
+        this.fieldAssignmentTargets = copyIdentityMap(fieldAssignmentTargets, "Field assignment target associations");
+        this.constructedStructs = copyIdentityMap(constructedStructs, "Constructed struct associations");
+        this.initializedStructFields = copyIdentityMap(initializedStructFields, "Initialized struct field associations");
+        this.accessedStructFields = copyIdentityMap(accessedStructFields, "Accessed struct field associations");
         this.resolvedTypes = copyIdentityMap(resolvedTypes, "Resolved type associations");
         this.expressionTypes = copyIdentityMap(expressionTypes, "Expression type associations");
         this.calledFunctions = copyIdentityMap(calledFunctions, "Called function associations");
@@ -80,6 +99,18 @@ public final class SemanticModel {
         Objects.requireNonNull(declaration, "Function declaration must not be null.");
 
         return Optional.ofNullable(functionSymbols.get(declaration));
+    }
+
+    public Optional<StructSymbol> symbolOf(StructDeclaration declaration) {
+        Objects.requireNonNull(declaration, "Struct declaration must not be null.");
+
+        return Optional.ofNullable(structSymbols.get(declaration));
+    }
+
+    public Optional<StructFieldSymbol> symbolOf(StructFieldDeclaration declaration) {
+        Objects.requireNonNull(declaration, "Struct field declaration must not be null.");
+
+        return Optional.ofNullable(structFieldSymbols.get(declaration));
     }
 
     public Optional<ParameterSymbol> symbolOf(Parameter parameter) {
@@ -128,6 +159,30 @@ public final class SemanticModel {
         Objects.requireNonNull(statement, "Assignment statement must not be null.");
 
         return Optional.ofNullable(assignmentTargets.get(statement));
+    }
+
+    public Optional<Symbol> assignmentTargetOf(FieldAssignmentStatement statement) {
+        Objects.requireNonNull(statement, "Field assignment statement must not be null.");
+
+        return Optional.ofNullable(fieldAssignmentTargets.get(statement));
+    }
+
+    public Optional<StructSymbol> constructedStructOf(StructConstructionExpression expression) {
+        Objects.requireNonNull(expression, "Struct construction expression must not be null.");
+
+        return Optional.ofNullable(constructedStructs.get(expression));
+    }
+
+    public Optional<StructFieldSymbol> initializedFieldOf(StructFieldInitializer initializer) {
+        Objects.requireNonNull(initializer, "Struct field initializer must not be null.");
+
+        return Optional.ofNullable(initializedStructFields.get(initializer));
+    }
+
+    public Optional<StructFieldSymbol> accessedFieldOf(FieldAccessExpression expression) {
+        Objects.requireNonNull(expression, "Field access expression must not be null.");
+
+        return Optional.ofNullable(accessedStructFields.get(expression));
     }
 
     public Optional<TypeSymbol> typeOf(TypeReference reference) {

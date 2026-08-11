@@ -48,6 +48,12 @@ public final class IrTextFormatter {
     private void writeModule(IrModule module) {
         line(1, "module @%s {".formatted(module.name().qualifiedName()));
 
+        for (var index = 0; index < module.structs().size(); index++) {
+            writeStruct(module.structs().get(index));
+
+            if (index < module.structs().size() - 1 || !module.functions().isEmpty()) blankLine();
+        }
+
         for (var index = 0; index < module.functions().size(); index++) {
             writeFunction(module.functions().get(index));
 
@@ -55,6 +61,14 @@ public final class IrTextFormatter {
         }
 
         line(1, "}");
+    }
+
+    private void writeStruct(IrStructType struct) {
+        line(2, "struct %s {".formatted(struct.displayName()));
+
+        for (var field : struct.fields()) line(3, "%s: %s".formatted(field.name(), field.type().displayName()));
+
+        line(2, "}");
     }
 
     private void writeFunction(IrFunction function) {
@@ -130,6 +144,15 @@ public final class IrTextFormatter {
         if (instruction instanceof IrLocalStoreInstruction(IrLocal local, IrValue value))
             return "store %s, %s".formatted(local.id(), value.id());
 
+        if (instruction instanceof IrStructFieldStoreInstruction store)
+            return "store_field %s.%s, %s".formatted(store.local().id(), formatFieldPath(store.path()), store.value().id());
+
+        if (instruction instanceof IrStructConstructInstruction construction)
+            return "%s: %s = construct %s".formatted(construction.id(), construction.type().displayName(), formatCallArguments(construction.fields()));
+
+        if (instruction instanceof IrStructFieldExtractInstruction extraction)
+            return "%s: %s = extract %s.%s".formatted(extraction.id(), extraction.type().displayName(), extraction.target().id(), extraction.field().name());
+
         if (instruction instanceof IrValueCallInstruction call)
             return "%s: %s = call @%s %s(%s)".formatted(call.id(), call.type().displayName(), call.target().id(), call.target().name(), formatCallArguments(call.arguments()));
 
@@ -143,6 +166,10 @@ public final class IrTextFormatter {
             return "%s: %s = %s %s, %s".formatted(binary.id(), binary.type().displayName(), binaryOperationName(binary.operator()), binary.left().id(), binary.right().id());
 
         throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
+    }
+
+    private String formatFieldPath(List<IrStructField> path) {
+        return String.join(".", path.stream().map(IrStructField::name).toList());
     }
 
     private String formatCallArguments(List<IrValue> arguments) {

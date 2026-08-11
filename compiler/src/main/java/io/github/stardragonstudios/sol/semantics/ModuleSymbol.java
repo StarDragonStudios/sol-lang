@@ -13,6 +13,7 @@ public final class ModuleSymbol {
     private final Scope scope;
 
     private final LinkedHashMap<String, FunctionSymbol> exportedFunctions = new LinkedHashMap<>();
+    private final LinkedHashMap<String, StructSymbol> exportedStructs = new LinkedHashMap<>();
 
     public ModuleSymbol(ModuleName name, CompilationUnit unit) {
         this.name = Objects.requireNonNull(name, "Module symbol name must not be null.");
@@ -45,12 +46,34 @@ public final class ModuleSymbol {
         return Optional.ofNullable(exportedFunctions.get(name));
     }
 
+    public List<StructSymbol> exportedStructs() {
+        return List.copyOf(exportedStructs.values());
+    }
+
+    public Optional<StructSymbol> exportedStruct(String name) {
+        Objects.requireNonNull(name, "Exported struct lookup name must not be null.");
+
+        if (name.isBlank()) throw new IllegalArgumentException("Exported struct lookup name must not be blank.");
+
+        return Optional.ofNullable(exportedStructs.get(name));
+    }
+
     boolean declareExport(FunctionSymbol function) {
         Objects.requireNonNull(function, "Exported function must not be null.");
 
         if (!scope.declare(function)) return false;
 
         exportedFunctions.put(function.name(), function);
+
+        return true;
+    }
+
+    boolean declareExport(StructSymbol struct) {
+        Objects.requireNonNull(struct, "Exported struct must not be null.");
+
+        if (!scope.declare(struct)) return false;
+
+        exportedStructs.put(struct.name(), struct);
 
         return true;
     }

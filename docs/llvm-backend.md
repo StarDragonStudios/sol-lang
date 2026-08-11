@@ -140,6 +140,11 @@ The initial Sol IR primitive representations are:
 | `char`      | `i32`     |
 | `void`      | `void`    |
 
+Sol IR structs lower to LLVM aggregate struct types whose element order matches
+the canonical declaration order. Structs are passed to functions and returned
+by value. Nested structs lower recursively; semantic analysis rejects recursive
+by-value layouts before backend generation.
+
 `char` stores a Unicode code point.
 
 `string` is deliberately unsupported by the current backend. Attempting to
@@ -201,7 +206,11 @@ The backend supports:
 * unary instructions;
 * binary instructions;
 * local loads;
-* value-returning calls.
+* value-returning calls;
+* struct construction with `insertvalue`;
+* field reads with `extractvalue`;
+* direct and nested field updates by rebuilding the affected aggregate path and
+  storing the complete updated value.
 
 Unary positive reuses the operand's LLVM value and does not emit a redundant
 instruction.

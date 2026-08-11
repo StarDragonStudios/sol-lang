@@ -2,13 +2,19 @@ package io.github.stardragonstudios.sol.lowering;
 
 import io.github.stardragonstudios.sol.ir.IrLocalInitializeInstruction;
 import io.github.stardragonstudios.sol.ir.IrLocalStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructField;
+import io.github.stardragonstudios.sol.ir.IrStructFieldStoreInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.syntax.AssignmentStatement;
 import io.github.stardragonstudios.sol.syntax.CallStatement;
 import io.github.stardragonstudios.sol.syntax.Statement;
 import io.github.stardragonstudios.sol.syntax.VariableDeclarationStatement;
+import io.github.stardragonstudios.sol.syntax.FieldAccessExpression;
+import io.github.stardragonstudios.sol.syntax.FieldAssignmentStatement;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 final class IrStatementLowerer {
@@ -22,6 +28,7 @@ final class IrStatementLowerer {
         switch (statement) {
             case VariableDeclarationStatement declaration -> lowerVariableDeclaration(declaration, model, context);
             case AssignmentStatement assignment -> lowerAssignment(assignment, model, context);
+            case FieldAssignmentStatement fieldAssignment -> lowerFieldAssignment(fieldAssignment, model, context);
             case CallStatement call -> IrCallLowerer.lower(call.call(), model, context);
 
             default -> throw new IrLoweringException(
@@ -45,7 +52,7 @@ final class IrStatementLowerer {
          * declaration to read its own not-yet-initialized storage.
          */
         var initializer = IrExpressionLowerer.lower(declaration.initializer(), model, context);
-        var local = context.declareLocal(symbol, IrTypeLowerer.lower(semanticType));
+        var local = context.declareLocal(symbol, context.lowerType(semanticType));
 
         final IrLocalInitializeInstruction instruction;
 
@@ -56,6 +63,42 @@ final class IrStatementLowerer {
         }
 
         context.emit(instruction);
+    }
+
+    private static void lowerFieldAssignment(
+        FieldAssignmentStatement assignment,
+        SemanticModel model,
+        IrFunctionLoweringContext context
+    ) {
+        var target = model.assignmentTargetOf(assignment).orElseThrow(() -> new IrLoweringException(
+            "Field assignment has no resolved root symbol."
+        ));
+
+        if (!(target instanceof LocalVariableSymbol localSymbol))
+            throw new IrLoweringException("Resolved field assignment root '%s' is not a local variable.".formatted(target.name()));
+
+        var path = new ArrayList<IrStructField>();
+
+        collectFieldPath(assignment.target(), model, context, path);
+
+        var value = IrExpressionLowerer.lower(assignment.value(), model, context);
+
+        context.emit(new IrStructFieldStoreInstruction(context.local(localSymbol), path, value));
+    }
+
+    private static void collectFieldPath(
+        FieldAccessExpression access,
+        SemanticModel model,
+        IrFunctionLoweringContext context,
+        List<IrStructField> path
+    ) {
+        if (access.target() instanceof FieldAccessExpression parent) collectFieldPath(parent, model, context, path);
+
+        var semanticField = model.accessedFieldOf(access).orElseThrow(() -> new IrLoweringException(
+            "Field assignment path '%s' has no resolved semantic field.".formatted(access.fieldName())
+        ));
+
+        path.add(context.structType(semanticField.owner()).fields().get(semanticField.index()));
     }
 
     private static void lowerAssignment(AssignmentStatement assignment, SemanticModel model, IrFunctionLoweringContext context) {

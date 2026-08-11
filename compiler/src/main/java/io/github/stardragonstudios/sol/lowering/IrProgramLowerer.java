@@ -7,12 +7,16 @@ import io.github.stardragonstudios.sol.ir.IrFunction;
 import io.github.stardragonstudios.sol.ir.IrModule;
 import io.github.stardragonstudios.sol.ir.IrProgram;
 import io.github.stardragonstudios.sol.ir.IrType;
+import io.github.stardragonstudios.sol.ir.IrStructField;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.semantics.FunctionSymbol;
 import io.github.stardragonstudios.sol.semantics.ModuleName;
 import io.github.stardragonstudios.sol.semantics.ModuleSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticAnalysisResult;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.semantics.SemanticProgramAnalysisResult;
+import io.github.stardragonstudios.sol.semantics.StructSymbol;
+import io.github.stardragonstudios.sol.semantics.types.StructType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.TypeReference;
 
@@ -27,6 +31,8 @@ public final class IrProgramLowerer {
         validateNoSemanticErrors(program);
 
         var programContext = new IrProgramLoweringContext();
+
+        assignStructTypes(program, programContext);
 
         /*
          * Identifiers and typed references are assigned before any function
@@ -85,6 +91,67 @@ public final class IrProgramLowerer {
         }
     }
 
+    private static void assignStructTypes(SemanticProgramAnalysisResult program, IrProgramLoweringContext context) {
+        var lowered = Collections.newSetFromMap(new IdentityHashMap<StructSymbol, Boolean>());
+        var visiting = Collections.newSetFromMap(new IdentityHashMap<StructSymbol, Boolean>());
+        var owners = new IdentityHashMap<StructSymbol, ModuleSymbol>();
+
+        for (var moduleName : program.moduleNames()) {
+            var module = requireModule(program, moduleName);
+
+            for (var struct : module.exportedStructs()) owners.put(struct, module);
+        }
+
+        for (var moduleName : program.moduleNames()) {
+            var module = requireModule(program, moduleName);
+
+            for (var struct : module.exportedStructs()) lowerStructType(program, struct, owners, context, lowered, visiting);
+        }
+    }
+
+    private static IrStructType lowerStructType(
+        SemanticProgramAnalysisResult program,
+        StructSymbol struct,
+        IdentityHashMap<StructSymbol, ModuleSymbol> owners,
+        IrProgramLoweringContext context,
+        Set<StructSymbol> lowered,
+        Set<StructSymbol> visiting
+    ) {
+        if (lowered.contains(struct)) return context.structType(struct);
+        if (!visiting.add(struct)) throw new IrLoweringException("Struct '%s' has a recursive value layout during IR lowering.".formatted(struct.name()));
+
+        var module = owners.get(struct);
+
+        if (module == null) throw new IrLoweringException("Struct '%s' has no owning semantic module.".formatted(struct.name()));
+
+        var model = requireAnalysis(program, module.name()).model();
+
+        var fields = new ArrayList<IrStructField>();
+
+        for (var field : struct.fields()) {
+            var semanticType = requireType(model, field.type(), "field '%s' of struct '%s'".formatted(field.name(), struct.name()));
+            IrType fieldType;
+
+            if (semanticType instanceof StructType nested) {
+                fieldType = lowerStructType(program, nested.symbol(), owners, context, lowered, visiting);
+            } else {
+                fieldType = IrTypeLowerer.lower(semanticType);
+            }
+
+            fields.add(new IrStructField(field.name(), fieldType, field.index()));
+        }
+
+        visiting.remove(struct);
+
+        var qualifiedName = "%s::%s".formatted(module.name().qualifiedName(), struct.name());
+        var type = new IrStructType(qualifiedName, fields);
+
+        context.assignStructType(struct, type);
+        lowered.add(struct);
+
+        return type;
+    }
+
     private static void assignFunctionReferences(SemanticProgramAnalysisResult program, IrProgramLoweringContext context) {
         for (var moduleName : program.moduleNames()) {
             var module = requireModule(program, moduleName);
@@ -96,10 +163,10 @@ public final class IrProgramLowerer {
                 for (var parameter : function.declaration().parameters()) {
                     var semanticType = requireType(model, parameter.type(), "parameter '%s' of function '%s'".formatted(parameter.name(), function.name()));
 
-                    parameterTypes.add(IrTypeLowerer.lower(semanticType));
+                    parameterTypes.add(IrTypeLowerer.lower(semanticType, context));
                 }
 
-                var returnType = IrTypeLowerer.lower(requireType(model, function.declaration().returnType(), "return type of function '%s'".formatted(function.name())));
+                var returnType = IrTypeLowerer.lower(requireType(model, function.declaration().returnType(), "return type of function '%s'".formatted(function.name())), context);
 
                 context.assignFunctionReference(function, parameterTypes, returnType);
             }

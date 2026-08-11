@@ -5,6 +5,8 @@ import io.github.stardragonstudios.sol.ir.IrLocalLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrUnaryInstruction;
 import io.github.stardragonstudios.sol.ir.IrValue;
 import io.github.stardragonstudios.sol.ir.IrValueCallInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructConstructInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructFieldExtractInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
@@ -15,7 +17,11 @@ import io.github.stardragonstudios.sol.syntax.LiteralExpression;
 import io.github.stardragonstudios.sol.syntax.NameExpression;
 import io.github.stardragonstudios.sol.syntax.ParenthesizedExpression;
 import io.github.stardragonstudios.sol.syntax.UnaryExpression;
+import io.github.stardragonstudios.sol.syntax.StructConstructionExpression;
+import io.github.stardragonstudios.sol.syntax.FieldAccessExpression;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Objects;
 
 final class IrExpressionLowerer {
@@ -33,13 +39,71 @@ final class IrExpressionLowerer {
             case UnaryExpression unary -> lowerUnary(unary, model, context);
             case BinaryExpression binary -> lowerBinary(binary, model, context);
             case CallExpression call -> lowerCall(call, model, context);
+            case StructConstructionExpression construction -> lowerStructConstruction(construction, model, context);
+            case FieldAccessExpression fieldAccess -> lowerFieldAccess(fieldAccess, model, context);
 
             default -> throw new IrLoweringException("Unsupported expression syntax '%s' during IR lowering.".formatted(expression.getClass().getSimpleName()));
         };
 
-        validateSemanticType(expression, lowered, model);
+        validateSemanticType(expression, lowered, model, context);
 
         return lowered;
+    }
+
+    private static IrValue lowerStructConstruction(
+        StructConstructionExpression expression,
+        SemanticModel model,
+        IrFunctionLoweringContext context
+    ) {
+        var struct = model.constructedStructOf(expression).orElseThrow(() -> new IrLoweringException(
+            "Struct construction '%s' has no resolved semantic struct.".formatted(expression.type().name())
+        ));
+        var type = context.structType(struct);
+        var valuesByFieldIndex = new HashMap<Integer, IrValue>();
+
+        /* Lower in source order so initializer side effects retain source evaluation order. */
+        for (var initializer : expression.fields()) {
+            var field = model.initializedFieldOf(initializer).orElseThrow(() -> new IrLoweringException(
+                "Initializer for field '%s' of struct '%s' has no resolved semantic field.".formatted(initializer.name(), struct.name())
+            ));
+
+            valuesByFieldIndex.put(field.index(), lower(initializer.value(), model, context));
+        }
+
+        var values = new ArrayList<IrValue>(type.fields().size());
+
+        for (var field : type.fields()) {
+            var value = valuesByFieldIndex.get(field.index());
+
+            if (value == null) throw new IrLoweringException(
+                "Construction of struct '%s' has no lowered value for field '%s'.".formatted(struct.name(), field.name())
+            );
+
+            values.add(value);
+        }
+
+        var instruction = new IrStructConstructInstruction(context.nextValueId(), type, values);
+
+        context.emit(instruction);
+
+        return instruction;
+    }
+
+    private static IrValue lowerFieldAccess(
+        FieldAccessExpression expression,
+        SemanticModel model,
+        IrFunctionLoweringContext context
+    ) {
+        var target = lower(expression.target(), model, context);
+        var semanticField = model.accessedFieldOf(expression).orElseThrow(() -> new IrLoweringException(
+            "Field access '%s' has no resolved semantic field.".formatted(expression.fieldName())
+        ));
+        var field = context.structType(semanticField.owner()).fields().get(semanticField.index());
+        var instruction = new IrStructFieldExtractInstruction(context.nextValueId(), target, field);
+
+        context.emit(instruction);
+
+        return instruction;
     }
 
     private static IrValue lowerName(NameExpression expression, SemanticModel model, IrFunctionLoweringContext context) {
@@ -104,12 +168,12 @@ final class IrExpressionLowerer {
         return new IrLoweringException("Semantically validated %s expression produced invalid IR: %s".formatted(kind, cause.getMessage()));
     }
 
-    private static void validateSemanticType(Expression expression, IrValue value, SemanticModel model) {
+    private static void validateSemanticType(Expression expression, IrValue value, SemanticModel model, IrFunctionLoweringContext context) {
         var semanticType = model.typeOf(expression).orElseThrow(() -> new IrLoweringException(
             "Expression syntax '%s' has no resolved semantic type.".formatted(expression.getClass().getSimpleName()))
         );
 
-        var expectedType = IrTypeLowerer.lower(semanticType);
+        var expectedType = context.lowerType(semanticType);
 
         if (!expectedType.equals(value.type()))
             throw new IrLoweringException("Lowered expression type '%s' does not match semantic type '%s'.".formatted(value.type().displayName(), expectedType.displayName()));

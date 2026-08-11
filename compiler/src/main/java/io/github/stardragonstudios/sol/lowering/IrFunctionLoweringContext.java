@@ -9,12 +9,15 @@ import io.github.stardragonstudios.sol.ir.IrLocal;
 import io.github.stardragonstudios.sol.ir.IrLocalId;
 import io.github.stardragonstudios.sol.ir.IrLocalKind;
 import io.github.stardragonstudios.sol.ir.IrParameter;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.ir.IrTerminator;
 import io.github.stardragonstudios.sol.ir.IrType;
 import io.github.stardragonstudios.sol.ir.IrValueId;
 import io.github.stardragonstudios.sol.semantics.FunctionSymbol;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
+import io.github.stardragonstudios.sol.semantics.StructSymbol;
+import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.VariableDeclarationKind;
 
 import java.util.ArrayList;
@@ -61,6 +64,14 @@ final class IrFunctionLoweringContext {
         Objects.requireNonNull(target, "Queried called-function symbol must not be null.");
 
         return programContext.functionReference(target);
+    }
+
+    IrType lowerType(TypeSymbol type) {
+        return IrTypeLowerer.lower(type, programContext);
+    }
+
+    IrStructType structType(StructSymbol struct) {
+        return programContext.structType(struct);
     }
 
     IrParameter declareParameter(ParameterSymbol parameter, IrType type) {

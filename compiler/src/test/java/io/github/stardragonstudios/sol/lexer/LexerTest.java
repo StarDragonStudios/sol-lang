@@ -36,7 +36,7 @@ final class LexerTest {
     @Test
     void recognizesAllInitialKeywords() {
         var tokens = Lexer.scan(
-            "fn let const if else while return then do end inject true false only namespace as"
+            "fn let const if else while return then do end inject true false only namespace as struct"
         );
 
         assertEquals(
@@ -57,6 +57,7 @@ final class LexerTest {
                 TokenKind.ONLY,
                 TokenKind.NAMESPACE,
                 TokenKind.AS,
+                TokenKind.STRUCT,
                 TokenKind.EOF
             ),
             kindsOf(tokens)
@@ -356,7 +357,7 @@ final class LexerTest {
     @Test
     void scansPunctuationAndArithmeticOperators() {
         var tokens = Lexer.scan(
-            "@ ( ) , : . -> = + - * / % ! && ||"
+            "@ ( ) { } , : . -> = + - * / % ! && ||"
         );
 
         assertEquals(
@@ -364,6 +365,8 @@ final class LexerTest {
                 TokenKind.AT,
                 TokenKind.LEFT_PAREN,
                 TokenKind.RIGHT_PAREN,
+                TokenKind.LEFT_BRACE,
+                TokenKind.RIGHT_BRACE,
                 TokenKind.COMMA,
                 TokenKind.COLON,
                 TokenKind.DOT,
@@ -387,6 +390,8 @@ final class LexerTest {
                 "@",
                 "(",
                 ")",
+                "{",
+                "}",
                 ",",
                 ":",
                 ".",

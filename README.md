@@ -14,6 +14,7 @@ and its native compilation pipeline:
 * functions;
 * variables and constants;
 * conditions and loops;
+* value-type structs on the Sol 0.1.1 development branch;
 * a Java bootstrap compiler;
 * a typed, compiler-independent Sol IR;
 * LLVM IR generation;

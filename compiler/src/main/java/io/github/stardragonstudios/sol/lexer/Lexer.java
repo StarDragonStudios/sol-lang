@@ -28,7 +28,8 @@ public final class Lexer {
         Map.entry("false", TokenKind.FALSE),
         Map.entry("only", TokenKind.ONLY),
         Map.entry("namespace", TokenKind.NAMESPACE),
-        Map.entry("as", TokenKind.AS)
+        Map.entry("as", TokenKind.AS),
+        Map.entry("struct", TokenKind.STRUCT)
     );
 
     private static final String UNEXPECTED_CHARACTER_CODE = "SOL-L001";
@@ -103,6 +104,18 @@ public final class Lexer {
             case ')' -> scanSingleCharacterToken(
                 start,
                 TokenKind.RIGHT_PAREN,
+                tokens
+            );
+
+            case '{' -> scanSingleCharacterToken(
+                start,
+                TokenKind.LEFT_BRACE,
+                tokens
+            );
+
+            case '}' -> scanSingleCharacterToken(
+                start,
+                TokenKind.RIGHT_BRACE,
                 tokens
             );
 

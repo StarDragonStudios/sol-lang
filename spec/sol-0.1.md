@@ -1,7 +1,8 @@
 # Sol 0.1 Language Specification
 
 Sol 0.1 defines the procedural bootstrap language implemented by the Java
-bootstrap compiler.
+bootstrap compiler. Sol 0.1.1 extends the released 0.1.0 language with
+user-defined value-type structs while preserving the procedural model.
 
 This specification describes the source-language behavior of Sol 0.1.
 Backend-specific representation, native executable construction and host
@@ -54,6 +55,7 @@ false
 only
 namespace
 as
+struct
 ```
 
 Annotation names such as `init` and `mut` are not keywords by themselves.
@@ -245,7 +247,8 @@ Primary expressions include:
 * literals;
 * names;
 * namespace-qualified names;
-* parenthesized expressions.
+* parenthesized expressions;
+* struct construction expressions.
 
 Examples:
 
@@ -254,6 +257,7 @@ Examples:
 value
 io::print_line
 (value + 1)
+Point { x: 10, y: 20 }
 ```
 
 A namespace-qualified name contains exactly one namespace qualifier and one
@@ -424,7 +428,7 @@ Sol 0.1 does not define:
 * string equality;
 * function values;
 * closures;
-* member access on runtime objects;
+* class or object member dispatch;
 * chained namespace qualification.
 
 Invalid expressions may internally use the compiler's semantic error type so
@@ -439,6 +443,7 @@ The procedural bootstrap supports the following statement forms:
 
 * local variable declarations;
 * assignments;
+* struct field assignments;
 * function-call statements;
 * `if` conditionals;
 * `while` loops;
@@ -556,12 +561,124 @@ value = 2.0
 
 is invalid.
 
-Assignment targets in Sol 0.1 are plain names. Assignment to functions,
-namespaces and other non-variable symbols is invalid.
+Assignment targets are local-variable names or fields rooted in local
+variables. Assignment to functions, namespaces and other non-variable symbols
+is invalid.
 
 Function parameters are also immutable and cannot be assignment targets.
 
-### Declaration visibility
+## Struct value types
+
+Sol 0.1.1 adds `struct` as the user-defined data-model primitive required by
+the self-hosted compiler.
+
+A struct declaration contains a name and zero or more ordered fields:
+
+```sol
+struct SourcePosition
+    offset: int
+    line: int
+    column: int
+end
+```
+
+Each field has a unique name and an explicit value type. A field cannot have
+type `void`. Struct fields may use another struct type, which permits nested
+value models:
+
+```sol
+struct SourceSpan
+    start: SourcePosition
+    end: SourcePosition
+end
+```
+
+Direct or indirect recursive struct layouts are invalid. Recursive data
+structures will use the pointer facilities tracked separately for Sol 0.1.1.
+
+Struct names share the module declaration namespace with functions and cannot
+reuse a built-in type name. Duplicate top-level names are invalid. A directly
+injected struct may be used by its unqualified name; namespace-qualified type
+syntax is not defined in 0.1.1.
+
+### Construction
+
+A struct value is constructed with braces and named field initializers:
+
+```sol
+let position: SourcePosition = SourcePosition {
+    offset: 0,
+    line: 1,
+    column: 1,
+}
+```
+
+Initializers may appear in any order and are evaluated in source order. Every
+declared field must be initialized exactly once. Missing, duplicate and unknown
+field initializers are errors. An initializer value must have exactly the field
+type; Sol performs no implicit conversion.
+
+The empty form is valid for a struct with no fields:
+
+```sol
+struct Marker
+end
+
+let marker: Marker = Marker {}
+```
+
+### Field access
+
+The `.` operator reads a named field:
+
+```sol
+position.line
+span.start.column
+```
+
+Field access may be chained through nested structs. Accessing an unknown field
+or applying `.` to a non-struct value is invalid.
+
+### Field mutation
+
+Fields may be updated only when the complete access path is rooted in an
+`@mut let` local:
+
+```sol
+@mut let position: SourcePosition = SourcePosition {
+    offset: 0,
+    line: 1,
+    column: 1,
+}
+
+position.line = 2
+```
+
+Nested mutation updates the containing value:
+
+```sol
+@mut let span: SourceSpan = initial_span
+span.start.line = 2
+```
+
+Ordinary `let`, `const` and parameters are immutable, including all of their
+nested fields. The assigned value must have exactly the field type.
+
+### Value semantics
+
+Structs have value semantics. They have no object identity, hidden object
+header or implicit heap allocation. Initialization, assignment, argument
+passing and return copy the complete struct value. Mutating one copy does not
+mutate another copy.
+
+Field order in the declaration defines the canonical Sol IR and native layout
+order. Source construction order does not change layout. Layout is deterministic
+for a fixed target ABI.
+
+Structs do not introduce classes, inheritance, methods, virtual dispatch,
+constructors, destructors or the Sol 0.2 object model.
+
+## Declaration visibility
 
 A local variable becomes visible only after its initializer has been analyzed.
 
@@ -1557,7 +1674,7 @@ The procedural API reports operation success through `boolean` results.
 Reading dynamically sized file data will require string ownership and lifetime
 semantics beyond the current Sol 0.1 bootstrap.
 
-## Sol 0.1 procedural scope
+## Sol 0.1.1 procedural scope
 
 Sol 0.1 intentionally defines a small procedural language used to bootstrap the
 compiler and native execution model.
@@ -1566,6 +1683,7 @@ The version includes:
 
 * primitive static types;
 * primitive literals;
+* user-defined struct value types;
 * unary and binary expressions;
 * lexical local scopes;
 * immutable and mutable local variables;
@@ -1582,7 +1700,6 @@ Sol 0.1 does not define:
 * classes or objects;
 * inheritance;
 * interfaces;
-* user-defined value types;
 * arrays;
 * pointers or references;
 * generics;

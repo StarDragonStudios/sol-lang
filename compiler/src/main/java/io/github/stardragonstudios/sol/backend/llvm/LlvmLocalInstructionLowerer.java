@@ -18,6 +18,7 @@ final class LlvmLocalInstructionLowerer {
         Objects.requireNonNull(context, "LLVM function lowering context must not be null.");
 
         switch (instruction) {
+            case IrStructFieldStoreInstruction fieldStore -> LlvmStructInstructionLowerer.lower(fieldStore, context);
             case IrLocalInitializeInstruction initialization -> lowerStore(initialization.local(), initialization.initializer(), context);
             case IrLocalLoadInstruction load -> lowerLoad(load, context);
             case IrLocalStoreInstruction store -> lowerStore(store.local(), store.value(), context);

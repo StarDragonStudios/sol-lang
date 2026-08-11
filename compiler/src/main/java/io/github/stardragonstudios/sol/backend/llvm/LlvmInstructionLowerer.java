@@ -4,6 +4,8 @@ import io.github.stardragonstudios.sol.ir.IrBinaryInstruction;
 import io.github.stardragonstudios.sol.ir.IrCallInstruction;
 import io.github.stardragonstudios.sol.ir.IrInstruction;
 import io.github.stardragonstudios.sol.ir.IrLocalInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructConstructInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructFieldExtractInstruction;
 import io.github.stardragonstudios.sol.ir.IrUnaryInstruction;
 
 import java.util.Objects;
@@ -16,6 +18,8 @@ final class LlvmInstructionLowerer {
         Objects.requireNonNull(context, "LLVM function lowering context must not be null.");
 
         switch (instruction) {
+            case IrStructConstructInstruction construction -> LlvmStructInstructionLowerer.lower(construction, context);
+            case IrStructFieldExtractInstruction extraction -> LlvmStructInstructionLowerer.lower(extraction, context);
             case IrUnaryInstruction unary -> LlvmUnaryInstructionLowerer.lower(unary, context);
             case IrBinaryInstruction binary -> LlvmBinaryInstructionLowerer.lower(binary, context);
             case IrLocalInstruction local -> LlvmLocalInstructionLowerer.lower(local, context);
