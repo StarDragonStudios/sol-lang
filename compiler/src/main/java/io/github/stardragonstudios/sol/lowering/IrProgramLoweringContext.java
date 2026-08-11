@@ -2,8 +2,10 @@ package io.github.stardragonstudios.sol.lowering;
 
 import io.github.stardragonstudios.sol.ir.IrFunctionId;
 import io.github.stardragonstudios.sol.ir.IrFunctionReference;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.ir.IrType;
 import io.github.stardragonstudios.sol.semantics.FunctionSymbol;
+import io.github.stardragonstudios.sol.semantics.StructSymbol;
 
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -12,6 +14,7 @@ import java.util.Objects;
 final class IrProgramLoweringContext {
     private final IdentityHashMap<FunctionSymbol, IrFunctionId> functionIds = new IdentityHashMap<>();
     private final IdentityHashMap<FunctionSymbol, IrFunctionReference> functionReferences = new IdentityHashMap<>();
+    private final IdentityHashMap<StructSymbol, IrStructType> structTypes = new IdentityHashMap<>();
 
     private int nextFunctionIndex;
 
@@ -70,5 +73,23 @@ final class IrProgramLoweringContext {
             throw new IrLoweringException("Function '%s' has no canonical IR reference.".formatted(function.name()));
 
         return reference;
+    }
+
+    void assignStructType(StructSymbol struct, IrStructType type) {
+        Objects.requireNonNull(struct, "Lowered struct symbol must not be null.");
+        Objects.requireNonNull(type, "Assigned IR struct type must not be null.");
+
+        if (structTypes.putIfAbsent(struct, type) != null)
+            throw new IrLoweringException("Struct '%s' already has a canonical IR type.".formatted(struct.name()));
+    }
+
+    IrStructType structType(StructSymbol struct) {
+        Objects.requireNonNull(struct, "Queried struct symbol must not be null.");
+
+        var type = structTypes.get(struct);
+
+        if (type == null) throw new IrLoweringException("Struct '%s' has no canonical IR type.".formatted(struct.name()));
+
+        return type;
     }
 }

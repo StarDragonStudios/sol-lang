@@ -33,7 +33,7 @@ final class IrFunctionSignatureLowerer {
                 "parameter '%s' of function '%s'".formatted(parameterSymbol.name(), function.name())
             );
 
-            loweredParameters.add(functionContext.declareParameter(parameterSymbol, IrTypeLowerer.lower(parameterType)));
+            loweredParameters.add(functionContext.declareParameter(parameterSymbol, functionContext.lowerType(parameterType)));
         }
 
         var returnType = requireType(
@@ -46,7 +46,7 @@ final class IrFunctionSignatureLowerer {
             function,
             programContext.functionId(function),
             loweredParameters,
-            IrTypeLowerer.lower(returnType),
+            functionContext.lowerType(returnType),
             functionContext
         );
     }

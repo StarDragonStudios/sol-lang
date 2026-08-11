@@ -1,5 +1,7 @@
 package io.github.stardragonstudios.sol.backend.llvm;
 
+import io.github.stardragonstudios.sol.ir.IrStructField;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.ir.PrimitiveIrType;
 
 import org.bytedeco.javacpp.BytePointer;
@@ -7,6 +9,8 @@ import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.llvm.LLVM.LLVMTypeRef;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.bytedeco.llvm.global.LLVM.LLVMDisposeMessage;
 import static org.bytedeco.llvm.global.LLVM.LLVMPrintTypeToString;
@@ -27,7 +31,29 @@ class LlvmTypeLowererTest {
         }
     }
 
+    @Test
+    void lowersStructFieldsInDeclarationOrderAndSupportsEmptyStructs() {
+        var nested = new IrStructType(
+            "application::Position",
+            List.of(
+                new IrStructField("line", PrimitiveIrType.INT, 0),
+                new IrStructField("column", PrimitiveIrType.CHAR, 1)
+            )
+        );
+        var span = new IrStructType(
+            "application::Span",
+            List.of(
+                new IrStructField("start", nested, 0),
+                new IrStructField("valid", PrimitiveIrType.BOOLEAN, 1)
+            )
+        );
+        var marker = new IrStructType("application::Marker", List.of());
 
+        try (var module = LlvmModule.create("sol.struct-types")) {
+            assertEquals("{ { i64, i32 }, i1 }", printType(LlvmTypeLowerer.lower(span, module.contextHandle())));
+            assertEquals("{}", printType(LlvmTypeLowerer.lower(marker, module.contextHandle())));
+        }
+    }
 
     @Test
     void rejectsInvalidInputs() {

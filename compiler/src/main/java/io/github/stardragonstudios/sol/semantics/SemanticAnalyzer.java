@@ -3,6 +3,7 @@ package io.github.stardragonstudios.sol.semantics;
 import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
 import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.StructType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.source.SourcePosition;
 import io.github.stardragonstudios.sol.source.SourceSpan;
@@ -34,6 +35,18 @@ public final class SemanticAnalyzer {
     private static final String MULTIPLE_ENTRY_POINTS_CODE = "SOL-S024";
     private static final String BODYLESS_ENTRY_POINT_CODE = "SOL-S025";
     private static final String INVALID_ENTRY_POINT_RETURN_CODE = "SOL-S026";
+    private static final String DUPLICATE_STRUCT_FIELD_CODE = "SOL-S027";
+    private static final String INVALID_STRUCT_FIELD_TYPE_CODE = "SOL-S028";
+    private static final String CYCLIC_STRUCT_LAYOUT_CODE = "SOL-S029";
+    private static final String NOT_A_STRUCT_TYPE_CODE = "SOL-S030";
+    private static final String UNKNOWN_STRUCT_FIELD_CODE = "SOL-S031";
+    private static final String DUPLICATE_STRUCT_INITIALIZER_CODE = "SOL-S032";
+    private static final String MISSING_STRUCT_INITIALIZER_CODE = "SOL-S033";
+    private static final String INCOMPATIBLE_STRUCT_INITIALIZER_CODE = "SOL-S034";
+    private static final String FIELD_ACCESS_ON_NON_STRUCT_CODE = "SOL-S035";
+    private static final String UNKNOWN_FIELD_CODE = "SOL-S036";
+    private static final String INVALID_FIELD_ASSIGNMENT_TARGET_CODE = "SOL-S037";
+    private static final String RESERVED_STRUCT_NAME_CODE = "SOL-S038";
 
     private static final ModuleName ISOLATED_MODULE_NAME = new ModuleName(List.of("<isolated>"));
     private static final SourceSpan PROGRAM_DIAGNOSTIC_SPAN = new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(0, 1, 1));
@@ -89,8 +102,11 @@ public final class SemanticAnalyzer {
         }
 
         private SemanticProgramAnalysisResult bind() {
+            binders.values().forEach(Binder::predeclareStructs);
             binders.values().forEach(Binder::predeclareFunctions);
             binders.values().forEach(Binder::resolveInjections);
+            binders.values().forEach(Binder::bindStructDeclarations);
+            validateStructLayouts();
             binders.values().forEach(Binder::bindFunctionSignatures);
 
             var programDiagnostics = new ArrayList<Diagnostic>();
@@ -103,6 +119,77 @@ public final class SemanticAnalyzer {
             binders.forEach((name, binder) -> analyses.put(name, binder.finish()));
 
             return new SemanticProgramAnalysisResult(modules, analyses, entryPoint, programDiagnostics);
+        }
+
+        private void validateStructLayouts() {
+            var owners = new IdentityHashMap<StructSymbol, Binder>();
+
+            for (var binder : binders.values())
+                for (var struct : binder.module.exportedStructs()) owners.put(struct, binder);
+
+            var checked = Collections.newSetFromMap(new IdentityHashMap<StructSymbol, Boolean>());
+            var invalid = Collections.newSetFromMap(new IdentityHashMap<StructSymbol, Boolean>());
+
+            for (var binder : binders.values())
+                for (var struct : binder.module.exportedStructs()) validateStructLayout(
+                    struct,
+                    owners,
+                    checked,
+                    invalid,
+                    Collections.newSetFromMap(new IdentityHashMap<>())
+                );
+        }
+
+        private boolean validateStructLayout(
+            StructSymbol struct,
+            IdentityHashMap<StructSymbol, Binder> owners,
+            Set<StructSymbol> checked,
+            Set<StructSymbol> invalid,
+            Set<StructSymbol> visiting
+        ) {
+            if (checked.contains(struct)) return !invalid.contains(struct);
+
+            visiting.add(struct);
+
+            for (var field : struct.fields()) {
+                var fieldType = programResolvedTypes.getOrDefault(field.type(), BuiltInTypes.ERROR);
+
+                if (!(fieldType instanceof StructType nestedType)) continue;
+
+                var nested = nestedType.symbol();
+
+                if (visiting.contains(nested)) {
+                    var owner = owners.get(struct);
+
+                    if (owner == null) throw new IllegalStateException("Struct '%s' has no semantic binder.".formatted(struct.name()));
+
+                    owner.diagnostics.add(new Diagnostic(
+                        CYCLIC_STRUCT_LAYOUT_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Struct '%s' has a recursive value layout through field '%s'.".formatted(struct.name(), field.name()),
+                        field.type().span()
+                    ));
+
+                    invalid.add(struct);
+                    visiting.remove(struct);
+                    checked.add(struct);
+
+                    return false;
+                }
+
+                if (!validateStructLayout(nested, owners, checked, invalid, visiting)) {
+                    invalid.add(struct);
+                    visiting.remove(struct);
+                    checked.add(struct);
+
+                    return false;
+                }
+            }
+
+            visiting.remove(struct);
+            checked.add(struct);
+
+            return true;
         }
 
         private Optional<ProgramEntryPoint> resolveEntryPoint(List<Diagnostic> programDiagnostics) {
@@ -165,11 +252,18 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<FunctionDeclaration, Scope> functionScopes = new IdentityHashMap<>();
         private final IdentityHashMap<Block, Scope> blockScopes = new IdentityHashMap<>();
         private final IdentityHashMap<FunctionDeclaration, FunctionSymbol> functionSymbols = new IdentityHashMap<>();
+        private final IdentityHashMap<StructDeclaration, StructSymbol> structSymbols = new IdentityHashMap<>();
+        private final IdentityHashMap<StructFieldDeclaration, StructFieldSymbol> structFieldSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<Parameter, ParameterSymbol> parameterSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<VariableDeclarationStatement, LocalVariableSymbol> localVariableSymbols = new IdentityHashMap<>();
         private final IdentityHashMap<NameExpression, Symbol> resolvedNames = new IdentityHashMap<>();
         private final IdentityHashMap<AssignmentStatement, Symbol> assignmentTargets = new IdentityHashMap<>();
+        private final IdentityHashMap<FieldAssignmentStatement, Symbol> fieldAssignmentTargets = new IdentityHashMap<>();
+        private final IdentityHashMap<StructConstructionExpression, StructSymbol> constructedStructs = new IdentityHashMap<>();
+        private final IdentityHashMap<StructFieldInitializer, StructFieldSymbol> initializedStructFields = new IdentityHashMap<>();
+        private final IdentityHashMap<FieldAccessExpression, StructFieldSymbol> accessedStructFields = new IdentityHashMap<>();
         private final IdentityHashMap<FunctionDeclaration, Boolean> duplicateFunctions = new IdentityHashMap<>();
+        private final IdentityHashMap<StructDeclaration, Boolean> duplicateStructs = new IdentityHashMap<>();
         private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
         private final IdentityHashMap<Expression, TypeSymbol> expressionTypes = new IdentityHashMap<>();
         private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions = new IdentityHashMap<>();
@@ -202,10 +296,16 @@ public final class SemanticAnalyzer {
                 functionScopes,
                 blockScopes,
                 functionSymbols,
+                structSymbols,
+                structFieldSymbols,
                 parameterSymbols,
                 localVariableSymbols,
                 resolvedNames,
                 assignmentTargets,
+                fieldAssignmentTargets,
+                constructedStructs,
+                initializedStructFields,
+                accessedStructFields,
                 calledFunctions,
                 qualifiedNameSymbols,
                 injectedModules,
@@ -223,6 +323,25 @@ public final class SemanticAnalyzer {
             return new SemanticAnalysisResult(model, diagnostics);
         }
 
+        private void predeclareStructs() {
+            for (var declaration : unit.declarations()) {
+                if (!(declaration instanceof StructDeclaration struct)) continue;
+
+                var symbol = new StructSymbol(struct);
+
+                structSymbols.put(struct, symbol);
+
+                for (var field : symbol.fields()) structFieldSymbols.put(field.declaration(), field);
+
+                if (BuiltInTypes.lookup(symbol.name()).isPresent()) {
+                    duplicateStructs.put(struct, true);
+                    continue;
+                }
+
+                if (!module.declareExport(symbol)) duplicateStructs.put(struct, true);
+            }
+        }
+
         private void predeclareFunctions() {
             for (var declaration : unit.declarations())
                 if (declaration instanceof FunctionDeclaration function) {
@@ -232,6 +351,43 @@ public final class SemanticAnalyzer {
 
                     if (!module.declareExport(symbol)) duplicateFunctions.put(function, true);
                 }
+        }
+
+        private void bindStructDeclarations() {
+            for (var declaration : unit.declarations()) {
+                if (!(declaration instanceof StructDeclaration struct)) continue;
+
+                var symbol = structSymbols.get(struct);
+
+                if (BuiltInTypes.lookup(symbol.name()).isPresent()) diagnostics.add(new Diagnostic(
+                    RESERVED_STRUCT_NAME_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Struct name '%s' is reserved by a built-in type.".formatted(symbol.name()),
+                    struct.span()
+                ));
+                else if (duplicateStructs.containsKey(struct)) reportDuplicate(symbol);
+
+                var fieldNames = new HashSet<String>();
+
+                for (var field : symbol.fields()) {
+                    if (!fieldNames.add(field.name())) diagnostics.add(new Diagnostic(
+                        DUPLICATE_STRUCT_FIELD_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Struct '%s' declares field '%s' more than once.".formatted(symbol.name(), field.name()),
+                        field.span()
+                    ));
+
+                    var fieldType = resolveTypeReference(field.type());
+
+                    if (fieldType != BuiltInTypes.ERROR && !fieldType.isValue()) diagnostics.add(new Diagnostic(
+                        INVALID_STRUCT_FIELD_TYPE_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Field '%s' of struct '%s' cannot have non-value type '%s'.".formatted(field.name(), symbol.name(), fieldType.name()),
+                        field.type().span()
+                    ));
+                }
+            }
+
         }
 
         private void bindFunctionSignatures() {
@@ -360,6 +516,12 @@ public final class SemanticAnalyzer {
                 return;
             }
 
+            if (statement instanceof FieldAssignmentStatement fieldAssignment) {
+                bindFieldAssignment(fieldAssignment, scope);
+
+                return;
+            }
+
             if (statement instanceof CallStatement callStatement) {
                 bindExpression(callStatement.call(), scope);
 
@@ -413,6 +575,17 @@ public final class SemanticAnalyzer {
             var valueType = bindExpression(assignment.value(), scope);
 
             validateAssignment(assignment, targetSymbol, valueType);
+        }
+
+        private void bindFieldAssignment(FieldAssignmentStatement assignment, Scope scope) {
+            var targetType = bindExpression(assignment.target(), scope);
+            var rootSymbol = rootSymbolOf(assignment.target());
+
+            if (rootSymbol != null) fieldAssignmentTargets.put(assignment, rootSymbol);
+
+            var valueType = bindExpression(assignment.value(), scope);
+
+            validateFieldAssignment(assignment, rootSymbol, targetType, valueType);
         }
 
         private void validateVariableType(VariableDeclarationStatement declaration, TypeSymbol declaredType) {
@@ -489,6 +662,10 @@ public final class SemanticAnalyzer {
 
                 case QualifiedNameExpression qualified -> type = bindQualifiedNameExpression(qualified, scope);
 
+                case StructConstructionExpression construction -> type = bindStructConstruction(construction, scope);
+
+                case FieldAccessExpression fieldAccess -> type = bindFieldAccess(fieldAccess, scope);
+
                 case null, default -> {
                     assert expression != null;
 
@@ -499,6 +676,129 @@ public final class SemanticAnalyzer {
             expressionTypes.put(expression, type);
 
             return type;
+        }
+
+        private TypeSymbol bindStructConstruction(StructConstructionExpression expression, Scope scope) {
+            var type = resolveTypeReference(expression.type());
+            var initializerTypes = new IdentityHashMap<StructFieldInitializer, TypeSymbol>();
+
+            for (var initializer : expression.fields()) initializerTypes.put(initializer, bindExpression(initializer.value(), scope));
+
+            if (type == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+
+            if (!(type instanceof StructType structType)) {
+                diagnostics.add(new Diagnostic(
+                    NOT_A_STRUCT_TYPE_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Type '%s' is not a struct and cannot be constructed with field initializers.".formatted(type.name()),
+                    expression.type().span()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var struct = structType.symbol();
+
+            constructedStructs.put(expression, struct);
+
+            var initializedNames = new HashSet<String>();
+
+            for (var initializer : expression.fields()) {
+                var field = struct.field(initializer.name());
+
+                if (field.isEmpty()) {
+                    diagnostics.add(new Diagnostic(
+                        UNKNOWN_STRUCT_FIELD_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Struct '%s' has no field named '%s'.".formatted(struct.name(), initializer.name()),
+                        initializer.span()
+                    ));
+
+                    continue;
+                }
+
+                var resolvedField = field.orElseThrow();
+
+                initializedStructFields.put(initializer, resolvedField);
+
+                if (!initializedNames.add(initializer.name())) {
+                    diagnostics.add(new Diagnostic(
+                        DUPLICATE_STRUCT_INITIALIZER_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Field '%s' of struct '%s' is initialized more than once.".formatted(initializer.name(), struct.name()),
+                        initializer.span()
+                    ));
+
+                    continue;
+                }
+
+                var expectedType = resolvedTypeOf(resolvedField.type());
+                var actualType = initializerTypes.get(initializer);
+
+                if (expectedType != BuiltInTypes.ERROR && actualType != BuiltInTypes.ERROR && expectedType != actualType) diagnostics.add(new Diagnostic(
+                    INCOMPATIBLE_STRUCT_INITIALIZER_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Field '%s' of struct '%s' expects type '%s', but found '%s'.".formatted(
+                        resolvedField.name(), struct.name(), expectedType.name(), actualType.name()
+                    ),
+                    initializer.value().span()
+                ));
+            }
+
+            for (var field : struct.fields()) if (!initializedNames.contains(field.name())) diagnostics.add(new Diagnostic(
+                MISSING_STRUCT_INITIALIZER_CODE,
+                DiagnosticSeverity.ERROR,
+                "Construction of struct '%s' is missing field '%s'.".formatted(struct.name(), field.name()),
+                expression.span()
+            ));
+
+            return structType;
+        }
+
+        private TypeSymbol bindFieldAccess(FieldAccessExpression expression, Scope scope) {
+            var targetType = bindExpression(expression.target(), scope);
+
+            if (targetType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+
+            if (!(targetType instanceof StructType structType)) {
+                diagnostics.add(new Diagnostic(
+                    FIELD_ACCESS_ON_NON_STRUCT_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot access field '%s' on value of non-struct type '%s'.".formatted(expression.fieldName(), targetType.name()),
+                    expression.fieldSpan()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var field = structType.symbol().field(expression.fieldName());
+
+            if (field.isEmpty()) {
+                diagnostics.add(new Diagnostic(
+                    UNKNOWN_FIELD_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Struct '%s' has no field named '%s'.".formatted(structType.name(), expression.fieldName()),
+                    expression.fieldSpan()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var resolvedField = field.orElseThrow();
+
+            accessedStructFields.put(expression, resolvedField);
+
+            return resolvedTypeOf(resolvedField.type());
+        }
+
+        private Symbol rootSymbolOf(FieldAccessExpression expression) {
+            Expression target = expression.target();
+
+            while (target instanceof FieldAccessExpression fieldAccess) target = fieldAccess.target();
+
+            if (target instanceof NameExpression name) return resolvedNames.get(name);
+
+            return null;
         }
 
         private TypeSymbol bindQualifiedNameExpression(QualifiedNameExpression expression, Scope scope) {
@@ -683,6 +983,17 @@ public final class SemanticAnalyzer {
                 return type;
             }
 
+            var declared = moduleScope.lookupLocal(reference.name()).filter(StructSymbol.class::isInstance).map(StructSymbol.class::cast);
+
+            if (declared.isPresent()) {
+                var type = declared.orElseThrow().type();
+
+                resolvedTypes.put(reference, type);
+                programResolvedTypes.put(reference, type);
+
+                return type;
+            }
+
             resolvedTypes.put(reference, BuiltInTypes.ERROR);
             programResolvedTypes.put(reference, BuiltInTypes.ERROR);
             diagnostics.add(new Diagnostic(
@@ -750,6 +1061,49 @@ public final class SemanticAnalyzer {
                 DiagnosticSeverity.ERROR,
                 "Cannot assign to '%s' because it is not a variable.".formatted(targetSymbol.name()),
                 assignment.target().span()
+            ));
+        }
+
+        private void validateFieldAssignment(
+            FieldAssignmentStatement assignment,
+            Symbol rootSymbol,
+            TypeSymbol targetType,
+            TypeSymbol valueType
+        ) {
+            switch (rootSymbol) {
+                case LocalVariableSymbol local -> {
+                    if (!local.isMutable()) diagnostics.add(new Diagnostic(
+                        IMMUTABLE_ASSIGNMENT_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Cannot mutate a field of immutable variable '%s'.".formatted(local.name()),
+                        assignment.target().span()
+                    ));
+                }
+
+                case ParameterSymbol parameter -> diagnostics.add(new Diagnostic(
+                    IMMUTABLE_ASSIGNMENT_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot mutate a field of immutable parameter '%s'.".formatted(parameter.name()),
+                    assignment.target().span()
+                ));
+
+                case null, default -> diagnostics.add(new Diagnostic(
+                    INVALID_FIELD_ASSIGNMENT_TARGET_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Field assignment target must be rooted in a local variable or parameter.",
+                    assignment.target().span()
+                ));
+            }
+
+            if (targetType == BuiltInTypes.ERROR || valueType == BuiltInTypes.ERROR || targetType == valueType) return;
+
+            diagnostics.add(new Diagnostic(
+                INCOMPATIBLE_ASSIGNMENT_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot assign value of type '%s' to field '%s' of type '%s'.".formatted(
+                    valueType.name(), assignment.target().fieldName(), targetType.name()
+                ),
+                assignment.value().span()
             ));
         }
 
@@ -860,11 +1214,13 @@ public final class SemanticAnalyzer {
 
             if (injection.selectedNames().isEmpty()) {
                 for (var function : targetModule.exportedFunctions()) declareInjectedFunction(injection, function, injected);
+                for (var struct : targetModule.exportedStructs()) declareInjectedStruct(injection, struct);
             } else {
                 for (var selectedName : injection.selectedNames()) {
                     var function = targetModule.exportedFunction(selectedName);
+                    var struct = targetModule.exportedStruct(selectedName);
 
-                    if (function.isEmpty()) {
+                    if (function.isEmpty() && struct.isEmpty()) {
                         diagnostics.add(new Diagnostic(
                             UNKNOWN_INJECTED_SYMBOL_CODE,
                             DiagnosticSeverity.ERROR,
@@ -875,7 +1231,8 @@ public final class SemanticAnalyzer {
                         continue;
                     }
 
-                    declareInjectedFunction(injection, function.orElseThrow(), injected);
+                    function.ifPresent(value -> declareInjectedFunction(injection, value, injected));
+                    struct.ifPresent(value -> declareInjectedStruct(injection, value));
                 }
             }
 
@@ -890,6 +1247,10 @@ public final class SemanticAnalyzer {
             }
 
             injected.add(function);
+        }
+
+        private void declareInjectedStruct(InjectionDeclaration injection, StructSymbol struct) {
+            if (!moduleScope.declare(struct)) reportInjectedDuplicate(struct.name(), injection);
         }
 
         private void resolveNamespaceInjection(InjectionDeclaration injection, ModuleSymbol targetModule) {

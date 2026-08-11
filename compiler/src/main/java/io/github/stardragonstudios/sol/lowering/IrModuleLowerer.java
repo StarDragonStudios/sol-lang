@@ -28,6 +28,7 @@ final class IrModuleLowerer {
         validateCanonicalAnalysis(module, analysis);
 
         var functions = new ArrayList<IrFunction>();
+        var structs = module.exportedStructs().stream().map(programContext::structType).toList();
 
         for (var function : module.exportedFunctions()) {
             var signature = IrFunctionSignatureLowerer.lower(function, analysis.model(), programContext);
@@ -40,7 +41,7 @@ final class IrModuleLowerer {
         }
 
         try {
-            return new IrModule(new IrModuleName(module.name().segments()), functions);
+            return new IrModule(new IrModuleName(module.name().segments()), structs, functions);
         } catch (IllegalArgumentException exception) {
             throw new IrLoweringException(
                 "Semantic module '%s' produced invalid IR: %s"

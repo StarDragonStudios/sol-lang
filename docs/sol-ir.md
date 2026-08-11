@@ -56,6 +56,12 @@ Primitive types are represented by `PrimitiveIrType`.
 
 There is no IR error type. Programs containing semantic errors must not be lowered into Sol IR.
 
+User-defined value structs are represented by `IrStructType`. A struct type
+retains its qualified diagnostic name and ordered `IrStructField` definitions.
+Field order is canonical and every field has an exact value type. Struct types
+are non-numeric first-class values and may appear in locals, parameters, return
+types and fields of other non-recursive structs.
+
 ## Identity
 
 Identifiers are deterministic objects rather than source names.
@@ -171,7 +177,18 @@ The initial value forms are:
 * logical negation;
 * numeric negation;
 * numeric positive;
-* value-returning function calls.
+* value-returning function calls;
+* struct construction;
+* struct field extraction.
+
+`IrStructConstructInstruction` consumes one value per field in canonical field
+order and produces the complete aggregate value. Semantic-to-IR lowering may
+evaluate named source initializers in a different source order before arranging
+their resulting values into canonical field order.
+
+`IrStructFieldExtractInstruction` reads one canonical field from a struct
+value. `IrStructFieldStoreInstruction` updates a non-empty field path rooted in
+a mutable local. Nested field stores preserve every field outside that path.
 
 The initial binary operations are:
 
@@ -214,7 +231,9 @@ Local storage is manipulated through:
   a value;
 * `IrLocalLoadInstruction`, which reads one local and produces a typed value;
 * `IrLocalStoreInstruction`, which updates mutable local storage without
-  producing a value.
+  producing a value;
+* `IrStructFieldStoreInstruction`, which replaces one direct or nested field of
+  a mutable struct local without producing a value.
 
 Initialization and storage operations require exact type equality.
 

@@ -3,6 +3,7 @@ package io.github.stardragonstudios.sol.lowering;
 import io.github.stardragonstudios.sol.ir.IrType;
 import io.github.stardragonstudios.sol.ir.PrimitiveIrType;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.StructType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 
 import java.util.Objects;
@@ -21,6 +22,15 @@ final class IrTypeLowerer {
         if (type == BuiltInTypes.VOID)      return PrimitiveIrType.VOID;
 
         throw new IrLoweringException("Unsupported semantic type '%s' during IR lowering.".formatted(type.name()));
+    }
+
+    static IrType lower(TypeSymbol type, IrProgramLoweringContext context) {
+        Objects.requireNonNull(type, "Lowered semantic type must not be null.");
+        Objects.requireNonNull(context, "IR program lowering context must not be null.");
+
+        if (type instanceof StructType structType) return context.structType(structType.symbol());
+
+        return lower(type);
     }
 
     public static class IrOperatorLowerer {

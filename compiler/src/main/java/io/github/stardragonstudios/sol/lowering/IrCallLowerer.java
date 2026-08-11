@@ -18,7 +18,7 @@ final class IrCallLowerer {
         var function = model.calledFunctionOf(expression).orElseThrow(() -> new IrLoweringException("Call expression has no resolved canonical function symbol."));
         var target = context.functionReference(function);
 
-        validateReturnType(expression, target.returnType(), model);
+        validateReturnType(expression, target.returnType(), model, context);
 
         var arguments = new ArrayList<IrValue>(expression.arguments().size());
 
@@ -38,9 +38,9 @@ final class IrCallLowerer {
         return instruction;
     }
 
-    private static void validateReturnType(CallExpression expression, IrType targetReturnType, SemanticModel model) {
+    private static void validateReturnType(CallExpression expression, IrType targetReturnType, SemanticModel model, IrFunctionLoweringContext context) {
         var semanticType = model.typeOf(expression).orElseThrow(() -> new IrLoweringException("Call expression has no resolved semantic result type."));
-        var loweredSemanticType = IrTypeLowerer.lower(semanticType);
+        var loweredSemanticType = context.lowerType(semanticType);
 
         if (!targetReturnType.equals(loweredSemanticType)) throw new IrLoweringException("Called function IR return type '%s' does not match semantic call type '%s'.".formatted(
             targetReturnType.displayName(),

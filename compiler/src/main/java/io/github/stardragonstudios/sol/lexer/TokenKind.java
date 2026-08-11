@@ -29,11 +29,14 @@ public enum TokenKind {
     ONLY,
     NAMESPACE,
     AS,
+    STRUCT,
 
     // Punctuation
     AT,
     LEFT_PAREN,
     RIGHT_PAREN,
+    LEFT_BRACE,
+    RIGHT_BRACE,
     COMMA,
     COLON,
     DOUBLE_COLON,
