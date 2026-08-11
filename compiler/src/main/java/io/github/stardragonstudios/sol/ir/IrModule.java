@@ -49,6 +49,10 @@ public record IrModule(IrModuleName name, List<IrStructType> structs, List<IrFun
         for (var struct : structs) {
             Objects.requireNonNull(struct, "IR module structs must not contain null values.");
 
+            if (!struct.isDefined()) throw new IllegalArgumentException(
+                "IR module struct type '%s' must be fully defined.".formatted(struct.displayName())
+            );
+
             if (!names.add(struct.displayName()))
                 throw new IllegalArgumentException("IR module must not contain duplicate struct type '%s'.".formatted(struct.displayName()));
         }

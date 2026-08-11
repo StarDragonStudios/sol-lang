@@ -3,6 +3,7 @@ package io.github.stardragonstudios.sol.backend.llvm;
 import io.github.stardragonstudios.sol.ir.IrBinaryInstruction;
 import io.github.stardragonstudios.sol.ir.IrType;
 import io.github.stardragonstudios.sol.ir.PrimitiveIrType;
+import io.github.stardragonstudios.sol.ir.IrPointerType;
 
 import org.bytedeco.javacpp.Pointer;
 import org.bytedeco.llvm.LLVM.LLVMValueRef;
@@ -118,6 +119,9 @@ final class LlvmBinaryInstructionLowerer {
         if (isFloat(operandType)) return LLVMBuildFCmp(context.builder(), floatingPredicate, left, right, valueName(instruction));
 
         if (operandType == PrimitiveIrType.INT || operandType == PrimitiveIrType.BOOLEAN || operandType == PrimitiveIrType.CHAR)
+            return LLVMBuildICmp(context.builder(), integerPredicate, left, right, valueName(instruction));
+
+        if (operandType instanceof IrPointerType)
             return LLVMBuildICmp(context.builder(), integerPredicate, left, right, valueName(instruction));
 
         throw new LlvmBackendException("LLVM equality comparison is not supported for Sol IR type '%s'.".formatted(operandType.displayName()));

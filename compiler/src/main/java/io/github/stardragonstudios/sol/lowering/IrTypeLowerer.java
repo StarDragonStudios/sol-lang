@@ -1,8 +1,10 @@
 package io.github.stardragonstudios.sol.lowering;
 
 import io.github.stardragonstudios.sol.ir.IrType;
+import io.github.stardragonstudios.sol.ir.IrPointerType;
 import io.github.stardragonstudios.sol.ir.PrimitiveIrType;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.PointerType;
 import io.github.stardragonstudios.sol.semantics.types.StructType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 
@@ -29,6 +31,8 @@ final class IrTypeLowerer {
         Objects.requireNonNull(context, "IR program lowering context must not be null.");
 
         if (type instanceof StructType structType) return context.structType(structType);
+        if (type instanceof PointerType pointerType)
+            return new IrPointerType(lower(pointerType.elementType(), context));
 
         return lower(type);
     }

@@ -165,6 +165,18 @@ public final class IrTextFormatter {
         if (instruction instanceof IrBinaryInstruction binary)
             return "%s: %s = %s %s, %s".formatted(binary.id(), binary.type().displayName(), binaryOperationName(binary.operator()), binary.left().id(), binary.right().id());
 
+        if (instruction instanceof IrPointerLoadInstruction load)
+            return "%s: %s = pointer_load %s".formatted(load.id(), load.type().displayName(), load.pointer().id());
+
+        if (instruction instanceof IrPointerIndexLoadInstruction load)
+            return "%s: %s = pointer_index_load %s, %s".formatted(load.id(), load.type().displayName(), load.pointer().id(), load.index().id());
+
+        if (instruction instanceof IrPointerStoreInstruction store)
+            return "pointer_store %s, %s".formatted(store.pointer().id(), store.value().id());
+
+        if (instruction instanceof IrPointerIndexStoreInstruction store)
+            return "pointer_index_store %s, %s, %s".formatted(store.pointer().id(), store.index().id(), store.value().id());
+
         throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
     }
 
@@ -216,7 +228,8 @@ public final class IrTextFormatter {
             || value instanceof IrFloatConstant
             || value instanceof IrBooleanConstant
             || value instanceof IrCharConstant
-            || value instanceof IrStringConstant;
+            || value instanceof IrStringConstant
+            || value instanceof IrNullConstant;
     }
 
     private String constantLiteral(IrValue value) {
@@ -225,6 +238,7 @@ public final class IrTextFormatter {
         if (value instanceof IrBooleanConstant constant) return Boolean.toString(constant.value());
         if (value instanceof IrCharConstant constant) return "U+%04X".formatted(constant.codePoint());
         if (value instanceof IrStringConstant constant) return quoteString(constant.value());
+        if (value instanceof IrNullConstant) return "null";
 
         throw new IllegalArgumentException("Unsupported IR constant type '%s'.".formatted(value.getClass().getSimpleName()));
     }

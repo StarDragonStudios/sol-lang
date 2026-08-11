@@ -139,11 +139,14 @@ The initial Sol IR primitive representations are:
 | `boolean`   | `i1`      |
 | `char`      | `i32`     |
 | `void`      | `void`    |
+| `pointer<T>` | opaque `ptr` |
 
 Sol IR structs lower to LLVM aggregate struct types whose element order matches
 the canonical declaration order. Structs are passed to functions and returned
 by value. Nested structs lower recursively; semantic analysis rejects recursive
-by-value layouts before backend generation.
+by-value layouts before backend generation. Pointer fields lower to opaque
+`ptr`, so a pointer may break an otherwise recursive struct layout without
+requiring a recursive LLVM aggregate.
 
 Source generics require no LLVM runtime mechanism. Sol IR contains only the
 concrete function and struct specializations produced by monomorphization, so
@@ -207,6 +210,7 @@ The backend supports:
 * floating-point constants;
 * boolean constants;
 * character constants;
+* typed null pointer constants;
 * unary instructions;
 * binary instructions;
 * local loads;
@@ -214,7 +218,10 @@ The backend supports:
 * struct construction with `insertvalue`;
 * field reads with `extractvalue`;
 * direct and nested field updates by rebuilding the affected aggregate path and
-  storing the complete updated value.
+  storing the complete updated value;
+* pointer loads and stores;
+* indexed pointer address calculation with `getelementptr` followed by a typed
+  load or store.
 
 Unary positive reuses the operand's LLVM value and does not emit a redundant
 instruction.
@@ -295,6 +302,32 @@ The backend does not:
 
 Those properties have already been established and validated by Sol IR.
 
+## Standard raw-memory lowering
+
+Concrete bodyless specializations from `std.memory` receive compiler-supplied
+LLVM bodies after function predeclaration. They call the platform C allocator
+through these 64-bit supported-target signatures:
+
+```llvm
+declare ptr @malloc(i64)
+declare ptr @realloc(ptr, i64)
+declare void @free(ptr)
+```
+
+The element size comes from LLVM's target-aware `sizeof` constant expression.
+`allocate<T>` and `reallocate<T>` guard signed non-positive counts and check
+`count * sizeof(T)` against the positive 64-bit byte-count range before calling
+the host allocator. Zero-sized pointee layouts return null without requesting
+host storage. `reallocate<T>(pointer, 0)` routes through `free` and returns an
+opaque null pointer; negative and overflowing requests return null without
+releasing the original allocation.
+
+The native allocator supplies alignment suitable for every Sol value layout
+currently emitted on the supported x86-64 and arm64 targets. Indexed access
+uses the exact pointee LLVM type with `getelementptr`, so element scaling and
+alignment are derived from the target data layout rather than hard-coded byte
+sizes.
+
 ## Native ownership
 
 `LlvmModule` owns:
@@ -359,10 +392,9 @@ compiler invocation into another.
 
 The current backend does not support:
 
-* strings;
 * LLVM IR optimization pipelines;
 * debug information;
-* runtime linking;
-* executable output.
+* sanitizer instrumentation as a first-class compiler option.
 
-Runtime linking and executable production belong to later toolchain stages.
+Runtime linking and executable production belong to the surrounding native
+toolchain layer rather than this LLVM generation component.

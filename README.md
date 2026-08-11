@@ -16,12 +16,13 @@ and its native compilation pipeline:
 * conditions and loops;
 * value-type structs on the Sol 0.1.1 development branch;
 * minimal monomorphized generics on the Sol 0.1.1 development branch;
+* typed raw pointers and explicit manual allocation on the Sol 0.1.1 development branch;
 * a Java bootstrap compiler;
 * a typed, compiler-independent Sol IR;
 * LLVM IR generation;
 * native object-file emission;
 * host-native executable linking;
-* bundled native console and file standard-library modules.
+* bundled native console, file and raw-memory standard-library modules.
 
 The compiler is implemented in Java, but generated Sol executables are native
 programs and do not depend on the JVM.
@@ -336,6 +337,35 @@ end
 
 File paths are resolved by the generated native process relative to its current
 working directory unless an absolute path is supplied.
+
+`std.memory` provides the deliberately unsafe bootstrap allocator through
+generic `allocate<T>`, `reallocate<T>` and `free<T>` operations. Raw storage is
+accessed with `*pointer` and `pointer[index]`:
+
+```sol
+inject namespace std.memory as memory
+
+@init
+fn launch() -> int
+    let values: pointer<int> = memory::allocate<int>(2)
+
+    if values == null then
+        return 1
+    end
+
+    values[0] = 19
+    values[1] = 23
+
+    let result: int = *values + values[1]
+    memory::free<int>(values)
+    return result
+end
+```
+
+This 0.1.1 facility is manual raw memory, not the future Sol ownership model.
+Bounds, liveness, aliasing, double-free and use-after-free remain programmer
+responsibilities; `ref<T>`, `borrow<T>`, lifetimes and borrow checking are not
+part of this release.
 
 Injected modules are discovered recursively.
 

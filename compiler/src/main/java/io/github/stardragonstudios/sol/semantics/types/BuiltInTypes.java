@@ -9,6 +9,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 public final class BuiltInTypes {
+    public static final String POINTER_NAME = "pointer";
+
     public static final PrimitiveType INT =
         new PrimitiveType(
             "int",
@@ -99,6 +101,12 @@ public final class BuiltInTypes {
         return Optional.ofNullable(
             PRIMITIVES_BY_NAME.get(name)
         );
+    }
+
+    public static boolean isReservedName(String name) {
+        Objects.requireNonNull(name, "Type name must not be null.");
+
+        return name.equals(POINTER_NAME) || lookup(name).isPresent();
     }
 
     public static PrimitiveType typeOf(

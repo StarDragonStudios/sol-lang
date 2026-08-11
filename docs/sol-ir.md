@@ -60,7 +60,13 @@ User-defined value structs are represented by `IrStructType`. A struct type
 retains its qualified diagnostic name and ordered `IrStructField` definitions.
 Field order is canonical and every field has an exact value type. Struct types
 are non-numeric first-class values and may appear in locals, parameters, return
-types and fields of other non-recursive structs.
+types and fields of other structs. Recursive by-value layouts are invalid, but
+an `IrPointerType` field may refer back to a canonical forward-declared
+`IrStructType` because the pointer does not embed the pointee layout.
+
+`IrPointerType` contains the exact pointed-to `IrType`. It is a non-numeric
+value type and preserves typed pointer distinctions throughout lowering even
+though the LLVM backend uses opaque native pointers.
 
 Source-level generic parameters never appear as open Sol IR types.
 Semantic-to-IR lowering monomorphizes every reachable concrete generic function and struct
@@ -185,7 +191,10 @@ The initial value forms are:
 * numeric positive;
 * value-returning function calls;
 * struct construction;
-* struct field extraction.
+* struct field extraction;
+* typed null constants;
+* direct pointer loads;
+* indexed pointer loads.
 
 `IrStructConstructInstruction` consumes one value per field in canonical field
 order and produces the complete aggregate value. Semantic-to-IR lowering may
@@ -195,6 +204,12 @@ their resulting values into canonical field order.
 `IrStructFieldExtractInstruction` reads one canonical field from a struct
 value. `IrStructFieldStoreInstruction` updates a non-empty field path rooted in
 a mutable local. Nested field stores preserve every field outside that path.
+
+`IrNullConstant` carries an exact `IrPointerType`. `IrPointerLoadInstruction`
+and `IrPointerIndexLoadInstruction` produce the pointer element type.
+`IrPointerStoreInstruction` and `IrPointerIndexStoreInstruction` are
+side-effecting instructions whose stored value must exactly match that element
+type; indexed forms additionally require an `int` index.
 
 The initial binary operations are:
 
@@ -467,6 +482,7 @@ The current lowering subset supports:
 * mutable `@mut let` declarations;
 * assignment statements targeting mutable locals;
 * direct and nested struct field mutation;
+* pointer dereference and index mutation;
 * bare returns;
 * value returns;
 * conditional statements;
@@ -501,6 +517,7 @@ The initial expression subset supports:
 * boolean literals;
 * character literals;
 * string literals;
+* contextually typed null literals;
 * parameter references;
 * local-variable references;
 * parenthesized expressions;
@@ -510,7 +527,8 @@ The initial expression subset supports:
 * relational operators;
 * equality and inequality;
 * logical conjunction and disjunction;
-* struct construction and field access.
+* struct construction and field access;
+* typed pointer dereference and indexing.
 
 Primitive literal lexemes are decoded during lowering after lexical and
 semantic validation.
@@ -528,6 +546,11 @@ A local-variable reference resolves through its canonical
 
 An assignment resolves through the canonical assignment-target symbol, lowers
 the assigned expression, and emits an `IrLocalStoreInstruction`.
+
+A pointer assignment lowers its pointer and optional index before its value,
+then emits a typed pointer store. Pointer mutation is independent of local
+binding mutability because it changes addressed storage rather than rebinding
+the pointer local.
 
 A call resolves exclusively through the canonical `FunctionSymbol` and
 semantic type arguments associated with its `CallExpression`. The current
@@ -551,7 +574,7 @@ resolution, mutability checking or assignment type checking.
 
 The following constructs are not lowered by the current layer:
 
-* references;
+* safe references and borrows;
 * global variables;
 * `break`;
 * `continue`;
@@ -593,7 +616,7 @@ through the Sol IR package boundary.
 The current design must permit later representation of:
 
 * global storage;
-* references;
+* safe references and borrows;
 * ownership operations;
 * destruction;
 * `break` and `continue`;

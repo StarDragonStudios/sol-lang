@@ -7,6 +7,10 @@ import io.github.stardragonstudios.sol.ir.IrLocalInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructConstructInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructFieldExtractInstruction;
 import io.github.stardragonstudios.sol.ir.IrUnaryInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerIndexLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerIndexStoreInstruction;
 
 import java.util.Objects;
 
@@ -24,6 +28,10 @@ final class LlvmInstructionLowerer {
             case IrBinaryInstruction binary -> LlvmBinaryInstructionLowerer.lower(binary, context);
             case IrLocalInstruction local -> LlvmLocalInstructionLowerer.lower(local, context);
             case IrCallInstruction call -> LlvmCallInstructionLowerer.lower(call, context);
+            case IrPointerLoadInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
+            case IrPointerIndexLoadInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
+            case IrPointerStoreInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
+            case IrPointerIndexStoreInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
 
             default -> throw new LlvmBackendException(
                 "Sol IR instruction implementation '%s' is not supported by the LLVM backend.".formatted(instruction.getClass().getSimpleName())

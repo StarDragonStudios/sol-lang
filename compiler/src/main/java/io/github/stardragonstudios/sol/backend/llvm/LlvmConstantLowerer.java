@@ -5,6 +5,7 @@ import io.github.stardragonstudios.sol.ir.IrCharConstant;
 import io.github.stardragonstudios.sol.ir.IrFloatConstant;
 import io.github.stardragonstudios.sol.ir.IrIntConstant;
 import io.github.stardragonstudios.sol.ir.IrStringConstant;
+import io.github.stardragonstudios.sol.ir.IrNullConstant;
 import io.github.stardragonstudios.sol.ir.IrValue;
 
 import org.bytedeco.javacpp.Pointer;
@@ -14,6 +15,7 @@ import java.util.Objects;
 
 import static org.bytedeco.llvm.global.LLVM.LLVMConstInt;
 import static org.bytedeco.llvm.global.LLVM.LLVMConstReal;
+import static org.bytedeco.llvm.global.LLVM.LLVMConstNull;
 
 final class LlvmConstantLowerer {
     private LlvmConstantLowerer() {}
@@ -34,6 +36,7 @@ final class LlvmConstantLowerer {
             case IrFloatConstant constant -> LLVMConstReal(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value());
             case IrBooleanConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.value() ? 1 : 0, 0);
             case IrCharConstant constant -> LLVMConstInt(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()), constant.codePoint(), 0);
+            case IrNullConstant constant -> LLVMConstNull(LlvmTypeLowerer.lower(constant.type(), context.llvmContext()));
 
             default -> throw new LlvmBackendException("Sol IR value implementation '%s' is not yet supported by the LLVM backend.".formatted(value.getClass().getSimpleName()));
         };

@@ -26,6 +26,7 @@ public final class Lexer {
         Map.entry("inject", TokenKind.INJECT),
         Map.entry("true", TokenKind.TRUE),
         Map.entry("false", TokenKind.FALSE),
+        Map.entry("null", TokenKind.NULL),
         Map.entry("only", TokenKind.ONLY),
         Map.entry("namespace", TokenKind.NAMESPACE),
         Map.entry("as", TokenKind.AS),
@@ -116,6 +117,18 @@ public final class Lexer {
             case '}' -> scanSingleCharacterToken(
                 start,
                 TokenKind.RIGHT_BRACE,
+                tokens
+            );
+
+            case '[' -> scanSingleCharacterToken(
+                start,
+                TokenKind.LEFT_BRACKET,
+                tokens
+            );
+
+            case ']' -> scanSingleCharacterToken(
+                start,
+                TokenKind.RIGHT_BRACKET,
                 tokens
             );
 

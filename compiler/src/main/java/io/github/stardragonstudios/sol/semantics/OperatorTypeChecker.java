@@ -3,6 +3,7 @@ package io.github.stardragonstudios.sol.semantics;
 import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
 import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.PointerType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSymbol;
 import io.github.stardragonstudios.sol.syntax.BinaryExpression;
 import io.github.stardragonstudios.sol.syntax.BinaryOperator;
@@ -67,12 +68,13 @@ final class OperatorTypeChecker {
     }
 
     private static boolean matchingEqualityTypes(TypeSymbol leftType, TypeSymbol rightType) {
-        if (leftType != rightType) return false;
+        if (!leftType.equals(rightType)) return false;
 
         return leftType == BuiltInTypes.INT
             || leftType == BuiltInTypes.FLOAT
             || leftType == BuiltInTypes.BOOLEAN
-            || leftType == BuiltInTypes.CHAR;
+            || leftType == BuiltInTypes.CHAR
+            || leftType instanceof PointerType;
     }
 
     private static TypeSymbol reportInvalidUnary(UnaryExpression expression, TypeSymbol operandType, List<Diagnostic> diagnostics) {

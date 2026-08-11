@@ -3,6 +3,7 @@ package io.github.stardragonstudios.sol.semantics;
 import io.github.stardragonstudios.sol.diagnostics.Diagnostic;
 import io.github.stardragonstudios.sol.diagnostics.DiagnosticSeverity;
 import io.github.stardragonstudios.sol.semantics.types.BuiltInTypes;
+import io.github.stardragonstudios.sol.semantics.types.PointerType;
 import io.github.stardragonstudios.sol.semantics.types.StructType;
 import io.github.stardragonstudios.sol.semantics.types.TypeParameterType;
 import io.github.stardragonstudios.sol.semantics.types.TypeSubstitution;
@@ -53,6 +54,10 @@ public final class SemanticAnalyzer {
     private static final String GENERIC_ARITY_CODE = "SOL-S040";
     private static final String INVALID_TYPE_ARGUMENT_CODE = "SOL-S041";
     private static final String RECURSIVE_GENERIC_INSTANTIATION_CODE = "SOL-S042";
+    private static final String UNTYPED_NULL_CODE = "SOL-S043";
+    private static final String DEREFERENCE_NON_POINTER_CODE = "SOL-S044";
+    private static final String INDEX_NON_POINTER_CODE = "SOL-S045";
+    private static final String INVALID_POINTER_INDEX_CODE = "SOL-S046";
 
     private static final ModuleName ISOLATED_MODULE_NAME = new ModuleName(List.of("<isolated>"));
     private static final SourceSpan PROGRAM_DIAGNOSTIC_SPAN = new SourceSpan(new SourcePosition(0, 1, 1), new SourcePosition(0, 1, 1));
@@ -218,6 +223,7 @@ public final class SemanticAnalyzer {
 
         private static boolean containsUnresolvedType(TypeSymbol type) {
             if (type == BuiltInTypes.ERROR || type instanceof TypeParameterType) return true;
+            if (type instanceof PointerType pointer) return containsUnresolvedType(pointer.elementType());
             if (type instanceof StructType struct)
                 return struct.arguments().stream().anyMatch(ProgramBinder::containsUnresolvedType);
 
@@ -485,7 +491,7 @@ public final class SemanticAnalyzer {
 
                 for (var field : symbol.fields()) structFieldSymbols.put(field.declaration(), field);
 
-                if (BuiltInTypes.lookup(symbol.name()).isPresent()) {
+                if (BuiltInTypes.isReservedName(symbol.name())) {
                     duplicateStructs.put(struct, true);
                     continue;
                 }
@@ -522,7 +528,7 @@ public final class SemanticAnalyzer {
 
                 var symbol = structSymbols.get(struct);
 
-                if (BuiltInTypes.lookup(symbol.name()).isPresent()) diagnostics.add(new Diagnostic(
+                if (BuiltInTypes.isReservedName(symbol.name())) diagnostics.add(new Diagnostic(
                     RESERVED_STRUCT_NAME_CODE,
                     DiagnosticSeverity.ERROR,
                     "Struct name '%s' is reserved by a built-in type.".formatted(symbol.name()),
@@ -721,6 +727,12 @@ public final class SemanticAnalyzer {
                 return;
             }
 
+            if (statement instanceof PointerAssignmentStatement pointerAssignment) {
+                bindPointerAssignment(pointerAssignment, scope);
+
+                return;
+            }
+
             if (statement instanceof CallStatement callStatement) {
                 bindExpression(callStatement.call(), scope);
 
@@ -751,7 +763,7 @@ public final class SemanticAnalyzer {
              * is therefore not visible inside its
              * own initializer.
              */
-            var initializerType = bindExpression(declaration.initializer(), scope);
+            var initializerType = bindExpression(declaration.initializer(), scope, declaredType);
 
             validateVariableType(declaration, declaredType);
 
@@ -771,7 +783,8 @@ public final class SemanticAnalyzer {
 
             if (targetSymbol != null) assignmentTargets.put(assignment, targetSymbol);
 
-            var valueType = bindExpression(assignment.value(), scope);
+            var targetType = targetSymbol == null ? BuiltInTypes.ERROR : typeOfValueSymbol(targetSymbol);
+            var valueType = bindExpression(assignment.value(), scope, targetType);
 
             validateAssignment(assignment, targetSymbol, valueType);
         }
@@ -782,9 +795,28 @@ public final class SemanticAnalyzer {
 
             if (rootSymbol != null) fieldAssignmentTargets.put(assignment, rootSymbol);
 
-            var valueType = bindExpression(assignment.value(), scope);
+            var valueType = bindExpression(assignment.value(), scope, targetType);
 
             validateFieldAssignment(assignment, rootSymbol, targetType, valueType);
+        }
+
+        private void bindPointerAssignment(PointerAssignmentStatement assignment, Scope scope) {
+            var targetType = bindExpression(assignment.target(), scope);
+            var valueType = bindExpression(assignment.value(), scope, targetType);
+
+            if (
+                targetType == BuiltInTypes.ERROR
+                || valueType == BuiltInTypes.ERROR
+                || sameType(targetType, valueType)
+            ) return;
+
+            diagnostics.add(new Diagnostic(
+                INCOMPATIBLE_ASSIGNMENT_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot store value of type '%s' through pointer target of type '%s'."
+                    .formatted(valueType.name(), targetType.name()),
+                assignment.value().span()
+            ));
         }
 
         private void validateVariableType(VariableDeclarationStatement declaration, TypeSymbol declaredType) {
@@ -835,14 +867,20 @@ public final class SemanticAnalyzer {
         }
 
         private TypeSymbol bindExpression(Expression expression, Scope scope) {
+            return bindExpression(expression, scope, null);
+        }
+
+        private TypeSymbol bindExpression(Expression expression, Scope scope, TypeSymbol expectedType) {
             TypeSymbol type;
 
             switch (expression) {
                 case LiteralExpression literal -> type = BuiltInTypes.typeOf(literal.kind());
 
+                case NullExpression nullExpression -> type = bindNullExpression(nullExpression, expectedType);
+
                 case NameExpression name -> type = bindNameExpression(name, scope);
 
-                case ParenthesizedExpression parenthesized -> type = bindExpression(parenthesized.expression(), scope);
+                case ParenthesizedExpression parenthesized -> type = bindExpression(parenthesized.expression(), scope, expectedType);
 
                 case UnaryExpression unary -> {
                     var operandType = bindExpression(unary.operand(), scope);
@@ -851,8 +889,20 @@ public final class SemanticAnalyzer {
                 }
 
                 case BinaryExpression binary -> {
-                    var leftType = bindExpression(binary.left(), scope);
-                    var rightType = bindExpression(binary.right(), scope);
+                    TypeSymbol leftType;
+                    TypeSymbol rightType;
+
+                    if (isEquality(binary) && isNullExpression(binary.left())) {
+                        rightType = bindExpression(binary.right(), scope);
+                        leftType = bindExpression(binary.left(), scope, rightType);
+                    } else {
+                        leftType = bindExpression(binary.left(), scope);
+                        rightType = bindExpression(
+                            binary.right(),
+                            scope,
+                            isEquality(binary) && leftType instanceof PointerType ? leftType : null
+                        );
+                    }
 
                     type = OperatorTypeChecker.checkBinary(binary, leftType, rightType, diagnostics);
                 }
@@ -864,6 +914,10 @@ public final class SemanticAnalyzer {
                 case StructConstructionExpression construction -> type = bindStructConstruction(construction, scope);
 
                 case FieldAccessExpression fieldAccess -> type = bindFieldAccess(fieldAccess, scope);
+
+                case PointerDereferenceExpression dereference -> type = bindPointerDereference(dereference, scope);
+
+                case PointerIndexExpression index -> type = bindPointerIndex(index, scope);
 
                 case null, default -> {
                     assert expression != null;
@@ -877,15 +931,85 @@ public final class SemanticAnalyzer {
             return type;
         }
 
+        private TypeSymbol bindNullExpression(NullExpression expression, TypeSymbol expectedType) {
+            if (expectedType instanceof PointerType) return expectedType;
+
+            diagnostics.add(new Diagnostic(
+                UNTYPED_NULL_CODE,
+                DiagnosticSeverity.ERROR,
+                "Literal 'null' requires a contextual pointer<T> type.",
+                expression.span()
+            ));
+
+            return BuiltInTypes.ERROR;
+        }
+
+        private TypeSymbol bindPointerDereference(PointerDereferenceExpression expression, Scope scope) {
+            var pointerType = bindExpression(expression.pointer(), scope);
+
+            if (pointerType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+            if (pointerType instanceof PointerType pointer) return pointer.elementType();
+
+            diagnostics.add(new Diagnostic(
+                DEREFERENCE_NON_POINTER_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot dereference value of non-pointer type '%s'.".formatted(pointerType.name()),
+                expression.span()
+            ));
+
+            return BuiltInTypes.ERROR;
+        }
+
+        private TypeSymbol bindPointerIndex(PointerIndexExpression expression, Scope scope) {
+            var pointerType = bindExpression(expression.pointer(), scope);
+            var indexType = bindExpression(expression.index(), scope);
+
+            if (indexType != BuiltInTypes.INT && indexType != BuiltInTypes.ERROR) diagnostics.add(new Diagnostic(
+                INVALID_POINTER_INDEX_CODE,
+                DiagnosticSeverity.ERROR,
+                "Pointer index must have type 'int', but found '%s'.".formatted(indexType.name()),
+                expression.index().span()
+            ));
+
+            if (pointerType == BuiltInTypes.ERROR || indexType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+
+            if (!(pointerType instanceof PointerType pointer)) {
+                diagnostics.add(new Diagnostic(
+                    INDEX_NON_POINTER_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot index value of non-pointer type '%s'.".formatted(pointerType.name()),
+                    expression.pointer().span()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            return indexType == BuiltInTypes.INT ? pointer.elementType() : BuiltInTypes.ERROR;
+        }
+
+        private boolean isEquality(BinaryExpression expression) {
+            return expression.operator() == BinaryOperator.EQUAL || expression.operator() == BinaryOperator.NOT_EQUAL;
+        }
+
+        private boolean isNullExpression(Expression expression) {
+            if (expression instanceof NullExpression) return true;
+            if (expression instanceof ParenthesizedExpression parenthesized) return isNullExpression(parenthesized.expression());
+
+            return false;
+        }
+
         private TypeSymbol bindStructConstruction(StructConstructionExpression expression, Scope scope) {
             var type = resolveTypeReference(expression.type());
-            var initializerTypes = new IdentityHashMap<StructFieldInitializer, TypeSymbol>();
 
-            for (var initializer : expression.fields()) initializerTypes.put(initializer, bindExpression(initializer.value(), scope));
+            if (type == BuiltInTypes.ERROR) {
+                for (var initializer : expression.fields()) bindExpression(initializer.value(), scope);
 
-            if (type == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+                return BuiltInTypes.ERROR;
+            }
 
             if (!(type instanceof StructType structType)) {
+                for (var initializer : expression.fields()) bindExpression(initializer.value(), scope);
+
                 diagnostics.add(new Diagnostic(
                     NOT_A_STRUCT_TYPE_CODE,
                     DiagnosticSeverity.ERROR,
@@ -906,6 +1030,8 @@ public final class SemanticAnalyzer {
                 var field = struct.field(initializer.name());
 
                 if (field.isEmpty()) {
+                    bindExpression(initializer.value(), scope);
+
                     diagnostics.add(new Diagnostic(
                         UNKNOWN_STRUCT_FIELD_CODE,
                         DiagnosticSeverity.ERROR,
@@ -932,7 +1058,7 @@ public final class SemanticAnalyzer {
                 }
 
                 var expectedType = fieldTypeOf(structType, resolvedField);
-                var actualType = initializerTypes.get(initializer);
+                var actualType = bindExpression(initializer.value(), scope, expectedType);
 
                 if (expectedType != BuiltInTypes.ERROR && actualType != BuiltInTypes.ERROR && !sameType(expectedType, actualType)) diagnostics.add(new Diagnostic(
                     INCOMPATIBLE_STRUCT_INITIALIZER_CODE,
@@ -1073,15 +1199,15 @@ public final class SemanticAnalyzer {
 
         private TypeSymbol bindCallExpression(CallExpression call, Scope scope) {
             var calleeType = bindExpression(call.callee(), scope);
-            var argumentTypes = new ArrayList<TypeSymbol>(call.arguments().size());
             var typeArguments = new ArrayList<TypeSymbol>(call.typeArguments().size());
 
-            for (var argument : call.arguments()) argumentTypes.add(bindExpression(argument, scope));
             for (var typeArgument : call.typeArguments()) typeArguments.add(resolveTypeReference(typeArgument));
 
             var resolvedFunction = resolvedFunctionOf(call.callee());
 
             if (resolvedFunction.isEmpty()) {
+                for (var argument : call.arguments()) bindExpression(argument, scope);
+
                 if (calleeType != BuiltInTypes.ERROR) diagnostics.add(new Diagnostic(
                     NOT_CALLABLE_CODE,
                     DiagnosticSeverity.ERROR,
@@ -1099,9 +1225,26 @@ public final class SemanticAnalyzer {
 
             validateArgumentCount(call, function);
 
-            if (!validateCallTypeArguments(call, function, typeArguments)) return BuiltInTypes.ERROR;
+            if (!validateCallTypeArguments(call, function, typeArguments)) {
+                for (var argument : call.arguments()) bindExpression(argument, scope);
+
+                return BuiltInTypes.ERROR;
+            }
 
             var substitutions = functionSubstitutions(function, typeArguments);
+            var parameters = function.declaration().parameters();
+            var argumentTypes = new ArrayList<TypeSymbol>(call.arguments().size());
+
+            for (var index = 0; index < call.arguments().size(); index++) {
+                TypeSymbol expectedType = null;
+
+                if (index < parameters.size()) expectedType = TypeSubstitution.substitute(
+                    resolvedTypeOf(parameters.get(index).type()),
+                    substitutions
+                );
+
+                argumentTypes.add(bindExpression(call.arguments().get(index), scope, expectedType));
+            }
 
             validateArgumentTypes(call, function, argumentTypes, substitutions);
 
@@ -1168,7 +1311,7 @@ public final class SemanticAnalyzer {
 
             var expression = statement.expression().orElseThrow();
 
-            var expressionType = bindExpression(expression, scope);
+            var expressionType = bindExpression(expression, scope, returnType);
 
             if (returnType == BuiltInTypes.VOID) {
                 diagnostics.add(new Diagnostic(
@@ -1250,6 +1393,28 @@ public final class SemanticAnalyzer {
                 if (!arguments.isEmpty()) return reportGenericArity(reference, "type parameter '%s'".formatted(reference.name()), 0, arguments.size());
 
                 return recordResolvedType(reference, parameter);
+            }
+
+            if (reference.name().equals(BuiltInTypes.POINTER_NAME)) {
+                if (arguments.size() != 1)
+                    return reportGenericArity(reference, "built-in type 'pointer'", 1, arguments.size());
+
+                var elementType = arguments.getFirst();
+
+                if (elementType == BuiltInTypes.ERROR) return recordResolvedType(reference, BuiltInTypes.ERROR);
+
+                if (!elementType.isValue()) {
+                    diagnostics.add(new Diagnostic(
+                        INVALID_TYPE_ARGUMENT_CODE,
+                        DiagnosticSeverity.ERROR,
+                        "Type argument of 'pointer' must be a value type, but found '%s'.".formatted(elementType.name()),
+                        reference.arguments().getFirst().span()
+                    ));
+
+                    return recordResolvedType(reference, BuiltInTypes.ERROR);
+                }
+
+                return recordResolvedType(reference, new PointerType(elementType));
             }
 
             var primitive = BuiltInTypes.lookup(reference.name());

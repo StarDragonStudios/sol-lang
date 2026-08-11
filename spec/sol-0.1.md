@@ -2,8 +2,8 @@
 
 Sol 0.1 defines the procedural bootstrap language implemented by the Java
 bootstrap compiler. Sol 0.1.1 extends the released 0.1.0 language with
-user-defined value-type structs and minimal compile-time generics while
-preserving the procedural model.
+user-defined value-type structs, minimal compile-time generics and explicit raw
+memory facilities while preserving the procedural model.
 
 This specification describes the source-language behavior of Sol 0.1.
 Backend-specific representation, native executable construction and host
@@ -53,6 +53,7 @@ end
 inject
 true
 false
+null
 only
 namespace
 as
@@ -136,7 +137,8 @@ type `void`.
 
 ## Literals
 
-Sol 0.1 provides literals for every primitive value type except `void`.
+Sol 0.1 provides literals for every primitive value type except `void`, plus
+the contextual raw-pointer literal `null`.
 
 ### Integer literals
 
@@ -234,6 +236,25 @@ Character and string literals support the following escape sequences:
 
 Other escape sequences are invalid in Sol 0.1.
 
+### Null literal
+
+`null` denotes a pointer that addresses no object. It has no independent
+source type and requires a contextual `pointer<T>` type, for example from a
+variable declaration, assignment, parameter, return type, struct field or
+comparison with a typed pointer:
+
+```sol
+let data: pointer<int> = null
+
+if data == null then
+    return 0
+end
+```
+
+Using `null` where no pointer type can be determined is invalid. There is no
+implicit conversion from `null` to an integer, string, struct or other
+non-pointer value.
+
 ## Expressions and operators
 
 Sol 0.1 is statically typed and performs no implicit conversion between
@@ -250,7 +271,8 @@ Primary expressions include:
 * names;
 * namespace-qualified names;
 * parenthesized expressions;
-* struct construction expressions.
+* struct construction expressions;
+* pointer dereference and indexing expressions.
 
 Examples:
 
@@ -336,8 +358,8 @@ From highest precedence to lowest, Sol 0.1 expressions are grouped as follows:
 
 | Precedence | Operators / form                | Associativity |
 | ---------: |---------------------------------|---------------|
-|          1 | postfix call, construction, field access | left   |
-|          2 | unary `!`, unary `-`, unary `+` | right         |
+|          1 | postfix call, construction, field access, indexing | left |
+|          2 | unary `!`, unary `-`, unary `+`, dereference `*` | right |
 |          3 | `*`, `/`, `%`                   | left          |
 |          4 | `+`, `-`                        | left          |
 |          5 | `<`, `<=`, `>`, `>=`            | left          |
@@ -360,6 +382,7 @@ Parentheses override the normal precedence:
 | `-`      | `float`   | `float`   |
 | `+`      | `int`     | `int`     |
 | `+`      | `float`   | `float`   |
+| `*`      | `pointer<T>` | `T`    |
 
 ### Arithmetic operators
 
@@ -402,11 +425,14 @@ int
 float
 boolean
 char
+pointer<T>
 ```
 
 The result has type `boolean`.
 
-The two operands must have exactly the same type.
+The two operands must have exactly the same type. Pointer equality compares
+addresses, including equality with a contextually typed `null`; it does not
+compare pointee contents.
 
 String equality and inequality are not defined in Sol 0.1. In particular, a
 native implementation must not substitute pointer identity for string-content
@@ -447,6 +473,7 @@ The procedural bootstrap supports the following statement forms:
 * local variable declarations;
 * assignments;
 * struct field assignments;
+* pointer dereference and index assignments;
 * function-call statements;
 * `if` conditionals;
 * `while` loops;
@@ -596,8 +623,9 @@ struct SourceSpan
 end
 ```
 
-Direct or indirect recursive struct layouts are invalid. Recursive data
-structures will use the pointer facilities tracked separately for Sol 0.1.1.
+Direct or indirect recursive by-value struct layouts are invalid. A pointer
+breaks the by-value cycle, so recursive structures such as a
+`pointer<Node>` field are valid.
 
 Struct names share the module declaration namespace with functions and cannot
 reuse a built-in type name. Duplicate top-level names are invalid. A directly
@@ -781,6 +809,81 @@ Sol 0.1.1 does not define:
 * specialization rules;
 * runtime type reification;
 * generic overload resolution.
+
+## Raw pointers and manual memory
+
+Sol 0.1.1 provides `pointer<T>` as an explicitly unsafe, typed raw pointer for
+bootstrap containers and compiler-owned buffers. `T` must be a value type;
+`pointer<void>` is invalid. Pointer types are invariant and distinct:
+`pointer<int>` and `pointer<boolean>` cannot be assigned, compared or converted
+to one another.
+
+Pointers are ordinary copyable values. Copying a pointer copies only its
+address and creates no ownership, lifetime or uniqueness relationship.
+`pointer<T>` has no automatic allocation, initialization or destruction.
+
+Sol 0.1.1 deliberately does not provide:
+
+* implicit or explicit pointer/integer conversion;
+* unrestricted conversion between different pointer element types;
+* a universal `void*` escape type;
+* pointer arithmetic;
+* automatic bounds or liveness checks;
+* `ref<T>`, `borrow<T>`, lifetimes, a borrow checker or strict ownership.
+
+Those safer reference and ownership facilities are reserved for future
+language design.
+
+### Dereference and indexing
+
+Unary `*` loads the element addressed by a pointer:
+
+```sol
+let first: int = *values
+```
+
+Indexing computes the address of the indexed element and loads it:
+
+```sol
+let third: int = values[2]
+```
+
+The index must have type `int`. Indexing is the only source-level offset
+operation in Sol 0.1.1; arbitrary `pointer + int` arithmetic is not defined.
+
+Both forms may be assignment targets:
+
+```sol
+*values = 10
+values[1] = 20
+```
+
+Mutating the addressed storage does not rebind the pointer value, so it is
+permitted through a pointer held in an immutable local or parameter. The
+stored value must have exactly type `T`.
+
+Dereferencing or indexing a null, dangling, freed or otherwise invalid pointer
+has undefined behavior. A negative or out-of-bounds index also has undefined
+behavior. The implementation is not required to diagnose those operations.
+Reading an element before a valid `T` value has been stored in its bytes has
+undefined behavior.
+
+### Pointer equality
+
+`==` and `!=` are defined for two values of the same `pointer<T>` type. They
+compare addresses. A pointer compares equal to `null` exactly when it addresses
+no object. Ordering comparisons are not defined for pointers.
+
+### Allocation responsibility
+
+Every successful allocation must eventually be released exactly once unless
+its lifetime intentionally extends until process termination. The programmer
+is responsible for retaining the only pointer needed to release an allocation,
+updating stale aliases after reallocation and preventing leaks, double-free,
+use-after-free and overlapping mutable access.
+
+These rules describe programmer obligations, not checks performed by the Sol
+0.1.1 compiler.
 
 ## Declaration visibility
 
@@ -1591,10 +1694,59 @@ The Sol 0.1 procedural bootstrap currently provides:
 ```text
 std.console
 std.file
+std.memory
 ```
 
 These modules expose bodyless Sol function declarations whose native
 implementations are supplied by the compiler backend.
+
+## `std.memory`
+
+The raw allocation module is:
+
+```text
+std.memory
+```
+
+It exports:
+
+```sol
+@fn allocate<T>(count: int) -> pointer<T>
+@fn reallocate<T>(value: pointer<T>, count: int) -> pointer<T>
+@fn free<T>(value: pointer<T>) -> void
+```
+
+The conventional namespace alias is `memory` or the shorter `mem`:
+
+```sol
+inject namespace std.memory as mem
+```
+
+`allocate<T>(count)` reserves storage aligned for `T` and large enough for
+`count` contiguous elements. The bytes are uninitialized. A zero or negative
+count, a zero-sized element type, byte-size overflow or allocator failure
+returns `null`.
+
+`reallocate<T>(value, count)` changes the requested element capacity. When
+`count` is zero it releases `value` and returns `null`; this also applies when
+`value` is already `null`. A negative count, zero-sized element type or
+byte-size overflow returns `null` without releasing or changing a non-null
+input allocation. For a positive valid count, passing `null` behaves as a new
+allocation. On success, the byte prefix shared by the old and new sizes is
+preserved and every previous alias must be treated as invalid. On allocation
+failure it returns `null` and the original allocation remains valid and must
+still be released.
+
+`free<T>(value)` releases an allocation returned by a successful matching
+allocation operation. `free<T>(null)` is a no-op. Passing an interior pointer,
+a pointer of the wrong allocation type, a pointer not returned by the allocator
+or a pointer already freed has undefined behavior. After a successful free,
+all aliases to that allocation are dangling.
+
+On every supported Sol 0.1.1 target, `int` and the native pointer width are 64
+bits. Allocation byte counts are checked before calling the host allocator,
+and the host allocator supplies alignment sufficient for every currently
+representable Sol value type.
 
 ## `std.console`
 
@@ -1807,6 +1959,7 @@ The version includes:
 * user-defined struct value types;
 * minimal generic structs and functions with explicit type arguments;
 * compile-time monomorphization;
+* typed raw pointers, pointer indexing and manual allocation;
 * unary and binary expressions;
 * lexical local scopes;
 * immutable and mutable local variables;
@@ -1816,7 +1969,7 @@ The version includes:
 * `while` loops;
 * executable entry points;
 * native compilation;
-* minimal console and filesystem standard-library modules.
+* minimal console, filesystem and raw-memory standard-library modules.
 
 Sol 0.1 does not define:
 
@@ -1824,7 +1977,7 @@ Sol 0.1 does not define:
 * inheritance;
 * interfaces;
 * arrays;
-* pointers or references;
+* safe references, borrowing, lifetimes or strict ownership;
 * generic inference, bounds, variance or runtime reification;
 * function overloading;
 * closures;
