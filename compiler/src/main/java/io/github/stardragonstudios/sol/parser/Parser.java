@@ -488,7 +488,6 @@ public final class Parser {
             case RETURN -> parseReturnStatement();
             case CONST, LET, AT -> parseVariableDeclarationStatement();
             case IDENTIFIER -> parseIdentifierStartedStatement();
-            case STAR -> parsePointerAssignmentStatement();
             case IF -> parseConditionalStatement();
             case WHILE -> parseWhileStatement();
 
@@ -550,6 +549,7 @@ public final class Parser {
             && !checkNext(TokenKind.DOUBLE_COLON)
             && !checkNext(TokenKind.LESS)
             && !checkNext(TokenKind.DOT)
+            && !checkNext(TokenKind.ARROW)
             && !checkNext(TokenKind.LEFT_BRACKET)
         ) return parseAssignmentStatement();
 
@@ -562,32 +562,18 @@ public final class Parser {
             if (expression instanceof FieldAccessExpression fieldAccess)
                 return new FieldAssignmentStatement(fieldAccess, value, span);
 
-            if (expression instanceof PointerIndexExpression)
-                return new PointerAssignmentStatement(expression, value, span);
+            if (expression instanceof PointerFieldAccessExpression pointerField)
+                return new PointerFieldAssignmentStatement(pointerField, value, span);
 
-            throw expectedToken("a field access or pointer index before '='", peek());
+            if (expression instanceof IndexExpression index)
+                return new IndexAssignmentStatement(index, value, span);
+
+            throw expectedToken("a field access or string index before '='", peek());
         }
 
         if (!(expression instanceof CallExpression call)) throw expectedToken("a function call statement", peek());
 
         return new CallStatement(call, call.span());
-    }
-
-    private PointerAssignmentStatement parsePointerAssignmentStatement() {
-        var target = parseUnaryExpression();
-
-        if (!(target instanceof PointerDereferenceExpression))
-            throw expectedToken("a pointer dereference assignment target", peek());
-
-        consume(TokenKind.ASSIGN, "'=' after the pointer dereference target");
-
-        var value = parseExpression();
-
-        return new PointerAssignmentStatement(
-            target,
-            value,
-            new SourceSpan(target.span().start(), value.span().end())
-        );
     }
 
     private AssignmentStatement parseAssignmentStatement() {
@@ -735,16 +721,6 @@ public final class Parser {
     }
 
     private Expression parseUnaryExpression() {
-        if (check(TokenKind.STAR)) {
-            var operatorToken = advance();
-            var pointer = parseUnaryExpression();
-
-            return new PointerDereferenceExpression(
-                pointer,
-                new SourceSpan(operatorToken.span().start(), pointer.span().end())
-            );
-        }
-
         if (check(TokenKind.BANG) || check(TokenKind.MINUS) || check(TokenKind.PLUS)) {
             var operatorToken = advance();
 
@@ -813,11 +789,24 @@ public final class Parser {
                 continue;
             }
 
+            if (match(TokenKind.ARROW)) {
+                var field = consume(TokenKind.IDENTIFIER, "a field name after '->'");
+
+                expression = new PointerFieldAccessExpression(
+                    expression,
+                    field.lexeme(),
+                    field.span(),
+                    new SourceSpan(expression.span().start(), field.span().end())
+                );
+
+                continue;
+            }
+
             if (match(TokenKind.LEFT_BRACKET)) {
                 var index = parseExpression();
-                var rightBracket = consume(TokenKind.RIGHT_BRACKET, "']' after the pointer index");
+                var rightBracket = consume(TokenKind.RIGHT_BRACKET, "']' after the string index");
 
-                expression = new PointerIndexExpression(
+                expression = new IndexExpression(
                     expression,
                     index,
                     new SourceSpan(expression.span().start(), rightBracket.span().end())

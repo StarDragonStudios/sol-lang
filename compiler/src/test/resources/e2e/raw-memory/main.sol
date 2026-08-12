@@ -16,8 +16,9 @@ fn launch() -> int
         return 1
     end
 
-    *values = Pair { first: 19, second: 1 }
-    values[1] = Pair { first: 20, second: 2 }
+    values->first = 19
+    values->second = 1
+    memory::store_at<Pair>(values, 1, Pair { first: 20, second: 2 })
 
     let grown: pointer<Pair> = memory::reallocate<Pair>(values, 3)
 
@@ -27,7 +28,7 @@ fn launch() -> int
     end
 
     values = grown
-    values[2] = Pair { first: 0, second: 0 }
+    memory::store_at<Pair>(values, 2, Pair { first: 0, second: 0 })
 
     let rejected: pointer<Pair> = memory::reallocate<Pair>(values, -1)
 
@@ -36,8 +37,8 @@ fn launch() -> int
         return 4
     end
 
-    let first: Pair = *values
-    let second: Pair = values[1]
+    let first: Pair = memory::load<Pair>(values)
+    let second: Pair = memory::load_at<Pair>(values, 1)
     let zero: pointer<int> = memory::allocate<int>(0)
     let negative: pointer<int> = memory::allocate<int>(-1)
     let empty: pointer<Empty> = memory::allocate<Empty>(1)
@@ -57,7 +58,7 @@ fn launch() -> int
         return 5
     end
 
-    *from_null = 42
+    memory::store<int>(from_null, 42)
 
     let released: pointer<int> = memory::reallocate<int>(from_null, 0)
 

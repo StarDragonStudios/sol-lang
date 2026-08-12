@@ -10,8 +10,7 @@ import io.github.stardragonstudios.sol.ir.IrStructFieldExtractInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.ir.IrNullConstant;
 import io.github.stardragonstudios.sol.ir.IrPointerType;
-import io.github.stardragonstudios.sol.ir.IrPointerLoadInstruction;
-import io.github.stardragonstudios.sol.ir.IrPointerIndexLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerFieldLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrStringIndexInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
@@ -26,8 +25,8 @@ import io.github.stardragonstudios.sol.syntax.UnaryExpression;
 import io.github.stardragonstudios.sol.syntax.StructConstructionExpression;
 import io.github.stardragonstudios.sol.syntax.FieldAccessExpression;
 import io.github.stardragonstudios.sol.syntax.NullExpression;
-import io.github.stardragonstudios.sol.syntax.PointerDereferenceExpression;
-import io.github.stardragonstudios.sol.syntax.PointerIndexExpression;
+import io.github.stardragonstudios.sol.syntax.PointerFieldAccessExpression;
+import io.github.stardragonstudios.sol.syntax.IndexExpression;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -51,8 +50,8 @@ final class IrExpressionLowerer {
             case CallExpression call -> lowerCall(call, model, context);
             case StructConstructionExpression construction -> lowerStructConstruction(construction, model, context);
             case FieldAccessExpression fieldAccess -> lowerFieldAccess(fieldAccess, model, context);
-            case PointerDereferenceExpression dereference -> lowerPointerDereference(dereference, model, context);
-            case PointerIndexExpression index -> lowerPointerIndex(index, model, context);
+            case PointerFieldAccessExpression fieldAccess -> lowerPointerFieldAccess(fieldAccess, model, context);
+            case IndexExpression index -> lowerIndex(index, model, context);
 
             default -> throw new IrLoweringException("Unsupported expression syntax '%s' during IR lowering.".formatted(expression.getClass().getSimpleName()));
         };
@@ -79,36 +78,33 @@ final class IrExpressionLowerer {
         return new IrNullConstant(context.nextValueId(), pointerType);
     }
 
-    private static IrValue lowerPointerDereference(
-        PointerDereferenceExpression expression,
+    private static IrValue lowerPointerFieldAccess(
+        PointerFieldAccessExpression expression,
         SemanticModel model,
         IrFunctionLoweringContext context
     ) {
         var pointer = lower(expression.pointer(), model, context);
-        var instruction = new IrPointerLoadInstruction(context.nextValueId(), pointer);
+        var semanticField = model.accessedFieldOf(expression).orElseThrow(() -> new IrLoweringException(
+            "Pointer-field access '%s' has no resolved semantic field.".formatted(expression.fieldName())
+        ));
+        if (!(pointer.type() instanceof IrPointerType pointerType) || !(pointerType.elementType() instanceof IrStructType structType))
+            throw new IrLoweringException("Pointer-field access lowered a non-pointer-to-struct target.");
+
+        var instruction = new IrPointerFieldLoadInstruction(context.nextValueId(), pointer, structType.fields().get(semanticField.index()));
 
         context.emit(instruction);
 
         return instruction;
     }
 
-    private static IrValue lowerPointerIndex(
-        PointerIndexExpression expression,
+    private static IrValue lowerIndex(
+        IndexExpression expression,
         SemanticModel model,
         IrFunctionLoweringContext context
     ) {
-        var pointer = lower(expression.pointer(), model, context);
+        var target = lower(expression.target(), model, context);
         var index = lower(expression.index(), model, context);
-
-        if (pointer.type() == io.github.stardragonstudios.sol.ir.PrimitiveIrType.STRING) {
-            var instruction = new IrStringIndexInstruction(context.nextValueId(), pointer, index);
-
-            context.emit(instruction);
-
-            return instruction;
-        }
-
-        var instruction = new IrPointerIndexLoadInstruction(context.nextValueId(), pointer, index);
+        var instruction = new IrStringIndexInstruction(context.nextValueId(), target, index);
 
         context.emit(instruction);
 

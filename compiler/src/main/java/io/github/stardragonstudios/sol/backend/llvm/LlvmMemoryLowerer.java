@@ -20,6 +20,9 @@ import static org.bytedeco.llvm.global.LLVM.LLVMBuildCall2;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildCondBr;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildICmp;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildMul;
+import static org.bytedeco.llvm.global.LLVM.LLVMBuildGEP2;
+import static org.bytedeco.llvm.global.LLVM.LLVMBuildLoad2;
+import static org.bytedeco.llvm.global.LLVM.LLVMBuildStore;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildRet;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildRetVoid;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildSDiv;
@@ -44,6 +47,10 @@ final class LlvmMemoryLowerer {
     private static final String ALLOCATE = "allocate";
     private static final String REALLOCATE = "reallocate";
     private static final String FREE = "free";
+    private static final String LOAD = "load";
+    private static final String STORE = "store";
+    private static final String LOAD_AT = "load_at";
+    private static final String STORE_AT = "store_at";
 
     private LlvmMemoryLowerer() {}
 
@@ -62,6 +69,10 @@ final class LlvmMemoryLowerer {
                 case ALLOCATE -> lowerAllocate(function, host.malloc(), context);
                 case REALLOCATE -> lowerReallocate(function, host.realloc(), host.free(), context);
                 case FREE -> lowerFree(function, host.free(), context);
+                case LOAD -> lowerLoad(function, false, context);
+                case STORE -> lowerStore(function, false, context);
+                case LOAD_AT -> lowerLoad(function, true, context);
+                case STORE_AT -> lowerStore(function, true, context);
 
                 default -> {
                     /* Future std.memory operations are lowered independently. */
@@ -200,6 +211,66 @@ final class LlvmMemoryLowerer {
         });
     }
 
+    private static void lowerLoad(IrFunction function, boolean indexed, LlvmProgramLoweringContext context) {
+        var pointerType = validateLoad(function, indexed);
+
+        withBuilder(function, context, builder -> {
+            var llvmContext = context.module().contextHandle();
+            var handle = context.function(function.id()).value();
+            var entry = appendBlock(llvmContext, handle, "memory.entry");
+            var pointer = requireParameter(handle, 0, function);
+
+            LLVMPositionBuilderAtEnd(builder, entry);
+
+            var address = indexed
+                ? indexedAddress(builder, pointerType.elementType(), pointer, requireParameter(handle, 1, function), llvmContext)
+                : pointer;
+            var loaded = LLVMBuildLoad2(builder, LlvmTypeLowerer.lower(pointerType.elementType(), llvmContext), address, "loaded");
+
+            requireValue(loaded, "memory load");
+            requireValue(LLVMBuildRet(builder, loaded), "memory load return");
+        });
+    }
+
+    private static void lowerStore(IrFunction function, boolean indexed, LlvmProgramLoweringContext context) {
+        var pointerType = validateStore(function, indexed);
+
+        withBuilder(function, context, builder -> {
+            var llvmContext = context.module().contextHandle();
+            var handle = context.function(function.id()).value();
+            var entry = appendBlock(llvmContext, handle, "memory.entry");
+            var pointer = requireParameter(handle, 0, function);
+
+            LLVMPositionBuilderAtEnd(builder, entry);
+
+            var address = indexed
+                ? indexedAddress(builder, pointerType.elementType(), pointer, requireParameter(handle, 1, function), llvmContext)
+                : pointer;
+            var valueIndex = indexed ? 2 : 1;
+
+            requireValue(LLVMBuildStore(builder, requireParameter(handle, valueIndex, function), address), "memory store");
+            requireValue(LLVMBuildRetVoid(builder), "memory store return");
+        });
+    }
+
+    private static LLVMValueRef indexedAddress(
+        LLVMBuilderRef builder,
+        IrType elementType,
+        LLVMValueRef pointer,
+        LLVMValueRef index,
+        LLVMContextRef context
+    ) {
+        final LLVMValueRef address;
+
+        try (var indices = new PointerPointer<LLVMValueRef>(1)) {
+            indices.put(0, index);
+            address = LLVMBuildGEP2(builder, LlvmTypeLowerer.lower(elementType, context), pointer, indices, 1, "memory.index");
+        }
+
+        requireValue(address, "memory indexed address");
+        return address;
+    }
+
     private static IrPointerType validateAllocate(IrFunction function) {
         validateBodyless(function);
         if (function.parameters().size() != 1 || function.parameters().getFirst().type() != PrimitiveIrType.INT)
@@ -230,6 +301,37 @@ final class LlvmMemoryLowerer {
             throw invalidSignature(function, "must accept exactly one pointer");
         if (function.returnType() != PrimitiveIrType.VOID)
             throw invalidSignature(function, "must return 'void'");
+    }
+
+    private static IrPointerType validateLoad(IrFunction function, boolean indexed) {
+        validateBodyless(function);
+        var expectedCount = indexed ? 2 : 1;
+
+        if (function.parameters().size() != expectedCount || !(function.parameters().getFirst().type() instanceof IrPointerType pointer))
+            throw invalidSignature(function, indexed ? "must accept a pointer and an 'int' index" : "must accept exactly one pointer");
+        if (indexed && function.parameters().get(1).type() != PrimitiveIrType.INT)
+            throw invalidSignature(function, "must accept an 'int' index as its second parameter");
+        if (!pointer.elementType().equals(function.returnType()))
+            throw invalidSignature(function, "must return the pointer element type");
+
+        return pointer;
+    }
+
+    private static IrPointerType validateStore(IrFunction function, boolean indexed) {
+        validateBodyless(function);
+        var expectedCount = indexed ? 3 : 2;
+
+        if (function.parameters().size() != expectedCount || !(function.parameters().getFirst().type() instanceof IrPointerType pointer))
+            throw invalidSignature(function, indexed ? "must accept a pointer, an 'int' index, and a value" : "must accept a pointer and a value");
+        if (indexed && function.parameters().get(1).type() != PrimitiveIrType.INT)
+            throw invalidSignature(function, "must accept an 'int' index as its second parameter");
+        var valueIndex = indexed ? 2 : 1;
+        if (!pointer.elementType().equals(function.parameters().get(valueIndex).type()))
+            throw invalidSignature(function, "must accept the pointer element type as its value");
+        if (function.returnType() != PrimitiveIrType.VOID)
+            throw invalidSignature(function, "must return 'void'");
+
+        return pointer;
     }
 
     private static void validateBodyless(IrFunction function) {

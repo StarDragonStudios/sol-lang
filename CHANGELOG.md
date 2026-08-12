@@ -5,10 +5,11 @@
 ### Self-host foundations
 
 * Added value-type structs and minimal compile-time generics.
-* Added typed raw `pointer<T>` values, contextual `null`, dereference and
-  element indexing.
-* Added `std.memory.allocate<T>`, `reallocate<T>` and `free<T>` with explicit
-  zero-count, overflow and allocation-failure behavior.
+* Added typed raw `pointer<T>` values, contextual `null` and explicit
+  pointer-to-struct field access with `pointer->field`.
+* Added `std.memory.allocate<T>`, `reallocate<T>`, `free<T>`, `load<T>`,
+  `store<T>`, `load_at<T>` and `store_at<T>`, with explicit zero-count,
+  overflow and allocation-failure behavior.
 * Added immutable UTF-8 string indexing by Unicode scalar value,
   concatenation, exact equality and inequality.
 * Added `std.string.length`, `slice` and `substring`, with deterministic

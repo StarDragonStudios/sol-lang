@@ -171,6 +171,9 @@ public final class IrTextFormatter {
         if (instruction instanceof IrPointerIndexLoadInstruction load)
             return "%s: %s = pointer_index_load %s, %s".formatted(load.id(), load.type().displayName(), load.pointer().id(), load.index().id());
 
+        if (instruction instanceof IrPointerFieldLoadInstruction load)
+            return "%s: %s = pointer_field_load %s.%s".formatted(load.id(), load.type().displayName(), load.pointer().id(), load.field().name());
+
         if (instruction instanceof IrStringIndexInstruction index)
             return "%s: char = string_index %s, %s".formatted(index.id(), index.string().id(), index.index().id());
 
@@ -179,6 +182,9 @@ public final class IrTextFormatter {
 
         if (instruction instanceof IrPointerIndexStoreInstruction store)
             return "pointer_index_store %s, %s, %s".formatted(store.pointer().id(), store.index().id(), store.value().id());
+
+        if (instruction instanceof IrPointerFieldStoreInstruction store)
+            return "pointer_field_store %s.%s, %s".formatted(store.pointer().id(), store.field().name(), store.value().id());
 
         throw new IllegalArgumentException("Unsupported IR instruction type '%s'.".formatted(instruction.getClass().getSimpleName()));
     }

@@ -366,6 +366,12 @@ uses the exact pointee LLVM type with `getelementptr`, so element scaling and
 alignment are derived from the target data layout rather than hard-coded byte
 sizes.
 
+`load<T>` and `store<T>` lower to typed LLVM loads and stores at the supplied
+address. `load_at<T>` and `store_at<T>` first compute the indexed address with
+typed `getelementptr`. Source-level `pointer->field` uses a struct GEP followed
+by a typed load or store; chained arrows repeat that operation using each
+field's pointer type.
+
 ## Native ownership
 
 `LlvmModule` owns:
