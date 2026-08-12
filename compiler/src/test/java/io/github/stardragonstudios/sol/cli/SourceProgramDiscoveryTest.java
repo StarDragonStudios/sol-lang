@@ -316,6 +316,7 @@ class SourceProgramDiscoveryTest {
         assertEquals(
             List.of(
                 "exists",
+                "read_text",
                 "write_text",
                 "append_text"
             ),
@@ -432,7 +433,7 @@ class SourceProgramDiscoveryTest {
             .map(FunctionDeclaration::name)
             .toList();
 
-        assertEquals(List.of("exists", "write_text", "append_text"), functionNames);
+        assertEquals(List.of("exists", "read_text", "write_text", "append_text"), functionNames);
     }
 
     private Path write(String name, String source) throws IOException {

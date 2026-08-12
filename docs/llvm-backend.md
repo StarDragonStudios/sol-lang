@@ -336,9 +336,15 @@ diagnostic and call the portable host `exit(70)` boundary.
 
 The runtime invariant is that every native Sol string contains valid UTF-8.
 Source decoding enforces it for literals, concatenation preserves it by joining
-complete strings, and slicing computes only scalar boundaries. Future console
-and file input lowerers must validate bytes before constructing this native
-aggregate.
+complete strings, and slicing computes only scalar boundaries.
+
+`std.file.read_text` and `std.console.read_line` share a native text-input
+runtime. It grows process-lifetime storage with `malloc`/`realloc`, validates
+RFC 3629 UTF-8 (including overlong encodings, surrogates and the U+10FFFF
+limit), counts Unicode scalars and only then constructs `{ ptr, i64, i64 }`.
+File bytes are read in binary mode without newline rewriting. Console input
+recognizes LF and CRLF, distinguishes an empty line from EOF, and accepts an
+unterminated non-empty final line. Stable failures call `exit(70)`.
 
 ## Standard raw-memory lowering
 

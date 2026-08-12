@@ -11,6 +11,7 @@ final class LlvmProgramLoweringContext {
     private final LlvmModule module;
     private final Map<IrFunctionId, LlvmFunctionHandle> functions = new HashMap<>();
     private LlvmStringRuntime stringRuntime;
+    private LlvmTextInputRuntime textInputRuntime;
 
     LlvmProgramLoweringContext(LlvmModule module) {
         this.module = Objects.requireNonNull(module, "LLVM lowering module must not be null.");
@@ -57,6 +58,12 @@ final class LlvmProgramLoweringContext {
         if (stringRuntime == null) stringRuntime = new LlvmStringRuntime(this);
 
         return stringRuntime;
+    }
+
+    LlvmTextInputRuntime textInputRuntime() {
+        if (textInputRuntime == null) textInputRuntime = new LlvmTextInputRuntime(this);
+
+        return textInputRuntime;
     }
 
     int functionCount() {

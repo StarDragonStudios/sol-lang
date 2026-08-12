@@ -311,12 +311,14 @@ fn launch() -> int
 end
 ```
 
-`std.console` currently provides UTF-8 standard-output operations through
-`print(string)` and `print_line(string)`. The `csl` name above is the
-conventional Sol 0.1 namespace alias for console access.
+`std.console` provides UTF-8 output through `print(string)` and
+`print_line(string)`, plus input through `read_line() -> string`. `read_line`
+removes LF or CRLF line terminators and returns `""` for a valid empty line.
+EOF before any line and malformed UTF-8 are deterministic runtime failures
+with status `70`. The `csl` name above is the conventional namespace alias.
 
 `std.file` provides the initial procedural filesystem API through
-`exists(string)`, `write_text(string, string)` and
+`exists(string)`, `read_text(string)`, `write_text(string, string)` and
 `append_text(string, string)`.
 
 The conventional Sol 0.1 namespace alias is `file`:
@@ -337,6 +339,11 @@ end
 
 File paths are resolved by the generated native process relative to its current
 working directory unless an absolute path is supplied.
+
+`read_text` returns the complete file unchanged, including line terminators.
+Empty files produce `""`. Missing or inaccessible files, read or close
+failures, and malformed UTF-8 produce a deterministic diagnostic and status
+`70`.
 
 Strings are immutable UTF-8 values. Public indices count Unicode scalar values,
 so multibyte text is never split in the middle of an encoding sequence.

@@ -42,6 +42,7 @@ final class LlvmFileLowerer {
     private static final String FILE_MODULE = "std.file";
 
     private static final String EXISTS = "exists";
+    private static final String READ_TEXT = "read_text";
     private static final String WRITE_TEXT = "write_text";
     private static final String APPEND_TEXT = "append_text";
 
@@ -58,6 +59,7 @@ final class LlvmFileLowerer {
         for (var function : module.functions()) {
             switch (function.name()) {
                 case EXISTS -> lowerExists(function, hostFunctions, context);
+                case READ_TEXT -> context.textInputRuntime().lowerReadText(function);
                 case WRITE_TEXT -> lowerWrite(function, false, hostFunctions, context);
                 case APPEND_TEXT -> lowerWrite(function, true, hostFunctions, context);
 

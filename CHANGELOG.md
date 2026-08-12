@@ -4,6 +4,9 @@
 
 ### Self-host foundations
 
+* Added strict UTF-8 input through `std.file.read_text` and
+  `std.console.read_line`, including portable line-ending handling and
+  deterministic I/O, EOF and decoding failures.
 * Added value-type structs and minimal compile-time generics.
 * Added typed raw `pointer<T>` values, contextual `null` and explicit
   pointer-to-struct field access with `pointer->field`.
