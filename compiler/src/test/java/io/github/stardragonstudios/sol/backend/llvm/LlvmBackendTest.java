@@ -111,7 +111,7 @@ class LlvmBackendTest {
             assertTrue(text.contains("ret double 1.500000e+00"));
             assertTrue(text.contains("ret i1 true"));
             assertTrue(text.contains("ret i32 128512"));
-            assertTrue(text.contains("define { ptr, i64 } @sol.function4.string_value()"));
+            assertTrue(text.contains("define { ptr, i64, i64 } @sol.function4.string_value()"));
             assertTrue(text.contains("c\"Hello\\00\""));
             assertTrue(text.contains("i64 5"));
 
@@ -187,8 +187,8 @@ class LlvmBackendTest {
             var text = normalizeNewlines(module.text());
 
             assertTrue(text.contains("declare i32 @putchar(i32)"));
-            assertTrue(text.contains("define void @sol.function0.print({ ptr, i64 } %value)"));
-            assertTrue(text.contains("define void @sol.function1.print_line({ ptr, i64 } %value)"));
+            assertTrue(text.contains("define void @sol.function0.print({ ptr, i64, i64 } %value)"));
+            assertTrue(text.contains("define void @sol.function1.print_line({ ptr, i64, i64 } %value)"));
             assertTrue(text.contains("console.condition:"));
             assertTrue(text.contains("console.body:"));
             assertTrue(text.contains("console.exit:"));
@@ -213,7 +213,7 @@ class LlvmBackendTest {
 
             assertTrue(text.contains("declare ptr @fopen(ptr, ptr)"));
             assertTrue(text.contains("declare i32 @fclose(ptr)"));
-            assertTrue(text.contains("define i1 @sol.function0.exists({ ptr, i64 } %path)"));
+            assertTrue(text.contains("define i1 @sol.function0.exists({ ptr, i64, i64 } %path)"));
             assertTrue(text.contains("c\"rb\\00\""));
             assertTrue(text.contains("@llvm.memcpy"));
             assertTrue(text.contains("store i8 0"));
@@ -240,8 +240,8 @@ class LlvmBackendTest {
             var text = normalizeNewlines(module.text());
 
             assertTrue(text.contains("declare i64 @fwrite(ptr, i64, i64, ptr)"));
-            assertTrue(text.contains("define i1 @sol.function0.write_text({ ptr, i64 } %path, { ptr, i64 } %content)"));
-            assertTrue(text.contains("define i1 @sol.function1.append_text({ ptr, i64 } %path, { ptr, i64 } %content)"));
+            assertTrue(text.contains("define i1 @sol.function0.write_text({ ptr, i64, i64 } %path, { ptr, i64, i64 } %content)"));
+            assertTrue(text.contains("define i1 @sol.function1.append_text({ ptr, i64, i64 } %path, { ptr, i64, i64 } %content)"));
             assertTrue(text.contains("c\"wb\\00\""));
             assertTrue(text.contains("c\"ab\\00\""));
             assertTrue(text.contains("call i64 @fwrite"));
@@ -288,6 +288,72 @@ class LlvmBackendTest {
             assertTrue(text.contains("getelementptr i64, ptr %pointer, i64 %index"));
             assertTrue(text.contains("load i64, ptr"));
             assertTrue(text.contains("store i64"));
+            module.verify();
+        }
+    }
+
+    @Test
+    void lowersUtf8StringIndexConcatenationAndEqualityThroughSharedRuntime() {
+        var left = new IrParameter(new IrValueId(0), "left", PrimitiveIrType.STRING);
+        var right = new IrParameter(new IrValueId(1), "right", PrimitiveIrType.STRING);
+        var index = new IrParameter(new IrValueId(2), "index", PrimitiveIrType.INT);
+        var concatenated = new IrBinaryInstruction(new IrValueId(3), IrBinaryOperator.ADD, left, right);
+        var equal = new IrBinaryInstruction(new IrValueId(4), IrBinaryOperator.EQUAL, concatenated, left);
+        var scalar = new IrStringIndexInstruction(new IrValueId(5), concatenated, index);
+        var function = IrFunction.definition(
+            new IrFunctionId(0),
+            "inspect",
+            List.of(left, right, index),
+            PrimitiveIrType.CHAR,
+            List.of(new IrBasicBlock(
+                new IrBlockId(0),
+                List.of(concatenated, equal, scalar),
+                IrReturnTerminator.returning(scalar)
+            ))
+        );
+        var program = IrProgram.library(List.of(new IrModule(new IrModuleName(List.of("strings")), List.of(function))));
+
+        try (var module = LlvmBackend.generate(program, "sol.string-operations")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("define internal { ptr, i64, i64 } @sol.runtime.string.concat"));
+            assertTrue(text.contains("define internal i1 @sol.runtime.string.equal"));
+            assertTrue(text.contains("define internal i32 @sol.runtime.string.index"));
+            assertTrue(text.contains("define internal i64 @sol.runtime.string.byte_offset"));
+            assertTrue(text.contains("call ptr @malloc(i64"));
+            assertTrue(text.contains("call i32 @memcmp"));
+            assertTrue(text.contains("Sol runtime error: string index out of bounds."));
+            module.verify();
+        }
+    }
+
+    @Test
+    void lowersStandardStringFunctionsToUnicodeScalarRuntime() {
+        var value = new IrParameter(new IrValueId(0), "value", PrimitiveIrType.STRING);
+        var length = IrFunction.declaration(new IrFunctionId(0), "length", List.of(value), PrimitiveIrType.INT);
+        var sliceValue = new IrParameter(new IrValueId(0), "value", PrimitiveIrType.STRING);
+        var sliceStart = new IrParameter(new IrValueId(1), "start", PrimitiveIrType.INT);
+        var sliceEnd = new IrParameter(new IrValueId(2), "end_index", PrimitiveIrType.INT);
+        var slice = IrFunction.declaration(new IrFunctionId(1), "slice", List.of(sliceValue, sliceStart, sliceEnd), PrimitiveIrType.STRING);
+        var substringValue = new IrParameter(new IrValueId(0), "value", PrimitiveIrType.STRING);
+        var substringStart = new IrParameter(new IrValueId(1), "start", PrimitiveIrType.INT);
+        var substringCount = new IrParameter(new IrValueId(2), "count", PrimitiveIrType.INT);
+        var substring = IrFunction.declaration(
+            new IrFunctionId(2), "substring", List.of(substringValue, substringStart, substringCount), PrimitiveIrType.STRING
+        );
+        var program = IrProgram.library(List.of(new IrModule(
+            new IrModuleName(List.of("std", "string")),
+            List.of(length, slice, substring)
+        )));
+
+        try (var module = LlvmBackend.generate(program, "sol.standard-string")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("define i64 @sol.function0.length({ ptr, i64, i64 } %value)"));
+            assertTrue(text.contains("define { ptr, i64, i64 } @sol.function1.slice"));
+            assertTrue(text.contains("define { ptr, i64, i64 } @sol.function2.substring"));
+            assertTrue(text.contains("@sol.runtime.string.slice"));
+            assertTrue(text.contains("@sol.runtime.string.substring"));
             module.verify();
         }
     }

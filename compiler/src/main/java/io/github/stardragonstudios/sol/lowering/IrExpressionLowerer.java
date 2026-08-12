@@ -12,6 +12,7 @@ import io.github.stardragonstudios.sol.ir.IrNullConstant;
 import io.github.stardragonstudios.sol.ir.IrPointerType;
 import io.github.stardragonstudios.sol.ir.IrPointerLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerIndexLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrStringIndexInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.ParameterSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
@@ -98,6 +99,15 @@ final class IrExpressionLowerer {
     ) {
         var pointer = lower(expression.pointer(), model, context);
         var index = lower(expression.index(), model, context);
+
+        if (pointer.type() == io.github.stardragonstudios.sol.ir.PrimitiveIrType.STRING) {
+            var instruction = new IrStringIndexInstruction(context.nextValueId(), pointer, index);
+
+            context.emit(instruction);
+
+            return instruction;
+        }
+
         var instruction = new IrPointerIndexLoadInstruction(context.nextValueId(), pointer, index);
 
         context.emit(instruction);

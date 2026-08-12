@@ -195,6 +195,7 @@ The initial value forms are:
 * typed null constants;
 * direct pointer loads;
 * indexed pointer loads.
+* Unicode-scalar string indexing.
 
 `IrStructConstructInstruction` consumes one value per field in canonical field
 order and produces the complete aggregate value. Semantic-to-IR lowering may
@@ -210,6 +211,11 @@ and `IrPointerIndexLoadInstruction` produce the pointer element type.
 `IrPointerStoreInstruction` and `IrPointerIndexStoreInstruction` are
 side-effecting instructions whose stored value must exactly match that element
 type; indexed forms additionally require an `int` index.
+
+`IrStringIndexInstruction` consumes a `string` and an `int` scalar index and
+produces `char`. String concatenation and exact content equality use typed
+`IrBinaryInstruction` values with `string` operands; their result types are
+`string` and `boolean`, respectively.
 
 The initial binary operations are:
 
@@ -529,6 +535,7 @@ The initial expression subset supports:
 * logical conjunction and disjunction;
 * struct construction and field access;
 * typed pointer dereference and indexing.
+* immutable string indexing, concatenation and equality.
 
 Primitive literal lexemes are decoded during lowering after lexical and
 semantic validation.
@@ -551,6 +558,11 @@ A pointer assignment lowers its pointer and optional index before its value,
 then emits a typed pointer store. Pointer mutation is independent of local
 binding mutability because it changes addressed storage rather than rebinding
 the pointer local.
+
+String indexing lowers independently to `IrStringIndexInstruction`; it never
+becomes a pointer load and cannot be used as an assignment target. Calls to
+`std.string` retain ordinary typed call instructions, so the IR surface does
+not expose the native UTF-8 representation or raw allocation pointers.
 
 A call resolves exclusively through the canonical `FunctionSymbol` and
 semantic type arguments associated with its `CallExpression`. The current

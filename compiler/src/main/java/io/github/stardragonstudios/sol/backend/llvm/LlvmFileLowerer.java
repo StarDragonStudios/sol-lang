@@ -243,7 +243,7 @@ final class LlvmFileLowerer {
     /*
      * Converts a bounded Sol UTF-8 string:
      *
-     *     { ptr, i64 }
+     *     { ptr, i64, i64 }
      *
      * into a temporary NUL-terminated buffer suitable for host C APIs.
      *

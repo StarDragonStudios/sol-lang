@@ -171,6 +171,9 @@ public final class IrTextFormatter {
         if (instruction instanceof IrPointerIndexLoadInstruction load)
             return "%s: %s = pointer_index_load %s, %s".formatted(load.id(), load.type().displayName(), load.pointer().id(), load.index().id());
 
+        if (instruction instanceof IrStringIndexInstruction index)
+            return "%s: char = string_index %s, %s".formatted(index.id(), index.string().id(), index.index().id());
+
         if (instruction instanceof IrPointerStoreInstruction store)
             return "pointer_store %s, %s".formatted(store.pointer().id(), store.value().id());
 

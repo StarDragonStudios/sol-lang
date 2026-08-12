@@ -34,8 +34,15 @@ public enum IrBinaryOperator {
         Objects.requireNonNull(rightType, "Right binary IR operand type must not be null.");
 
         return switch (this) {
-            case MULTIPLY, DIVIDE, ADD, SUBTRACT -> {
+            case MULTIPLY, DIVIDE, SUBTRACT -> {
                 if (!matchingNumericTypes(leftType, rightType)) throw invalidOperands(leftType, rightType);
+
+                yield leftType;
+            }
+
+            case ADD -> {
+                if (!matchingNumericTypes(leftType, rightType) && !matchingStrings(leftType, rightType))
+                    throw invalidOperands(leftType, rightType);
 
                 yield leftType;
             }
@@ -70,6 +77,10 @@ public enum IrBinaryOperator {
 
     private boolean matchingNumericTypes(IrType leftType, IrType rightType) {
         return leftType.equals(rightType) && leftType.isNumeric();
+    }
+
+    private boolean matchingStrings(IrType leftType, IrType rightType) {
+        return leftType == PrimitiveIrType.STRING && rightType == PrimitiveIrType.STRING;
     }
 
     private IllegalArgumentException invalidOperands(IrType leftType, IrType rightType) {

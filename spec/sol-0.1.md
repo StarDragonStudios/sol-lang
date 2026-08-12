@@ -116,8 +116,8 @@ Sol 0.1 defines the following primitive types:
 | `int`     | numeric, integral | Signed whole-number values    |
 | `float`   | numeric           | Floating-point values         |
 | `boolean` | logical           | The values `true` and `false` |
-| `char`    | character         | One character value           |
-| `string`  | text              | Sequences of characters       |
+| `char`    | character         | One Unicode scalar value      |
+| `string`  | text              | Valid UTF-8 scalar sequences  |
 | `void`    | non-value         | Absence of a returned value   |
 
 Primitive type names are lowercase and case-sensitive. For example, `int` is
@@ -204,8 +204,9 @@ A character literal is enclosed in single quotes:
 '\n'
 ```
 
-It contains exactly one character or one supported escape sequence and has type
-`char`.
+It contains exactly one Unicode scalar value or one supported escape sequence
+and has type `char`. Supplementary values such as `'🐉'` are one `char`, even
+though their source representation occupies four bytes in UTF-8.
 
 ### String literals
 
@@ -219,7 +220,10 @@ A string literal is enclosed in double quotes:
 
 A string literal cannot contain an unescaped source newline.
 
-String literals have type `string`.
+String literals have type `string`. Their decoded contents must be a sequence of
+Unicode scalar values and are represented as valid UTF-8 by the native runtime.
+An unpaired surrogate or malformed UTF-8 source file is rejected with
+`SOL-L006`; the compiler does not insert replacement characters.
 
 ### Escape sequences
 
@@ -272,7 +276,7 @@ Primary expressions include:
 * namespace-qualified names;
 * parenthesized expressions;
 * struct construction expressions;
-* pointer dereference and indexing expressions.
+* pointer dereference and string or pointer indexing expressions.
 
 Examples:
 
@@ -391,6 +395,7 @@ Parentheses override the normal precedence:
 | `*`, `/`, `+`, `-` | `int`, `int`     | `int`   |
 | `*`, `/`, `+`, `-` | `float`, `float` | `float` |
 | `%`                | `int`, `int`     | `int`   |
+| `+`                | `string`, `string` | `string` |
 
 Mixed numeric operations are invalid:
 
@@ -425,6 +430,7 @@ int
 float
 boolean
 char
+string
 pointer<T>
 ```
 
@@ -434,9 +440,11 @@ The two operands must have exactly the same type. Pointer equality compares
 addresses, including equality with a contextually typed `null`; it does not
 compare pointee contents.
 
-String equality and inequality are not defined in Sol 0.1. In particular, a
-native implementation must not substitute pointer identity for string-content
-equality.
+String equality compares the exact Unicode scalar sequence. Because every Sol
+string is valid UTF-8, the native implementation may compare the corresponding
+byte sequences. Equality does not perform Unicode normalization, case folding
+or locale-sensitive comparison; for example, precomposed `"é"` is distinct
+from `"é"` containing `e` followed by a combining accent.
 
 ### Logical operators
 
@@ -453,8 +461,6 @@ conversion for numeric, character or string values.
 Sol 0.1 does not define:
 
 * implicit primitive conversions;
-* string concatenation;
-* string equality;
 * function values;
 * closures;
 * class or object member dispatch;
@@ -884,6 +890,47 @@ use-after-free and overlapping mutable access.
 
 These rules describe programmer obligations, not checks performed by the Sol
 0.1.1 compiler.
+
+## Immutable UTF-8 strings
+
+A `string` is an immutable sequence of Unicode scalar values with a valid
+UTF-8 encoding. Its public length and every public string index are measured
+in scalar values, not UTF-8 bytes, UTF-16 code units, extended grapheme
+clusters or display columns.
+
+Indexing returns the scalar at the requested zero-based position as `char`:
+
+```sol
+let text: string = "Aé🐉Z"
+let dragon: char = text[2]
+```
+
+The index must have type `int`. Assigning through a string index is invalid
+because strings are immutable. A negative index or an index greater than or
+equal to the scalar length emits `Sol runtime error: string index out of
+bounds.` and terminates the process with status `70`.
+
+Binary `+` concatenates two strings and produces a valid UTF-8 string. The
+result's storage is managed by the bootstrap runtime for the remainder of the
+process; no raw pointer or manual release operation is exposed through the
+public string API. A native allocation or representable-length failure emits a
+runtime diagnostic and terminates with status `70`.
+
+`==` and `!=` compare exact scalar sequences. They do not compare storage
+addresses and do not perform normalization, case folding or locale-sensitive
+comparison. Consequently, `"é"` and `"é"` are distinct sequences.
+
+Slices are immutable views over valid scalar boundaries. Literals use static
+storage, concatenation storage remains live until process termination, and
+slice views therefore remain valid for the bootstrap lifetime model. Future
+ownership facilities may reclaim string storage earlier without changing the
+public value semantics.
+
+No platform boundary may construct a Sol `string` from malformed UTF-8.
+Malformed source input is diagnosed as `SOL-L006`. Console or filesystem input
+APIs must likewise reject invalid input according to their documented failure
+contract rather than replacement-decoding it into a malformed or altered
+string.
 
 ## Declaration visibility
 
@@ -1695,10 +1742,51 @@ The Sol 0.1 procedural bootstrap currently provides:
 std.console
 std.file
 std.memory
+std.string
 ```
 
 These modules expose bodyless Sol function declarations whose native
 implementations are supplied by the compiler backend.
+
+## `std.string`
+
+The bootstrap string module is:
+
+```text
+std.string
+```
+
+It exports:
+
+```sol
+@fn length(value: string) -> int
+@fn slice(value: string, start: int, end_index: int) -> string
+@fn substring(value: string, start: int, count: int) -> string
+```
+
+The conventional namespace alias is `strings`:
+
+```sol
+inject namespace std.string as strings
+```
+
+`length(value)` returns the number of Unicode scalar values. It is `0` for the
+empty string.
+
+`slice(value, start, end_index)` returns the end-exclusive scalar range
+`[start, end_index)`. A valid range satisfies:
+
+```text
+0 <= start <= end_index <= length(value)
+```
+
+`substring(value, start, count)` returns `count` scalar values starting at
+`start`. A valid request has non-negative `start` and `count`, does not overflow
+`int`, and ends no later than `length(value)`.
+
+Empty ranges are valid, including ranges at the end of a string. Invalid slice
+or substring requests emit a deterministic runtime diagnostic and terminate
+the process with status `70`. Every successful result remains valid UTF-8.
 
 ## `std.memory`
 
@@ -1944,8 +2032,8 @@ Sol 0.1 does not define:
 
 The procedural API reports operation success through `boolean` results.
 
-Reading dynamically sized file data will require string ownership and lifetime
-semantics beyond the current Sol 0.1 bootstrap.
+Future file-content input must validate UTF-8 before constructing a string and
+may use the same process-lifetime runtime storage as bootstrap concatenation.
 
 ## Sol 0.1.1 procedural scope
 
@@ -1969,7 +2057,7 @@ The version includes:
 * `while` loops;
 * executable entry points;
 * native compilation;
-* minimal console, filesystem and raw-memory standard-library modules.
+* minimal string, console, filesystem and raw-memory standard-library modules.
 
 Sol 0.1 does not define:
 
@@ -1984,8 +2072,6 @@ Sol 0.1 does not define:
 * first-class functions;
 * exceptions;
 * `break` or `continue`;
-* string concatenation;
-* string equality;
 * automatic numeric conversions;
 * package manifests;
 * command-line argument binding for `@init`;

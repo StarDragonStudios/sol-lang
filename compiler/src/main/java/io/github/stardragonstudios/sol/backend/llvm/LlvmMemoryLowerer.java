@@ -29,6 +29,7 @@ import static org.bytedeco.llvm.global.LLVM.LLVMCreateBuilderInContext;
 import static org.bytedeco.llvm.global.LLVM.LLVMDisposeBuilder;
 import static org.bytedeco.llvm.global.LLVM.LLVMFunctionType;
 import static org.bytedeco.llvm.global.LLVM.LLVMGetParam;
+import static org.bytedeco.llvm.global.LLVM.LLVMGetNamedFunction;
 import static org.bytedeco.llvm.global.LLVM.LLVMIntEQ;
 import static org.bytedeco.llvm.global.LLVM.LLVMIntSGT;
 import static org.bytedeco.llvm.global.LLVM.LLVMIntSLE;
@@ -272,7 +273,9 @@ final class LlvmMemoryLowerer {
 
         requireValue(functionType, "host function type '%s'".formatted(name));
 
-        var function = LLVMAddFunction(context.module().moduleHandle(), name, functionType);
+        var function = LLVMGetNamedFunction(context.module().moduleHandle(), name);
+
+        if (Pointer.isNull(function)) function = LLVMAddFunction(context.module().moduleHandle(), name, functionType);
 
         requireValue(function, "host function declaration '%s'".formatted(name));
 

@@ -338,6 +338,26 @@ end
 File paths are resolved by the generated native process relative to its current
 working directory unless an absolute path is supplied.
 
+Strings are immutable UTF-8 values. Public indices count Unicode scalar values,
+so multibyte text is never split in the middle of an encoding sequence.
+Indexing, concatenation and exact content equality are built into the language;
+`std.string` supplies length and slicing operations:
+
+```sol
+inject namespace std.string as strings
+
+let text: string = "Aé🐉Z"
+let scalar: char = text[2]
+let middle: string = strings::slice(text, 1, 3)
+let same: string = strings::substring(text, 1, 2)
+let message: string = "Sol " + "🐉"
+```
+
+`strings::length(text)` returns `4` in this example. `slice` uses the
+end-exclusive scalar range `[start, end)`, while `substring` accepts a scalar
+start and count. Invalid indices and ranges produce a deterministic runtime
+diagnostic and terminate the process with status `70`.
+
 `std.memory` provides the deliberately unsafe bootstrap allocator through
 generic `allocate<T>`, `reallocate<T>` and `free<T>` operations. Raw storage is
 accessed with `*pointer` and `pointer[index]`:

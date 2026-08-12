@@ -106,7 +106,7 @@ class LlvmFunctionDeclarationLowererTest {
                 ; ModuleID = 'sol.strings'
                 source_filename = "sol.strings"
 
-                declare void @sol.function0.write({ ptr, i64 })
+                declare void @sol.function0.write({ ptr, i64, i64 })
                 """,
                 normalizeNewlines(module.text())
             );

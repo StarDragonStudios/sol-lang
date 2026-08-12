@@ -104,7 +104,7 @@ final class LlvmConsoleLowerer {
         /*
          * entry:
          *
-         *     { ptr, i64 } value
+         *     { ptr, i64, i64 } value
          *
          * becomes:
          *

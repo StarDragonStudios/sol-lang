@@ -23,6 +23,7 @@ import static org.bytedeco.llvm.global.LLVM.LLVMBuildOr;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildSDiv;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildSRem;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildSub;
+import static org.bytedeco.llvm.global.LLVM.LLVMBuildNot;
 
 import static org.bytedeco.llvm.global.LLVM.LLVMIntEQ;
 import static org.bytedeco.llvm.global.LLVM.LLVMIntNE;
@@ -70,6 +71,9 @@ final class LlvmBinaryInstructionLowerer {
     }
 
     private static LLVMValueRef lowerAdd(IrBinaryInstruction instruction, LLVMValueRef left, LLVMValueRef right, LlvmFunctionLoweringContext context) {
+        if (instruction.left().type() == PrimitiveIrType.STRING)
+            return context.stringRuntime().concat(context.builder(), left, right, valueName(instruction));
+
         if (isFloat(instruction.left().type())) return LLVMBuildFAdd(context.builder(), left, right, valueName(instruction));
 
         return LLVMBuildAdd(context.builder(), left, right, valueName(instruction));
@@ -123,6 +127,14 @@ final class LlvmBinaryInstructionLowerer {
 
         if (operandType instanceof IrPointerType)
             return LLVMBuildICmp(context.builder(), integerPredicate, left, right, valueName(instruction));
+
+        if (operandType == PrimitiveIrType.STRING) {
+            var equal = context.stringRuntime().equal(context.builder(), left, right, valueName(instruction) + "_equal");
+
+            return integerPredicate == LLVMIntEQ
+                ? equal
+                : LLVMBuildNot(context.builder(), equal, valueName(instruction));
+        }
 
         throw new LlvmBackendException("LLVM equality comparison is not supported for Sol IR type '%s'.".formatted(operandType.displayName()));
     }

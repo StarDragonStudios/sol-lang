@@ -41,7 +41,11 @@ final class OperatorTypeChecker {
         if (leftType == BuiltInTypes.ERROR || rightType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
 
         return switch (expression.operator()) {
-            case MULTIPLY, DIVIDE, ADD, SUBTRACT -> matchingNumericTypes(leftType, rightType)
+            case MULTIPLY, DIVIDE, SUBTRACT -> matchingNumericTypes(leftType, rightType)
+                ? leftType
+                : reportInvalidBinary(expression, leftType, rightType, diagnostics);
+
+            case ADD -> matchingNumericTypes(leftType, rightType) || matchingStrings(leftType, rightType)
                 ? leftType
                 : reportInvalidBinary(expression, leftType, rightType, diagnostics);
 
@@ -74,7 +78,12 @@ final class OperatorTypeChecker {
             || leftType == BuiltInTypes.FLOAT
             || leftType == BuiltInTypes.BOOLEAN
             || leftType == BuiltInTypes.CHAR
+            || leftType == BuiltInTypes.STRING
             || leftType instanceof PointerType;
+    }
+
+    private static boolean matchingStrings(TypeSymbol leftType, TypeSymbol rightType) {
+        return leftType == BuiltInTypes.STRING && rightType == BuiltInTypes.STRING;
     }
 
     private static TypeSymbol reportInvalidUnary(UnaryExpression expression, TypeSymbol operandType, List<Diagnostic> diagnostics) {

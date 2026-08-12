@@ -25,10 +25,11 @@ final class LlvmStringLowerer {
     /*
      * Current native Sol string representation:
      *
-     *     { ptr, i64 }
+     *     { ptr, i64, i64 }
      *
      * The pointer addresses UTF-8 data and the integer stores the
-     * number of UTF-8 bytes. The length deliberately excludes any
+     * number of UTF-8 bytes. The final integer stores the number of
+     * Unicode scalar values. The byte length deliberately excludes any
      * implementation NUL terminator used for static LLVM storage.
      *
      * Keeping the length explicit avoids defining Sol strings as
@@ -39,7 +40,11 @@ final class LlvmStringLowerer {
 
         if (Pointer.isNull(context)) throw new LlvmBackendException("LLVM string context must not be a null native pointer.");
 
-        var fields = new LLVMTypeRef[] {LLVMPointerType(LLVMInt8TypeInContext(context), 0), LLVMInt64TypeInContext(context)};
+        var fields = new LLVMTypeRef[] {
+            LLVMPointerType(LLVMInt8TypeInContext(context), 0),
+            LLVMInt64TypeInContext(context),
+            LLVMInt64TypeInContext(context)
+        };
 
         try (var nativeFields = new PointerPointer<LLVMTypeRef>(fields)) {
             var type = LLVMStructTypeInContext(context, nativeFields, fields.length, 0);
@@ -70,10 +75,13 @@ final class LlvmStringLowerer {
 
         var byteLength = constant.value().getBytes(StandardCharsets.UTF_8).length;
         var length = LLVMConstInt(LLVMInt64TypeInContext(context.llvmContext()), byteLength, 0);
+        var scalarCount = constant.value().codePointCount(0, constant.value().length());
+        var scalars = LLVMConstInt(LLVMInt64TypeInContext(context.llvmContext()), scalarCount, 0);
 
         if (Pointer.isNull(length)) throw new LlvmBackendException("LLVM failed to create the length of Sol IR string constant '%s'.".formatted(constant.id()));
+        if (Pointer.isNull(scalars)) throw new LlvmBackendException("LLVM failed to create the scalar count of Sol IR string constant '%s'.".formatted(constant.id()));
 
-        var fields = new LLVMValueRef[] {data, length};
+        var fields = new LLVMValueRef[] {data, length, scalars};
 
         try (var nativeFields = new PointerPointer<LLVMValueRef>(fields)) {
             var lowered = LLVMConstStructInContext(context.llvmContext(), nativeFields, fields.length, 0);
