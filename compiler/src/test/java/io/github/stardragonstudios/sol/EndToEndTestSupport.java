@@ -60,10 +60,23 @@ final class EndToEndTestSupport {
     }
 
     static NativeExecutionResult execute(Path executable, Path workingDirectory) throws IOException, InterruptedException, ExecutionException {
+        return execute(executable, workingDirectory, new byte[0]);
+    }
+
+    static NativeExecutionResult execute(Path executable, Path workingDirectory, String standardInput) throws IOException, InterruptedException, ExecutionException {
+        return execute(executable, workingDirectory, Objects.requireNonNull(standardInput, "E2E standard input must not be null.").getBytes(StandardCharsets.UTF_8));
+    }
+
+    static NativeExecutionResult execute(Path executable, Path workingDirectory, byte[] standardInput) throws IOException, InterruptedException, ExecutionException {
         Objects.requireNonNull(executable, "E2E executable must not be null.");
         Objects.requireNonNull(workingDirectory, "E2E working directory must not be null.");
+        Objects.requireNonNull(standardInput, "E2E standard input bytes must not be null.");
 
         var process = new ProcessBuilder(executable.toString()).directory(workingDirectory.toFile()).start();
+
+        try (var input = process.getOutputStream()) {
+            input.write(standardInput);
+        }
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var standardOutput = executor.submit(() -> {

@@ -1849,6 +1849,7 @@ It exports:
 ```sol
 @fn print(value: string) -> void
 @fn print_line(value: string) -> void
+@fn read_line() -> string
 ```
 
 The conventional namespace alias used by Sol 0.1 programs is `csl`:
@@ -1899,7 +1900,26 @@ preserves the UTF-8 text represented by the Sol string.
 
 `csl` is only a namespace alias. It is not a runtime console object.
 
-Console input is not part of the Sol 0.1 procedural standard library.
+### `read_line`
+
+```sol
+let line: string = csl::read_line()
+```
+
+reads one line from standard input and returns its content without its line
+terminator. Both LF and CRLF are accepted; a trailing carriage return before
+LF is removed. A valid empty line returns `""`. A final non-empty line that
+ends at EOF without a terminator is returned normally.
+
+EOF before any line is available emits:
+
+```text
+Sol runtime error: std.console.read_line reached EOF before a line was available.
+```
+
+and terminates with status `70`. Input is decoded strictly as UTF-8. Malformed
+input and allocation failures likewise emit a stable runtime diagnostic and
+terminate with status `70`.
 
 ## `std.file`
 
@@ -1913,6 +1933,7 @@ It exports:
 
 ```sol
 @fn exists(path: string) -> boolean
+@fn read_text(path: string) -> string
 @fn write_text(path: string, content: string) -> boolean
 @fn append_text(path: string, content: string) -> boolean
 ```
@@ -1956,6 +1977,22 @@ false  when it cannot be opened
 ```
 
 `exists` does not return file contents.
+
+### `read_text`
+
+```sol
+let source: string = file::read_text("main.sol")
+```
+
+returns the complete file contents. An empty file returns `""`; ASCII,
+multiline content and multibyte Unicode are preserved. File line endings are
+not rewritten.
+
+The bytes must be valid UTF-8 before a Sol `string` is constructed. A missing
+or inaccessible file, a read or close failure, malformed UTF-8, or allocation
+failure emits a deterministic runtime diagnostic and terminates with status
+`70`. This follows the bootstrap runtime-failure convention because Sol 0.1.1
+does not yet define a general `Result`, exception or nullable-string model.
 
 ### `write_text`
 
@@ -2023,17 +2060,15 @@ Absolute paths are interpreted according to the host operating system.
 
 Sol 0.1 does not define:
 
-* reading file contents into a `string`;
 * filesystem directory APIs;
 * file objects;
 * explicit file handles in source code;
 * a portable path abstraction;
 * runtime filesystem exceptions.
 
-The procedural API reports operation success through `boolean` results.
-
-Future file-content input must validate UTF-8 before constructing a string and
-may use the same process-lifetime runtime storage as bootstrap concatenation.
+The write APIs report operation success through `boolean` results. Input
+storage has process lifetime in the 0.1.1 bootstrap, matching runtime string
+concatenation.
 
 ## Sol 0.1.1 procedural scope
 

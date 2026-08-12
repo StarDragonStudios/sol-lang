@@ -116,6 +116,83 @@ final class SolEndToEndCompilationTest {
     }
 
     @Test
+    void readsUtf8FileTextAndConsoleLines() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "text-input", "main.sol", "input.txt");
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent(), "\r\nSol 🐉\nfinal\r");
+
+        assertEquals(42, result.exitCode(), result.standardOutput() + result.standardError());
+        assertEquals("", result.standardError());
+    }
+
+    @Test
+    void reportsConsoleEofBeforeALine() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "console-eof", "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(70, result.exitCode());
+        assertTrue(result.standardOutput().contains("std.console.read_line reached EOF"));
+    }
+
+    @Test
+    void rejectsMalformedUtf8FileInput() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "invalid-text-input", "main.sol", "invalid.txt");
+        Files.write(source.getParent().resolve("invalid.txt"), new byte[] {(byte) 0xC3, 0x28});
+        var compilation = EndToEndTestSupport.compile(source);
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(70, result.exitCode());
+        assertTrue(result.standardOutput().contains("text input is not valid UTF-8"));
+    }
+
+    @Test
+    void readsEmptyFilesAndGrowsConsoleInputStorage() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "empty-and-long-input", "main.sol", "empty.txt");
+        var compilation = EndToEndTestSupport.compile(source);
+        var longLine = "x".repeat(600);
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent(), longLine + "\n");
+
+        assertEquals(42, result.exitCode(), result.standardOutput() + result.standardError());
+        assertEquals("", result.standardError());
+    }
+
+    @Test
+    void reportsMissingFileInput() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "missing-text-input", "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(70, result.exitCode());
+        assertTrue(result.standardOutput().contains("std.file.read_text could not open the file"));
+    }
+
+    @Test
+    void rejectsMalformedUtf8ConsoleInput() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "console-eof", "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent(), new byte[] {(byte) 0xC3, 0x28, '\n'});
+
+        assertEquals(70, result.exitCode());
+        assertTrue(result.standardOutput().contains("text input is not valid UTF-8"));
+    }
+
+    @Test
     void compilesAndExecutesBootstrapStringOperations() throws Exception {
         EndToEndTestSupport.assumeNativeLinkerAvailable();
 

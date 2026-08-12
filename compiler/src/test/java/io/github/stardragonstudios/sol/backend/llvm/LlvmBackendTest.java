@@ -254,6 +254,32 @@ class LlvmBackendTest {
     }
 
     @Test
+    void lowersStandardTextInputFunctionsWithStrictUtf8Validation() {
+        var readPath = new IrParameter(new IrValueId(0), "path", PrimitiveIrType.STRING);
+        var readText = IrFunction.declaration(new IrFunctionId(0), "read_text", List.of(readPath), PrimitiveIrType.STRING);
+        var readLine = IrFunction.declaration(new IrFunctionId(1), "read_line", List.of(), PrimitiveIrType.STRING);
+        var program = IrProgram.library(List.of(
+            new IrModule(new IrModuleName(List.of("std", "file")), List.of(readText)),
+            new IrModule(new IrModuleName(List.of("std", "console")), List.of(readLine))
+        ));
+
+        try (var module = LlvmBackend.generate(program, "sol.text-input")) {
+            var text = normalizeNewlines(module.text());
+
+            assertTrue(text.contains("define { ptr, i64, i64 } @sol.function0.read_text"));
+            assertTrue(text.contains("define { ptr, i64, i64 } @sol.function1.read_line()"));
+            assertTrue(text.contains("declare i32 @fgetc(ptr)"));
+            assertTrue(text.contains("declare i32 @getchar()"));
+            assertTrue(text.contains("file.read.open_failed:"));
+            assertTrue(text.contains("console.read.eof_without_data:"));
+            assertTrue(text.contains("utf8.invalid:"));
+            assertTrue(text.contains("text input is not valid UTF-8"));
+
+            module.verify();
+        }
+    }
+
+    @Test
     void lowersTypedPointerLoadsStoresAndIndexingThroughOpaqueNativePointers() {
         var pointerType = new IrPointerType(PrimitiveIrType.INT);
         var pointer = new IrParameter(new IrValueId(0), "pointer", pointerType);

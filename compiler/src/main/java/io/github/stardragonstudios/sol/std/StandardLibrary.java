@@ -24,11 +24,13 @@ public final class StandardLibrary {
         """
         @fn print(value: string) -> void
         @fn print_line(value: string) -> void
+        @fn read_line() -> string
         """,
 
         FILE,
         """
         @fn exists(path: string) -> boolean
+        @fn read_text(path: string) -> string
         @fn write_text(path: string, content: string) -> boolean
         @fn append_text(path: string, content: string) -> boolean
         """,

@@ -39,6 +39,7 @@ final class LlvmConsoleLowerer {
     private static final String CONSOLE_MODULE = "std.console";
     private static final String PRINT = "print";
     private static final String PRINT_LINE = "print_line";
+    private static final String READ_LINE = "read_line";
 
     private LlvmConsoleLowerer() {}
 
@@ -55,6 +56,7 @@ final class LlvmConsoleLowerer {
             switch (function.name()) {
                 case PRINT -> lowerOutputFunction(function, false, putchar, context);
                 case PRINT_LINE -> lowerOutputFunction(function, true, putchar, context);
+                case READ_LINE -> context.textInputRuntime().lowerReadLine(function);
 
                 default -> {
                     /*
