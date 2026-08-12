@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class PointerSemanticAnalysisTest {
     @Test
-    void typesPointersNullDereferenceIndexingAndRecursivePointerLayouts() {
+    void typesPointersNullPointerFieldsAndRecursivePointerLayouts() {
         var unit = Parser.parse(Lexer.scan(
             """
             struct Node
@@ -26,13 +26,11 @@ final class PointerSemanticAnalysisTest {
                 next: pointer<Node>
             end
 
-            fn use(values: pointer<int>, node: pointer<Node>) -> int
-                @mut let current: pointer<int> = null
-                values[0] = 40
-                *values = 42
-                current = values
-                if current != null then
-                    return node[0].value + *current
+            fn use(node: pointer<Node>) -> int
+                let current: pointer<Node> = null
+                node->value = 42
+                if current == null then
+                    return node->next->value + node->value
                 end
                 return 0
             end
@@ -47,7 +45,7 @@ final class PointerSemanticAnalysisTest {
         var declaration = assertInstanceOf(VariableDeclarationStatement.class, function.body().orElseThrow().statements().getFirst());
         var nullExpression = assertInstanceOf(NullExpression.class, declaration.initializer());
 
-        assertEquals(BuiltInTypes.INT, pointer.elementType());
+        assertInstanceOf(io.github.stardragonstudios.sol.semantics.types.StructType.class, pointer.elementType());
         assertEquals(pointer, analysis.model().typeOf(nullExpression).orElseThrow());
     }
 
@@ -64,9 +62,10 @@ final class PointerSemanticAnalysisTest {
                 let impossible: pointer<void> = null
                 let untyped: int = null
                 let mismatch: pointer<int> = flags
-                number[0] = 1
+                number->value = 1
+                integers->value = 1
+                let indexed_pointer: int = integers[0]
                 integers[true] = 1
-                *number = 1
                 if integers == flags then
                     return
                 end
@@ -79,7 +78,7 @@ final class PointerSemanticAnalysisTest {
             .collect(Collectors.toSet());
 
         assertEquals(
-            Set.of("SOL-S005", "SOL-S008", "SOL-S038", "SOL-S040", "SOL-S041", "SOL-S043", "SOL-S044", "SOL-S045", "SOL-S046"),
+            Set.of("SOL-S005", "SOL-S008", "SOL-S035", "SOL-S038", "SOL-S040", "SOL-S041", "SOL-S043", "SOL-S044", "SOL-S045", "SOL-S046"),
             codes
         );
     }
@@ -95,6 +94,10 @@ final class PointerSemanticAnalysisTest {
                 @init
                 fn launch() -> int
                     @mut let values: pointer<int> = memory::allocate<int>(2)
+                    memory::store<int>(values, 40)
+                    memory::store_at<int>(values, 1, 42)
+                    let first: int = memory::load<int>(values)
+                    let second: int = memory::load_at<int>(values, 1)
                     values = memory::reallocate<int>(values, 4)
                     memory::free<int>(values)
                     return 0

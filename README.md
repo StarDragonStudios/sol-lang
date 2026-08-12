@@ -360,7 +360,8 @@ diagnostic and terminate the process with status `70`.
 
 `std.memory` provides the deliberately unsafe bootstrap allocator through
 generic `allocate<T>`, `reallocate<T>` and `free<T>` operations. Raw storage is
-accessed with `*pointer` and `pointer[index]`:
+read and written explicitly with `load<T>`, `store<T>`, `load_at<T>` and
+`store_at<T>`; `[]` is reserved for string scalar indexing:
 
 ```sol
 inject namespace std.memory as memory
@@ -373,14 +374,24 @@ fn launch() -> int
         return 1
     end
 
-    values[0] = 19
-    values[1] = 23
+    memory::store<int>(values, 19)
+    memory::store_at<int>(values, 1, 23)
 
-    let result: int = *values + values[1]
+    let result: int = memory::load<int>(values) + memory::load_at<int>(values, 1)
     memory::free<int>(values)
     return result
 end
 ```
+
+Pointers to structs use `->` for field reads, writes and chains:
+
+```sol
+node->value = 42
+let next_value: int = node->next->value
+```
+
+Sol deliberately has no source-level `*pointer`, `(*pointer).field`,
+`pointer[index]` or `&value` syntax in this bootstrap memory model.
 
 This 0.1.1 facility is manual raw memory, not the future Sol ownership model.
 Bounds, liveness, aliasing, double-free and use-after-free remain programmer

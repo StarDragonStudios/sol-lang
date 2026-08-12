@@ -5,8 +5,7 @@ import io.github.stardragonstudios.sol.ir.IrLocalStoreInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructField;
 import io.github.stardragonstudios.sol.ir.IrStructFieldStoreInstruction;
 import io.github.stardragonstudios.sol.ir.IrStructType;
-import io.github.stardragonstudios.sol.ir.IrPointerStoreInstruction;
-import io.github.stardragonstudios.sol.ir.IrPointerIndexStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerFieldStoreInstruction;
 import io.github.stardragonstudios.sol.semantics.LocalVariableSymbol;
 import io.github.stardragonstudios.sol.semantics.SemanticModel;
 import io.github.stardragonstudios.sol.syntax.AssignmentStatement;
@@ -15,9 +14,7 @@ import io.github.stardragonstudios.sol.syntax.Statement;
 import io.github.stardragonstudios.sol.syntax.VariableDeclarationStatement;
 import io.github.stardragonstudios.sol.syntax.FieldAccessExpression;
 import io.github.stardragonstudios.sol.syntax.FieldAssignmentStatement;
-import io.github.stardragonstudios.sol.syntax.PointerAssignmentStatement;
-import io.github.stardragonstudios.sol.syntax.PointerDereferenceExpression;
-import io.github.stardragonstudios.sol.syntax.PointerIndexExpression;
+import io.github.stardragonstudios.sol.syntax.PointerFieldAssignmentStatement;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +32,7 @@ final class IrStatementLowerer {
             case VariableDeclarationStatement declaration -> lowerVariableDeclaration(declaration, model, context);
             case AssignmentStatement assignment -> lowerAssignment(assignment, model, context);
             case FieldAssignmentStatement fieldAssignment -> lowerFieldAssignment(fieldAssignment, model, context);
-            case PointerAssignmentStatement pointerAssignment -> lowerPointerAssignment(pointerAssignment, model, context);
+            case PointerFieldAssignmentStatement pointerAssignment -> lowerPointerFieldAssignment(pointerAssignment, model, context);
             case CallStatement call -> IrCallLowerer.lower(call.call(), model, context);
 
             default -> throw new IrLoweringException(
@@ -44,31 +41,21 @@ final class IrStatementLowerer {
         }
     }
 
-    private static void lowerPointerAssignment(
-        PointerAssignmentStatement assignment,
+    private static void lowerPointerFieldAssignment(
+        PointerFieldAssignmentStatement assignment,
         SemanticModel model,
         IrFunctionLoweringContext context
     ) {
-        switch (assignment.target()) {
-            case PointerDereferenceExpression dereference -> {
-                var pointer = IrExpressionLowerer.lower(dereference.pointer(), model, context);
-                var value = IrExpressionLowerer.lower(assignment.value(), model, context);
+        var pointer = IrExpressionLowerer.lower(assignment.target().pointer(), model, context);
+        var semanticField = model.accessedFieldOf(assignment.target()).orElseThrow(() -> new IrLoweringException(
+            "Pointer-field assignment '%s' has no resolved semantic field.".formatted(assignment.target().fieldName())
+        ));
+        if (!(pointer.type() instanceof io.github.stardragonstudios.sol.ir.IrPointerType pointerType)
+            || !(pointerType.elementType() instanceof IrStructType structType))
+            throw new IrLoweringException("Pointer-field assignment lowered a non-pointer-to-struct target.");
 
-                context.emit(new IrPointerStoreInstruction(pointer, value));
-            }
-
-            case PointerIndexExpression index -> {
-                var pointer = IrExpressionLowerer.lower(index.pointer(), model, context);
-                var loweredIndex = IrExpressionLowerer.lower(index.index(), model, context);
-                var value = IrExpressionLowerer.lower(assignment.value(), model, context);
-
-                context.emit(new IrPointerIndexStoreInstruction(pointer, loweredIndex, value));
-            }
-
-            default -> throw new IrLoweringException(
-                "Unsupported pointer assignment target '%s'.".formatted(assignment.target().getClass().getSimpleName())
-            );
-        }
+        var value = IrExpressionLowerer.lower(assignment.value(), model, context);
+        context.emit(new IrPointerFieldStoreInstruction(pointer, structType.fields().get(semanticField.index()), value));
     }
 
     private static void lowerVariableDeclaration(VariableDeclarationStatement declaration, SemanticModel model, IrFunctionLoweringContext context) {

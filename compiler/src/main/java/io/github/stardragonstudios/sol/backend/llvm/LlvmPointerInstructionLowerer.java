@@ -5,6 +5,9 @@ import io.github.stardragonstudios.sol.ir.IrPointerIndexLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerIndexStoreInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerFieldLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerFieldStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrStructType;
 import io.github.stardragonstudios.sol.ir.IrPointerType;
 
 import org.bytedeco.javacpp.Pointer;
@@ -16,6 +19,7 @@ import java.util.Objects;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildGEP2;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildLoad2;
 import static org.bytedeco.llvm.global.LLVM.LLVMBuildStore;
+import static org.bytedeco.llvm.global.LLVM.LLVMBuildStructGEP2;
 
 final class LlvmPointerInstructionLowerer {
     private LlvmPointerInstructionLowerer() {}
@@ -29,6 +33,8 @@ final class LlvmPointerInstructionLowerer {
             case IrPointerIndexLoadInstruction load -> lowerIndexLoad(load, context);
             case IrPointerStoreInstruction store -> lowerStore(store, context);
             case IrPointerIndexStoreInstruction store -> lowerIndexStore(store, context);
+            case IrPointerFieldLoadInstruction load -> lowerFieldLoad(load, context);
+            case IrPointerFieldStoreInstruction store -> lowerFieldStore(store, context);
 
             default -> throw new LlvmBackendException(
                 "Unsupported pointer IR instruction '%s'.".formatted(instruction.getClass().getSimpleName())
@@ -72,6 +78,44 @@ final class LlvmPointerInstructionLowerer {
         var address = indexedAddress(instruction.pointer().type(), context.value(instruction.pointer()), context.value(instruction.index()), context);
 
         requireValue(LLVMBuildStore(context.builder(), context.value(instruction.value()), address), "pointer index store");
+    }
+
+    private static void lowerFieldLoad(IrPointerFieldLoadInstruction instruction, LlvmFunctionLoweringContext context) {
+        var address = fieldAddress(instruction.pointer().type(), context.value(instruction.pointer()), instruction.field().index(), context);
+        var lowered = LLVMBuildLoad2(
+            context.builder(),
+            LlvmTypeLowerer.lower(instruction.type(), context.llvmContext()),
+            address,
+            valueName(instruction.id().index())
+        );
+
+        requireValue(lowered, "pointer field load");
+        context.registerValue(instruction, lowered);
+    }
+
+    private static void lowerFieldStore(IrPointerFieldStoreInstruction instruction, LlvmFunctionLoweringContext context) {
+        var address = fieldAddress(instruction.pointer().type(), context.value(instruction.pointer()), instruction.field().index(), context);
+
+        requireValue(LLVMBuildStore(context.builder(), context.value(instruction.value()), address), "pointer field store");
+    }
+
+    private static LLVMValueRef fieldAddress(
+        io.github.stardragonstudios.sol.ir.IrType pointerType,
+        LLVMValueRef pointer,
+        int fieldIndex,
+        LlvmFunctionLoweringContext context
+    ) {
+        var structType = (IrStructType) ((IrPointerType) pointerType).elementType();
+        var address = LLVMBuildStructGEP2(
+            context.builder(),
+            LlvmTypeLowerer.lower(structType, context.llvmContext()),
+            pointer,
+            fieldIndex,
+            "pointer_field"
+        );
+
+        requireValue(address, "pointer field address");
+        return address;
     }
 
     private static LLVMValueRef indexedAddress(

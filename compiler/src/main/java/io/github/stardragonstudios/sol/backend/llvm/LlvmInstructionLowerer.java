@@ -11,6 +11,8 @@ import io.github.stardragonstudios.sol.ir.IrPointerLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerIndexLoadInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerStoreInstruction;
 import io.github.stardragonstudios.sol.ir.IrPointerIndexStoreInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerFieldLoadInstruction;
+import io.github.stardragonstudios.sol.ir.IrPointerFieldStoreInstruction;
 import io.github.stardragonstudios.sol.ir.IrStringIndexInstruction;
 
 import java.util.Objects;
@@ -33,6 +35,8 @@ final class LlvmInstructionLowerer {
             case IrPointerIndexLoadInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
             case IrPointerStoreInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
             case IrPointerIndexStoreInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
+            case IrPointerFieldLoadInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
+            case IrPointerFieldStoreInstruction pointer -> LlvmPointerInstructionLowerer.lower(pointer, context);
             case IrStringIndexInstruction string -> LlvmStringInstructionLowerer.lower(string, context);
 
             default -> throw new LlvmBackendException(

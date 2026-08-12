@@ -18,19 +18,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class PointerIrLoweringTest {
     @Test
-    void lowersConcreteMemorySpecializationsAndPointerInstructions() {
+    void lowersConcreteMemorySpecializationsAndPointerFieldInstructions() {
         var application = module(
             "application",
             """
             inject namespace std.memory as memory
 
+            struct Pair
+                value: int
+            end
+
             @init
             fn launch() -> int
-                @mut let values: pointer<int> = memory::allocate<int>(2)
-                values[0] = 40
-                *values = 42
-                let result: int = values[0]
-                memory::free<int>(values)
+                let values: pointer<Pair> = memory::allocate<Pair>(2)
+                memory::store_at<Pair>(values, 1, Pair { value: 40 })
+                values->value = 42
+                let result: int = values->value
+                memory::free<Pair>(values)
                 return result
             end
             """
@@ -49,11 +53,13 @@ final class PointerIrLoweringTest {
         var instructions = launch.blocks().stream().flatMap(block -> block.instructions().stream()).toList();
         var memoryModule = program.modules().get(1);
 
-        assertEquals(List.of("allocate$int", "free$int"), memoryModule.functions().stream().map(IrFunction::name).toList());
-        assertInstanceOf(IrPointerType.class, memoryModule.function("allocate$int").orElseThrow().returnType());
-        assertTrue(instructions.stream().anyMatch(IrPointerIndexStoreInstruction.class::isInstance));
-        assertTrue(instructions.stream().anyMatch(IrPointerStoreInstruction.class::isInstance));
-        assertTrue(instructions.stream().anyMatch(IrPointerIndexLoadInstruction.class::isInstance));
+        assertEquals(
+            List.of("allocate", "store_at", "free"),
+            memoryModule.functions().stream().map(function -> function.name().substring(0, function.name().indexOf('$'))).toList()
+        );
+        assertInstanceOf(IrPointerType.class, memoryModule.functions().getFirst().returnType());
+        assertTrue(instructions.stream().anyMatch(IrPointerFieldStoreInstruction.class::isInstance));
+        assertTrue(instructions.stream().anyMatch(IrPointerFieldLoadInstruction.class::isInstance));
     }
 
     @Test
@@ -72,7 +78,7 @@ final class PointerIrLoweringTest {
                 if node == null then
                     return 42
                 end
-                return (*node).value
+                return node->value
             end
             """
         ))));

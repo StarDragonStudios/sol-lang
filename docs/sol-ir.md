@@ -488,7 +488,7 @@ The current lowering subset supports:
 * mutable `@mut let` declarations;
 * assignment statements targeting mutable locals;
 * direct and nested struct field mutation;
-* pointer dereference and index mutation;
+* pointer-to-struct field mutation;
 * bare returns;
 * value returns;
 * conditional statements;
@@ -534,7 +534,7 @@ The initial expression subset supports:
 * equality and inequality;
 * logical conjunction and disjunction;
 * struct construction and field access;
-* typed pointer dereference and indexing.
+* typed pointer-to-struct field access;
 * immutable string indexing, concatenation and equality.
 
 Primitive literal lexemes are decoded during lowering after lexical and
@@ -554,10 +554,15 @@ A local-variable reference resolves through its canonical
 An assignment resolves through the canonical assignment-target symbol, lowers
 the assigned expression, and emits an `IrLocalStoreInstruction`.
 
-A pointer assignment lowers its pointer and optional index before its value,
-then emits a typed pointer store. Pointer mutation is independent of local
-binding mutability because it changes addressed storage rather than rebinding
-the pointer local.
+Pointer-field assignment lowers the pointer before its value, then emits a
+typed `IrPointerFieldStoreInstruction`. Pointer-field mutation is independent
+of local binding mutability because it changes addressed storage rather than
+rebinding the pointer local. Reads emit `IrPointerFieldLoadInstruction`.
+
+Calls to `std.memory.load<T>`, `store<T>`, `load_at<T>` and `store_at<T>` retain
+ordinary typed call instructions. Their concrete bodyless specializations
+receive compiler-supplied LLVM bodies, keeping raw address operations out of
+Sol source syntax.
 
 String indexing lowers independently to `IrStringIndexInstruction`; it never
 becomes a pointer load and cannot be used as an assignment target. Calls to

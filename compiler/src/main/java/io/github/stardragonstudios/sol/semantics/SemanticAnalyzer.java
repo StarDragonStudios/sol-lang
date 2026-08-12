@@ -55,7 +55,7 @@ public final class SemanticAnalyzer {
     private static final String INVALID_TYPE_ARGUMENT_CODE = "SOL-S041";
     private static final String RECURSIVE_GENERIC_INSTANTIATION_CODE = "SOL-S042";
     private static final String UNTYPED_NULL_CODE = "SOL-S043";
-    private static final String DEREFERENCE_NON_POINTER_CODE = "SOL-S044";
+    private static final String POINTER_FIELD_ON_NON_POINTER_CODE = "SOL-S044";
     private static final String INDEX_NON_INDEXABLE_CODE = "SOL-S045";
     private static final String INVALID_INDEX_CODE = "SOL-S046";
     private static final String IMMUTABLE_STRING_INDEX_CODE = "SOL-S047";
@@ -411,6 +411,7 @@ public final class SemanticAnalyzer {
         private final IdentityHashMap<StructConstructionExpression, StructSymbol> constructedStructs = new IdentityHashMap<>();
         private final IdentityHashMap<StructFieldInitializer, StructFieldSymbol> initializedStructFields = new IdentityHashMap<>();
         private final IdentityHashMap<FieldAccessExpression, StructFieldSymbol> accessedStructFields = new IdentityHashMap<>();
+        private final IdentityHashMap<PointerFieldAccessExpression, StructFieldSymbol> accessedPointerStructFields = new IdentityHashMap<>();
         private final IdentityHashMap<FunctionDeclaration, Boolean> duplicateFunctions = new IdentityHashMap<>();
         private final IdentityHashMap<StructDeclaration, Boolean> duplicateStructs = new IdentityHashMap<>();
         private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes = new IdentityHashMap<>();
@@ -461,6 +462,7 @@ public final class SemanticAnalyzer {
                 constructedStructs,
                 initializedStructFields,
                 accessedStructFields,
+                accessedPointerStructFields,
                 calledFunctions,
                 calledFunctionTypeArguments,
                 qualifiedNameSymbols,
@@ -728,8 +730,14 @@ public final class SemanticAnalyzer {
                 return;
             }
 
-            if (statement instanceof PointerAssignmentStatement pointerAssignment) {
-                bindPointerAssignment(pointerAssignment, scope);
+            if (statement instanceof PointerFieldAssignmentStatement pointerFieldAssignment) {
+                bindPointerFieldAssignment(pointerFieldAssignment, scope);
+
+                return;
+            }
+
+            if (statement instanceof IndexAssignmentStatement indexAssignment) {
+                bindIndexAssignment(indexAssignment, scope);
 
                 return;
             }
@@ -801,23 +809,9 @@ public final class SemanticAnalyzer {
             validateFieldAssignment(assignment, rootSymbol, targetType, valueType);
         }
 
-        private void bindPointerAssignment(PointerAssignmentStatement assignment, Scope scope) {
+        private void bindPointerFieldAssignment(PointerFieldAssignmentStatement assignment, Scope scope) {
             var targetType = bindExpression(assignment.target(), scope);
             var valueType = bindExpression(assignment.value(), scope, targetType);
-
-            if (
-                assignment.target() instanceof PointerIndexExpression index
-                && expressionTypes.get(index.pointer()) == BuiltInTypes.STRING
-            ) {
-                diagnostics.add(new Diagnostic(
-                    IMMUTABLE_STRING_INDEX_CODE,
-                    DiagnosticSeverity.ERROR,
-                    "String values are immutable and cannot be assigned through indexing.",
-                    assignment.target().span()
-                ));
-
-                return;
-            }
 
             if (
                 targetType == BuiltInTypes.ERROR
@@ -828,9 +822,23 @@ public final class SemanticAnalyzer {
             diagnostics.add(new Diagnostic(
                 INCOMPATIBLE_ASSIGNMENT_CODE,
                 DiagnosticSeverity.ERROR,
-                "Cannot store value of type '%s' through pointer target of type '%s'."
+                "Cannot assign value of type '%s' to pointer field of type '%s'."
                     .formatted(valueType.name(), targetType.name()),
                 assignment.value().span()
+            ));
+        }
+
+        private void bindIndexAssignment(IndexAssignmentStatement assignment, Scope scope) {
+            bindExpression(assignment.target(), scope);
+            bindExpression(assignment.value(), scope);
+
+            if (expressionTypes.get(assignment.target().target()) != BuiltInTypes.STRING) return;
+
+            diagnostics.add(new Diagnostic(
+                IMMUTABLE_STRING_INDEX_CODE,
+                DiagnosticSeverity.ERROR,
+                "String values are immutable and cannot be assigned through indexing.",
+                assignment.target().span()
             ));
         }
 
@@ -930,9 +938,9 @@ public final class SemanticAnalyzer {
 
                 case FieldAccessExpression fieldAccess -> type = bindFieldAccess(fieldAccess, scope);
 
-                case PointerDereferenceExpression dereference -> type = bindPointerDereference(dereference, scope);
+                case PointerFieldAccessExpression fieldAccess -> type = bindPointerFieldAccess(fieldAccess, scope);
 
-                case PointerIndexExpression index -> type = bindPointerIndex(index, scope);
+                case IndexExpression index -> type = bindIndex(index, scope);
 
                 case null, default -> {
                     assert expression != null;
@@ -959,24 +967,8 @@ public final class SemanticAnalyzer {
             return BuiltInTypes.ERROR;
         }
 
-        private TypeSymbol bindPointerDereference(PointerDereferenceExpression expression, Scope scope) {
-            var pointerType = bindExpression(expression.pointer(), scope);
-
-            if (pointerType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
-            if (pointerType instanceof PointerType pointer) return pointer.elementType();
-
-            diagnostics.add(new Diagnostic(
-                DEREFERENCE_NON_POINTER_CODE,
-                DiagnosticSeverity.ERROR,
-                "Cannot dereference value of non-pointer type '%s'.".formatted(pointerType.name()),
-                expression.span()
-            ));
-
-            return BuiltInTypes.ERROR;
-        }
-
-        private TypeSymbol bindPointerIndex(PointerIndexExpression expression, Scope scope) {
-            var pointerType = bindExpression(expression.pointer(), scope);
+        private TypeSymbol bindIndex(IndexExpression expression, Scope scope) {
+            var targetType = bindExpression(expression.target(), scope);
             var indexType = bindExpression(expression.index(), scope);
 
             if (indexType != BuiltInTypes.INT && indexType != BuiltInTypes.ERROR) diagnostics.add(new Diagnostic(
@@ -986,23 +978,19 @@ public final class SemanticAnalyzer {
                 expression.index().span()
             ));
 
-            if (pointerType == BuiltInTypes.ERROR || indexType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+            if (targetType == BuiltInTypes.ERROR || indexType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
 
-            if (pointerType == BuiltInTypes.STRING)
+            if (targetType == BuiltInTypes.STRING)
                 return indexType == BuiltInTypes.INT ? BuiltInTypes.CHAR : BuiltInTypes.ERROR;
 
-            if (!(pointerType instanceof PointerType pointer)) {
-                diagnostics.add(new Diagnostic(
-                    INDEX_NON_INDEXABLE_CODE,
-                    DiagnosticSeverity.ERROR,
-                    "Cannot index value of type '%s'; only strings and pointers are indexable.".formatted(pointerType.name()),
-                    expression.pointer().span()
-                ));
+            diagnostics.add(new Diagnostic(
+                INDEX_NON_INDEXABLE_CODE,
+                DiagnosticSeverity.ERROR,
+                "Cannot index value of type '%s'; only strings are indexable.".formatted(targetType.name()),
+                expression.target().span()
+            ));
 
-                return BuiltInTypes.ERROR;
-            }
-
-            return indexType == BuiltInTypes.INT ? pointer.elementType() : BuiltInTypes.ERROR;
+            return BuiltInTypes.ERROR;
         }
 
         private boolean isEquality(BinaryExpression expression) {
@@ -1130,6 +1118,54 @@ public final class SemanticAnalyzer {
             var resolvedField = field.orElseThrow();
 
             accessedStructFields.put(expression, resolvedField);
+
+            return fieldTypeOf(structType, resolvedField);
+        }
+
+        private TypeSymbol bindPointerFieldAccess(PointerFieldAccessExpression expression, Scope scope) {
+            var targetType = bindExpression(expression.pointer(), scope);
+
+            if (targetType == BuiltInTypes.ERROR) return BuiltInTypes.ERROR;
+
+            if (!(targetType instanceof PointerType pointer)) {
+                diagnostics.add(new Diagnostic(
+                    POINTER_FIELD_ON_NON_POINTER_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot use '->' on value of non-pointer type '%s'.".formatted(targetType.name()),
+                    expression.pointer().span()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            if (!(pointer.elementType() instanceof StructType structType)) {
+                diagnostics.add(new Diagnostic(
+                    FIELD_ACCESS_ON_NON_STRUCT_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Cannot access field '%s' through pointer to non-struct type '%s'."
+                        .formatted(expression.fieldName(), pointer.elementType().name()),
+                    expression.fieldSpan()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var field = structType.symbol().field(expression.fieldName());
+
+            if (field.isEmpty()) {
+                diagnostics.add(new Diagnostic(
+                    UNKNOWN_FIELD_CODE,
+                    DiagnosticSeverity.ERROR,
+                    "Struct '%s' has no field named '%s'.".formatted(structType.name(), expression.fieldName()),
+                    expression.fieldSpan()
+                ));
+
+                return BuiltInTypes.ERROR;
+            }
+
+            var resolvedField = field.orElseThrow();
+
+            accessedPointerStructFields.put(expression, resolvedField);
 
             return fieldTypeOf(structType, resolvedField);
         }

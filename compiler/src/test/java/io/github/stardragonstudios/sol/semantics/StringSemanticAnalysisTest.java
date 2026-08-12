@@ -32,7 +32,7 @@ final class StringSemanticAnalysisTest {
 
         var function = assertInstanceOf(FunctionDeclaration.class, unit.declarations().getFirst());
         var statements = function.body().orElseThrow().statements();
-        var scalar = assertInstanceOf(PointerIndexExpression.class,
+        var scalar = assertInstanceOf(IndexExpression.class,
             assertInstanceOf(VariableDeclarationStatement.class, statements.get(0)).initializer());
         var concatenation = assertInstanceOf(BinaryExpression.class,
             assertInstanceOf(VariableDeclarationStatement.class, statements.get(1)).initializer());

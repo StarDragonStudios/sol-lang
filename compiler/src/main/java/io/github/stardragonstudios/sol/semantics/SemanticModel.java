@@ -21,6 +21,7 @@ public final class SemanticModel {
     private final IdentityHashMap<StructConstructionExpression, StructSymbol> constructedStructs;
     private final IdentityHashMap<StructFieldInitializer, StructFieldSymbol> initializedStructFields;
     private final IdentityHashMap<FieldAccessExpression, StructFieldSymbol> accessedStructFields;
+    private final IdentityHashMap<PointerFieldAccessExpression, StructFieldSymbol> accessedPointerStructFields;
     private final IdentityHashMap<TypeReference, TypeSymbol> resolvedTypes;
     private final IdentityHashMap<Expression, TypeSymbol> expressionTypes;
     private final IdentityHashMap<CallExpression, FunctionSymbol> calledFunctions;
@@ -46,6 +47,7 @@ public final class SemanticModel {
         Map<StructConstructionExpression, StructSymbol> constructedStructs,
         Map<StructFieldInitializer, StructFieldSymbol> initializedStructFields,
         Map<FieldAccessExpression, StructFieldSymbol> accessedStructFields,
+        Map<PointerFieldAccessExpression, StructFieldSymbol> accessedPointerStructFields,
         Map<CallExpression, FunctionSymbol> calledFunctions,
         Map<CallExpression, List<TypeSymbol>> calledFunctionTypeArguments,
         Map<QualifiedNameExpression, FunctionSymbol> qualifiedNameSymbols,
@@ -70,6 +72,7 @@ public final class SemanticModel {
         this.constructedStructs = copyIdentityMap(constructedStructs, "Constructed struct associations");
         this.initializedStructFields = copyIdentityMap(initializedStructFields, "Initialized struct field associations");
         this.accessedStructFields = copyIdentityMap(accessedStructFields, "Accessed struct field associations");
+        this.accessedPointerStructFields = copyIdentityMap(accessedPointerStructFields, "Accessed pointer struct field associations");
         this.resolvedTypes = copyIdentityMap(resolvedTypes, "Resolved type associations");
         this.expressionTypes = copyIdentityMap(expressionTypes, "Expression type associations");
         this.calledFunctions = copyIdentityMap(calledFunctions, "Called function associations");
@@ -201,6 +204,12 @@ public final class SemanticModel {
         Objects.requireNonNull(expression, "Field access expression must not be null.");
 
         return Optional.ofNullable(accessedStructFields.get(expression));
+    }
+
+    public Optional<StructFieldSymbol> accessedFieldOf(PointerFieldAccessExpression expression) {
+        Objects.requireNonNull(expression, "Pointer-field access expression must not be null.");
+
+        return Optional.ofNullable(accessedPointerStructFields.get(expression));
     }
 
     public Optional<TypeSymbol> typeOf(TypeReference reference) {

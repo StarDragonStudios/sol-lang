@@ -30,7 +30,11 @@ public final class SyntaxExpressions {
                 collect(assignment.target(), expressions);
                 collect(assignment.value(), expressions);
             }
-            case PointerAssignmentStatement assignment -> {
+            case PointerFieldAssignmentStatement assignment -> {
+                collect(assignment.target(), expressions);
+                collect(assignment.value(), expressions);
+            }
+            case IndexAssignmentStatement assignment -> {
                 collect(assignment.target(), expressions);
                 collect(assignment.value(), expressions);
             }
@@ -62,9 +66,9 @@ public final class SyntaxExpressions {
             case UnaryExpression unary -> collect(unary.operand(), expressions);
             case ParenthesizedExpression parenthesized -> collect(parenthesized.expression(), expressions);
             case FieldAccessExpression access -> collect(access.target(), expressions);
-            case PointerDereferenceExpression dereference -> collect(dereference.pointer(), expressions);
-            case PointerIndexExpression index -> {
-                collect(index.pointer(), expressions);
+            case PointerFieldAccessExpression access -> collect(access.pointer(), expressions);
+            case IndexExpression index -> {
+                collect(index.target(), expressions);
                 collect(index.index(), expressions);
             }
             case StructConstructionExpression construction -> {
