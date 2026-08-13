@@ -8,9 +8,21 @@ fn launch() -> int
     let line: string = console::read_line()
     let unterminated: string = console::read_line()
 
-    if contents == "First line\nSegunda ñ\n🐉\n" && empty == "" && line == "Sol 🐉" && unterminated == "final\r" then
-        return 42
+    if contents != "First line\nSegunda ñ\n🐉\n" then
+        return 1
     end
 
-    return 1
+    if empty != "" then
+        return 2
+    end
+
+    if line != "Sol 🐉" then
+        return 3
+    end
+
+    if unterminated != "final\r" then
+        return 4
+    end
+
+    return 42
 end
