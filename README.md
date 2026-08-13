@@ -46,7 +46,7 @@ command-line interface.
 
 ## Installation
 
-Sol 0.1.0 is distributed as a portable, platform-specific archive. The
+Sol 0.1.1 is distributed as a portable, platform-specific archive. The
 compiler itself runs on the JVM, while executables produced from Sol source are
 native programs and do not require Java at runtime.
 
@@ -60,13 +60,13 @@ To use the Sol compiler, the host system currently requires:
 The linker can also be selected explicitly with the `SOL_LINKER` environment
 variable.
 
-Download the Sol 0.1.0 archive matching your operating system and architecture
+Download the Sol 0.1.1 archive matching your operating system and architecture
 from the GitHub release and extract it to a directory of your choice.
 
 A distribution has the following layout:
 
 ```text
-sol-0.1.0-<platform>/
+sol-0.1.1-<platform>/
 ├── bin/
 │   ├── sol
 │   ├── solc
@@ -84,7 +84,7 @@ Add the extracted `bin` directory to `PATH`.
 For example:
 
 ```bash
-export PATH="/path/to/sol-0.1.0-<platform>/bin:$PATH"
+export PATH="/path/to/sol-0.1.1-<platform>/bin:$PATH"
 ```
 
 Verify the installation with:
@@ -97,7 +97,7 @@ solc --version
 Both commands should report:
 
 ```text
-Sol 0.1.0
+Sol 0.1.1
 ```
 
 ### Windows
@@ -113,7 +113,7 @@ solc --version
 Both commands should report:
 
 ```text
-Sol 0.1.0
+Sol 0.1.1
 ```
 
 ### Compile a program
