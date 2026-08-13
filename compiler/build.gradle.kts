@@ -159,4 +159,9 @@ val distributionSmokeTest = tasks.register<Test>("distributionSmokeTest") {
     filter {
         includeTestsMatching("io.github.stardragonstudios.sol.SolDistributionSmokeTest")
     }
+
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
