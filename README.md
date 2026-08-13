@@ -405,6 +405,33 @@ Bounds, liveness, aliasing, double-free and use-after-free remain programmer
 responsibilities; `ref<T>`, `borrow<T>`, lifetimes and borrow checking are not
 part of this release.
 
+`std.collections.vector` builds a generic growable contiguous collection on
+that raw-memory model. `Vector<T>` is distinct from the node-linked `List<T>`
+reserved for a later collections module:
+
+```sol
+inject std.collections.vector
+
+let values: pointer<Vector<int>> = create_vector<int>()
+vector_push<int>(values, 19)
+vector_push<int>(values, 23)
+
+let result: int = vector_get<int>(values, 0) + vector_pop<int>(values)
+destroy_vector<int>(values)
+```
+
+The module provides `create_vector`, `destroy_vector`, `vector_length`,
+`vector_capacity`, `vector_get`, `vector_set`, `vector_reserve`, `vector_push`,
+`vector_pop` and `vector_clear`. Capacity starts at zero, the first automatic
+growth reserves eight elements, and later automatic growth doubles capacity.
+Invalid indices, empty pops, invalid or overflowing capacities, and allocation
+failures emit deterministic diagnostics and terminate with status `70`.
+
+Elements have value-copy semantics. Destroying a vector frees its contiguous
+buffer and header, but does not recursively release resources referenced by its
+elements; those remain the caller's responsibility under the manual-memory
+model. `clear` sets length to zero while retaining capacity and storage.
+
 Injected modules are discovered recursively.
 
 Cyclic function-level module dependencies are supported. A module already

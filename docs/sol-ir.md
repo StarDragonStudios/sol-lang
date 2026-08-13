@@ -564,6 +564,12 @@ ordinary typed call instructions. Their concrete bodyless specializations
 receive compiler-supplied LLVM bodies, keeping raw address operations out of
 Sol source syntax.
 
+Generic `std.collections.vector` functions are monomorphized through the same
+plan as user-defined generics. Vector storage, growth and element operations
+lower from their Sol implementations; the IR has no vector-specific types or
+instructions. Only bodyless runtime-failure helpers are completed by the LLVM
+standard-library boundary.
+
 String indexing lowers independently to `IrStringIndexInstruction`; it never
 becomes a pointer load and cannot be used as an assignment target. Calls to
 `std.string` retain ordinary typed call instructions, so the IR surface does
