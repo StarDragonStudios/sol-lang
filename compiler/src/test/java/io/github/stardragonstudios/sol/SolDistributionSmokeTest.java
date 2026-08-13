@@ -24,8 +24,8 @@ final class SolDistributionSmokeTest {
         var sol = launcher(distribution, "sol");
         var solc = launcher(distribution, "solc");
 
-        assertProcess(run(temporaryDirectory, sol, "--version"), 0, "Sol " + expectedVersion);
-        assertProcess(run(temporaryDirectory, solc, "--version"), 0, "Sol " + expectedVersion);
+        assertProcess("sol --version", run(temporaryDirectory, sol, "--version"), 0, "Sol " + expectedVersion);
+        assertProcess("solc --version", run(temporaryDirectory, solc, "--version"), 0, "Sol " + expectedVersion);
 
         var source = temporaryDirectory.resolve("foundations.sol");
         var input = "Sol 🐉\n";
@@ -85,12 +85,12 @@ final class SolDistributionSmokeTest {
 
         var output = temporaryDirectory.resolve("foundations");
 
-        assertProcess(run(temporaryDirectory, solc, source.toString(), "-o", output.toString()), 0, "");
+        assertProcess("solc compile", run(temporaryDirectory, solc, source.toString(), "-o", output.toString()), 0, "");
 
         var executable = Files.exists(output) ? output : Path.of(output + ".exe");
 
-        assertProcess(run(temporaryDirectory, input, executable), 42, "Sol 0.1.1 foundations smoke test");
-        assertProcess(run(temporaryDirectory, input, sol, "run", source.toString()), 42, "Sol 0.1.1 foundations smoke test");
+        assertProcess("native executable", run(temporaryDirectory, input, executable), 42, "Sol 0.1.1 foundations smoke test");
+        assertProcess("sol run", run(temporaryDirectory, input, sol, "run", source.toString()), 42, "Sol 0.1.1 foundations smoke test");
     }
 
     private static Path launcher(Path distribution, String name) {
@@ -127,10 +127,12 @@ final class SolDistributionSmokeTest {
         return new ProcessResult(exitCode, output);
     }
 
-    private static void assertProcess(ProcessResult result, int expectedExitCode, String expectedOutput) {
-        assertEquals(expectedExitCode, result.exitCode(), result.output());
+    private static void assertProcess(String operation, ProcessResult result, int expectedExitCode, String expectedOutput) {
+        var diagnostic = "%s failed with exit code %d.%n%s".formatted(operation, result.exitCode(), result.output());
 
-        if (!expectedOutput.isEmpty()) assertTrue(result.output().contains(expectedOutput), result.output());
+        assertEquals(expectedExitCode, result.exitCode(), diagnostic);
+
+        if (!expectedOutput.isEmpty()) assertTrue(result.output().contains(expectedOutput), diagnostic);
     }
 
     private static boolean isWindows() {
