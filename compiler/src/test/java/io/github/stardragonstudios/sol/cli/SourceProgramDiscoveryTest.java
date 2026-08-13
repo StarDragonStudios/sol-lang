@@ -373,6 +373,34 @@ class SourceProgramDiscoveryTest {
     }
 
     @Test
+    void discoversBundledVectorAndItsMemoryDependency() throws IOException {
+        write(
+            "main.sol",
+            """
+            inject std.collections.vector
+
+            @init
+            fn launch() -> int
+                let values: pointer<Vector<int>> = create_vector<int>()
+                destroy_vector<int>(values)
+                return 0
+            end
+            """
+        );
+
+        var program = SourceProgramDiscovery.discover(temporaryDirectory.resolve("main.sol"));
+        var vectorName = new ModuleName(List.of("std", "collections", "vector"));
+        var memoryName = new ModuleName(List.of("std", "memory"));
+        var vector = program.modules().stream().filter(module -> module.name().equals(vectorName)).findFirst().orElseThrow();
+
+        assertTrue(program.modules().stream().anyMatch(module -> module.name().equals(memoryName)));
+        assertTrue(program.sourceFileOf(vectorName).endsWith(Path.of(".sol-stdlib", "std", "collections", "vector.sol")));
+        assertTrue(vector.unit().declarations().stream().anyMatch(declaration ->
+            declaration instanceof io.github.stardragonstudios.sol.syntax.StructDeclaration struct && struct.name().equals("Vector")
+        ));
+    }
+
+    @Test
     void rejectsSourceFilesThatAreNotValidUtf8() throws IOException {
         var source = temporaryDirectory.resolve("main.sol");
 

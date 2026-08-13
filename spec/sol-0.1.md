@@ -1836,6 +1836,72 @@ bits. Allocation byte counts are checked before calling the host allocator,
 and the host allocator supplies alignment sufficient for every currently
 representable Sol value type.
 
+## `std.collections.vector`
+
+The bootstrap contiguous collection module is:
+
+```text
+std.collections.vector
+```
+
+It exports the generic value type:
+
+```sol
+struct Vector<T>
+    data: pointer<T>
+    length: int
+    capacity: int
+end
+```
+
+and these operations:
+
+```sol
+fn create_vector<T>() -> pointer<Vector<T>>
+fn destroy_vector<T>(vector: pointer<Vector<T>>) -> void
+fn vector_length<T>(vector: pointer<Vector<T>>) -> int
+fn vector_capacity<T>(vector: pointer<Vector<T>>) -> int
+fn vector_get<T>(vector: pointer<Vector<T>>, index: int) -> T
+fn vector_set<T>(vector: pointer<Vector<T>>, index: int, value: T) -> void
+fn vector_reserve<T>(vector: pointer<Vector<T>>, requested: int) -> void
+fn vector_push<T>(vector: pointer<Vector<T>>, value: T) -> void
+fn vector_pop<T>(vector: pointer<Vector<T>>) -> T
+fn vector_clear<T>(vector: pointer<Vector<T>>) -> void
+```
+
+`Vector<T>` is a growable contiguous buffer, not a node-linked list. The name
+`List<T>` is reserved for a future linked collection. Direct injection is the
+conventional use because it exposes both the type and its procedural functions:
+
+```sol
+inject std.collections.vector
+```
+
+The invariant is always:
+
+```text
+0 <= length <= capacity
+```
+
+An empty vector has null `data`, zero `length` and zero `capacity`. The first
+automatic growth reserves eight elements; subsequent automatic growth doubles
+capacity after checking signed 64-bit overflow. `reserve` never shrinks and is
+a no-op when the requested capacity is already available. Reallocation
+preserves the live element prefix.
+
+`get` and `set` require `0 <= index < length`. `pop` removes and returns the
+last element. `clear` resets length to zero without changing capacity or
+freeing storage. Element operations copy values; clearing or destroying a
+vector does not recursively release allocations referenced by its elements.
+
+`destroy_vector(null)` is a no-op. Destroying a non-null vector frees its data
+buffer and header. Every alias to either allocation is dangling afterward.
+Using a destroyed vector, destroying it twice, or passing a header not created
+by `create_vector` has undefined behavior.
+
+Invalid indices, empty pops, negative or overflowing capacities, and allocation
+failures emit stable runtime diagnostics and terminate with status `70`.
+
 ## `std.console`
 
 The console module is:

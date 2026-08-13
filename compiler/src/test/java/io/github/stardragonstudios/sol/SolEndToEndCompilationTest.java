@@ -116,6 +116,56 @@ final class SolEndToEndCompilationTest {
     }
 
     @Test
+    void compilesAndExecutesGenericVectorFixture() throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "generic-vector", "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(42, result.exitCode(), result.standardOutput() + result.standardError());
+        assertEquals("", result.standardOutput());
+        assertEquals("", result.standardError());
+    }
+
+    @Test
+    void reportsGenericVectorBoundsFailure() throws Exception {
+        assertVectorFailure("vector-bounds", "vector index out of bounds");
+    }
+
+    @Test
+    void reportsGenericVectorEmptyPopFailure() throws Exception {
+        assertVectorFailure("vector-empty-pop", "cannot pop an empty vector");
+    }
+
+    @Test
+    void reportsGenericVectorCapacityFailure() throws Exception {
+        assertVectorFailure("vector-capacity", "invalid or overflowing vector capacity");
+    }
+
+    @Test
+    void reportsGenericVectorGrowthOverflow() throws Exception {
+        assertVectorFailure("vector-overflow", "invalid or overflowing vector capacity");
+    }
+
+    private void assertVectorFailure(String fixture, String message) throws Exception {
+        EndToEndTestSupport.assumeNativeLinkerAvailable();
+
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, fixture, "main.sol");
+        var compilation = EndToEndTestSupport.compile(source);
+
+        assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
+
+        var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
+
+        assertEquals(70, result.exitCode());
+        assertTrue(result.standardOutput().contains(message), result.standardOutput());
+    }
+
+    @Test
     void readsUtf8FileTextAndConsoleLines() throws Exception {
         EndToEndTestSupport.assumeNativeLinkerAvailable();
 

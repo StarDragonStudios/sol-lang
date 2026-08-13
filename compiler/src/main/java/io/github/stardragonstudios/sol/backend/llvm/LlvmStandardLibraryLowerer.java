@@ -9,6 +9,7 @@ final class LlvmStandardLibraryLowerer {
     private static final String FILE_MODULE = "std.file";
     private static final String MEMORY_MODULE = "std.memory";
     private static final String STRING_MODULE = "std.string";
+    private static final String VECTOR_MODULE = "std.collections.vector";
 
     private LlvmStandardLibraryLowerer() {}
 
@@ -22,6 +23,7 @@ final class LlvmStandardLibraryLowerer {
                 case FILE_MODULE -> LlvmFileLowerer.lower(module, context);
                 case MEMORY_MODULE -> LlvmMemoryLowerer.lower(module, context);
                 case STRING_MODULE -> LlvmStringStandardLibraryLowerer.lower(module, context);
+                case VECTOR_MODULE -> LlvmVectorLowerer.lower(module, context);
 
                 default -> {
                     /*

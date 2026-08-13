@@ -378,6 +378,17 @@ typed `getelementptr`. Source-level `pointer->field` uses a struct GEP followed
 by a typed load or store; chained arrows repeat that operation using each
 field's pointer type.
 
+## Standard vector lowering
+
+`std.collections.vector` is implemented in Sol using monomorphized generic
+functions, `Vector<T>` structs and the public `std.memory` operations. The
+backend does not replace vector operations with collection intrinsics.
+
+Only its four bodyless failure boundaries receive compiler-supplied LLVM
+bodies. They print stable diagnostics and call `exit(70)` for allocation,
+bounds, capacity/overflow and empty-pop failures. Concrete vector operations
+otherwise retain ordinary Sol IR and LLVM call, struct and pointer operations.
+
 ## Native ownership
 
 `LlvmModule` owns:
