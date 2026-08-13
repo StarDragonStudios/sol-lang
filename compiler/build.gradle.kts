@@ -8,7 +8,7 @@ plugins {
     application
 }
 
-version = "0.1.0"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
@@ -40,12 +40,16 @@ val nativePlatform = providers.gradleProperty("solNativePlatform").orElse(detect
 
 tasks.named<Zip>("distZip") {
     archiveClassifier.set(nativePlatform)
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
 }
 
 tasks.named<Tar>("distTar") {
     archiveClassifier.set(nativePlatform)
     compression = Compression.GZIP
     archiveExtension.set("tar.gz")
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
 }
 
 dependencies {
@@ -141,8 +145,11 @@ val distributionSmokeTest = tasks.register<Test>("distributionSmokeTest") {
     group = "verification"
     description = "Smoke-tests the installed Sol distribution."
 
-    dependsOn("installDist")
+    dependsOn("installDist", "testClasses")
     useJUnitPlatform()
+
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
 
     jvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 
