@@ -10,8 +10,8 @@ OUTPUT="$BUILD_DIR/solc"
 
 VERSION=$("$SEED_SOLC" --version)
 
-if [ "$VERSION" != "Sol 0.1.0" ]; then
-    echo "bootstrap error: expected Sol 0.1.0 seed compiler, got: $VERSION" >&2
+if [ "$VERSION" != "Sol 0.1.1" ]; then
+    echo "bootstrap error: expected Sol 0.1.1 seed compiler, got: $VERSION" >&2
     exit 1
 fi
 

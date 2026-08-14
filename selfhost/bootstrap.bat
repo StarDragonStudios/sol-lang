@@ -16,8 +16,8 @@ set "OUTPUT=%BUILD_DIR%\solc.exe"
 set "VERSION="
 for /f "delims=" %%V in ('call "%SEED_SOLC%" --version') do set "VERSION=%%V"
 
-if not "%VERSION%"=="Sol 0.1.0" (
-    echo bootstrap error: expected Sol 0.1.0 seed compiler, got: %VERSION% 1>&2
+if not "%VERSION%"=="Sol 0.1.1" (
+    echo bootstrap error: expected Sol 0.1.1 seed compiler, got: %VERSION% 1>&2
     exit /b 1
 )
 

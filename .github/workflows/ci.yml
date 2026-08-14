@@ -66,23 +66,23 @@ jobs:
                     distribution: temurin
                     java-version: "25"
 
-            -   name: Download Sol 0.1.0 seed compiler
+            -   name: Download Sol 0.1.1 seed compiler
                 env:
                     GH_TOKEN: ${{ github.token }}
                 run: |
                     mkdir -p .bootstrap
 
-                    gh release download v0.1.0 \
+                    gh release download v0.1.1 \
                         --repo "$GITHUB_REPOSITORY" \
-                        --pattern "sol-0.1.0-linux-x86_64.tar.gz" \
+                        --pattern "sol-0.1.1-linux-x86_64.tar.gz" \
                         --dir .bootstrap
 
-                    tar -xzf .bootstrap/sol-0.1.0-linux-x86_64.tar.gz \
+                    tar -xzf .bootstrap/sol-0.1.1-linux-x86_64.tar.gz \
                         -C .bootstrap
 
             -   name: Bootstrap self-hosted compiler
                 env:
-                    SOLC: ${{ github.workspace }}/.bootstrap/sol-0.1.0-linux-x86_64/bin/solc
+                    SOLC: ${{ github.workspace }}/.bootstrap/sol-0.1.1-linux-x86_64/bin/solc
                 run: ./selfhost/bootstrap.sh
 
     selfhost-bootstrap-windows:
@@ -99,20 +99,20 @@ jobs:
                     distribution: temurin
                     java-version: "25"
 
-            -   name: Download Sol 0.1.0 seed compiler
+            -   name: Download Sol 0.1.1 seed compiler
                 shell: pwsh
                 env:
                     GH_TOKEN: ${{ github.token }}
                 run: |
                     New-Item -ItemType Directory -Force .bootstrap | Out-Null
 
-                    gh release download v0.1.0 `
+                    gh release download v0.1.1 `
                         --repo "$env:GITHUB_REPOSITORY" `
-                        --pattern "sol-0.1.0-windows-x86_64.zip" `
+                        --pattern "sol-0.1.1-windows-x86_64.zip" `
                         --dir .bootstrap
 
                     Expand-Archive `
-                        -Path .bootstrap/sol-0.1.0-windows-x86_64.zip `
+                        -Path .bootstrap/sol-0.1.1-windows-x86_64.zip `
                         -DestinationPath .bootstrap
 
             -   name: Verify Windows native linker
@@ -125,7 +125,7 @@ jobs:
             -   name: Bootstrap self-hosted compiler
                 shell: cmd
                 env:
-                    SOLC: ${{ github.workspace }}\.bootstrap\sol-0.1.0-windows-x86_64\bin\solc.bat
+                    SOLC: ${{ github.workspace }}\.bootstrap\sol-0.1.1-windows-x86_64\bin\solc.bat
                     SOL_LINKER: C:\Program Files\LLVM\bin\clang.exe
                 run: selfhost\bootstrap.bat
 
