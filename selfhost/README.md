@@ -16,7 +16,10 @@ selfhost/src/main.sol
 stage 1 native compiler executable
 ```
 
-At this stage, the self-hosted compiler is only a minimal executable skeleton. Frontend, semantic analysis, typed Sol IR, LLVM generation, native object emission, linking, and the final compiler CLI will be implemented incrementally in later issues.
+The self-host now contains its source model, token representation and lexical
+scanner. Parsing, semantic analysis, typed Sol IR, LLVM generation, native
+object emission, linking, and the final compiler CLI will be implemented
+incrementally in later issues.
 
 The full compiler architecture remains:
 
@@ -48,7 +51,8 @@ The bootstrap script:
 selfhost/build/stage1/solc
 ```
 
-5. executes the generated program to verify that the native bootstrap artifact is runnable.
+5. executes the generated program to verify that the native bootstrap artifact is runnable;
+6. compiles and runs the self-host lexical-analysis suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -79,13 +83,23 @@ The generated stage 1 executable is written to:
 selfhost\build\stage1\solc.exe
 ```
 
-## Current scope
+## Source model and lexer
 
-The current bootstrap establishes only:
+The frontend implementation under `selfhost/src/frontend/` provides:
 
-* the fresh self-host source tree;
-* the compiler entry point;
-* the stage 0 → stage 1 build flow;
-* validation that the frozen Sol 0.1.1 seed can compile the new compiler skeleton.
+* zero-based Unicode-scalar offsets with one-based lines and columns;
+* half-open source spans `[start, end)`;
+* value-type tokens and stable integer token kinds;
+* keywords, identifiers, numeric, string and character literals;
+* punctuation, arithmetic, logical, comparison and pointer-arrow operators;
+* LF, CRLF and CR newline handling;
+* line and block comments;
+* explicit lexical results with stable `SOL-L001` through `SOL-L005`
+  diagnostics.
 
-Lexer, parser, semantic analysis, typed Sol IR, LLVM backend implementation, native toolchain orchestration, and command-line compatibility are intentionally outside the scope of this initial bootstrap.
+Sol strings already guarantee valid UTF-8, so malformed input is rejected by
+the text-input boundary before lexical analysis. Lexer offsets therefore count
+Unicode scalar values, matching the indexing semantics of Sol strings.
+
+`selfhost/src/lexer_test.sol` is a separate native test entry point. Both
+bootstrap scripts compile and execute it with the frozen Sol 0.1.1 seed.
