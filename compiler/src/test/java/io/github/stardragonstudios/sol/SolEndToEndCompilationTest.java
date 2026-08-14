@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -169,7 +170,13 @@ final class SolEndToEndCompilationTest {
     void readsUtf8FileTextAndConsoleLines() throws Exception {
         EndToEndTestSupport.assumeNativeLinkerAvailable();
 
-        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "text-input", "main.sol", "input.txt");
+        var source = EndToEndTestSupport.copyFixture(temporaryDirectory, "text-input", "main.sol");
+
+        Files.writeString(
+            source.getParent().resolve("input.txt"),
+            "First line\nSegunda ñ\n🐉\n",
+            StandardCharsets.UTF_8
+        );
         var compilation = EndToEndTestSupport.compile(source);
 
         assertEquals(CompilerExitCode.SUCCESS.value(), compilation.exitCode(), compilation.compilerOutput());
@@ -297,7 +304,7 @@ final class SolEndToEndCompilationTest {
         var result = EndToEndTestSupport.execute(compilation.executable(), source.getParent());
 
         assertEquals(23, result.exitCode(), result.standardError());
-        assertEquals("Hello Sol ñ\n", result.standardOutput());
+        assertEquals("Hello Sol ñ" + System.lineSeparator(), result.standardOutput());
         assertEquals("", result.standardError());
     }
 
