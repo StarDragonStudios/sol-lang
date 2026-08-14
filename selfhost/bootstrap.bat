@@ -17,6 +17,8 @@ set "LEXER_TEST_SOURCE=%SELFHOST_DIR%src\lexer_test.sol"
 set "LEXER_TEST_OUTPUT=%TEST_BUILD_DIR%\lexer_test.exe"
 set "PARSER_TEST_SOURCE=%SELFHOST_DIR%src\parser_test.sol"
 set "PARSER_TEST_OUTPUT=%TEST_BUILD_DIR%\parser_test.exe"
+set "GRAMMAR_TEST_SOURCE=%SELFHOST_DIR%src\grammar_test.sol"
+set "GRAMMAR_TEST_OUTPUT=%TEST_BUILD_DIR%\grammar_test.exe"
 
 set "VERSION="
 for /f "delims=" %%V in ('call "%SEED_SOLC%" --version') do set "VERSION=%%V"
@@ -53,6 +55,14 @@ if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host parser foundations
 "%PARSER_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling self-host grammar tests
+call "%SEED_SOLC%" "%GRAMMAR_TEST_SOURCE%" -o "%GRAMMAR_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating complete self-host grammar
+"%GRAMMAR_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: stage 1 ready at %OUTPUT%

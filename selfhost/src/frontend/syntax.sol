@@ -34,6 +34,15 @@ fn create_compilation_unit(span: SourceSpan) -> pointer<SyntaxNode>
     )
 end
 
+fn create_syntax_name(text: string, span: SourceSpan) -> pointer<SyntaxNode>
+    return create_syntax_node(
+        syntax_kind_name(),
+        syntax_variant_none(),
+        text,
+        span
+    )
+end
+
 fn syntax_add_child(parent: pointer<SyntaxNode>, child: pointer<SyntaxNode>) -> boolean
     if parent == null || child == null then
         return false

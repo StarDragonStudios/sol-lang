@@ -12,6 +12,8 @@ LEXER_TEST_SOURCE="$SELFHOST_DIR/src/lexer_test.sol"
 LEXER_TEST_OUTPUT="$TEST_BUILD_DIR/lexer_test"
 PARSER_TEST_SOURCE="$SELFHOST_DIR/src/parser_test.sol"
 PARSER_TEST_OUTPUT="$TEST_BUILD_DIR/parser_test"
+GRAMMAR_TEST_SOURCE="$SELFHOST_DIR/src/grammar_test.sol"
+GRAMMAR_TEST_OUTPUT="$TEST_BUILD_DIR/grammar_test"
 
 VERSION=$("$SEED_SOLC" --version)
 
@@ -39,5 +41,11 @@ echo "bootstrap: compiling self-host parser tests"
 
 echo "bootstrap: validating self-host parser foundations"
 "$PARSER_TEST_OUTPUT"
+
+echo "bootstrap: compiling self-host grammar tests"
+"$SEED_SOLC" "$GRAMMAR_TEST_SOURCE" -o "$GRAMMAR_TEST_OUTPUT"
+
+echo "bootstrap: validating complete self-host grammar"
+"$GRAMMAR_TEST_OUTPUT"
 
 echo "bootstrap: stage 1 ready at $OUTPUT"

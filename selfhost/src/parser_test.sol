@@ -185,7 +185,7 @@ fn test_newline_only_compilation_unit() -> int
 end
 
 fn test_unexpected_top_level_token() -> int
-    let lexical: LexResult = scan_source("fn")
+    let lexical: LexResult = scan_source("42")
     let parsed: ParseResult = parse_tokens(lexical.tokens)
     @mut let failure: int = 0
 
@@ -197,7 +197,7 @@ fn test_unexpected_top_level_token() -> int
         failure = 2
     end
 
-    if failure == 0 && parsed.diagnostic.message != "Unexpected token 'fn' at top level." then
+    if failure == 0 && parsed.diagnostic.message != "Unexpected token '42' at top level." then
         failure = 3
     end
 
