@@ -7,9 +7,11 @@ SEED_SOLC=${SOLC:-solc}
 SOURCE="$SELFHOST_DIR/src/main.sol"
 BUILD_DIR="$SELFHOST_DIR/build/stage1"
 OUTPUT="$BUILD_DIR/solc"
-TEST_SOURCE="$SELFHOST_DIR/src/lexer_test.sol"
 TEST_BUILD_DIR="$SELFHOST_DIR/build/tests"
-TEST_OUTPUT="$TEST_BUILD_DIR/lexer_test"
+LEXER_TEST_SOURCE="$SELFHOST_DIR/src/lexer_test.sol"
+LEXER_TEST_OUTPUT="$TEST_BUILD_DIR/lexer_test"
+PARSER_TEST_SOURCE="$SELFHOST_DIR/src/parser_test.sol"
+PARSER_TEST_OUTPUT="$TEST_BUILD_DIR/parser_test"
 
 VERSION=$("$SEED_SOLC" --version)
 
@@ -27,9 +29,15 @@ echo "bootstrap: validating stage 1 executable"
 "$OUTPUT"
 
 echo "bootstrap: compiling self-host lexer tests"
-"$SEED_SOLC" "$TEST_SOURCE" -o "$TEST_OUTPUT"
+"$SEED_SOLC" "$LEXER_TEST_SOURCE" -o "$LEXER_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host lexer"
-"$TEST_OUTPUT"
+"$LEXER_TEST_OUTPUT"
+
+echo "bootstrap: compiling self-host parser tests"
+"$SEED_SOLC" "$PARSER_TEST_SOURCE" -o "$PARSER_TEST_OUTPUT"
+
+echo "bootstrap: validating self-host parser foundations"
+"$PARSER_TEST_OUTPUT"
 
 echo "bootstrap: stage 1 ready at $OUTPUT"
