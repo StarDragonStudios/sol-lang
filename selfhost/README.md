@@ -16,8 +16,9 @@ selfhost/src/main.sol
 stage 1 native compiler executable
 ```
 
-The self-host now contains its source model, token representation and lexical
-scanner. Parsing, semantic analysis, typed Sol IR, LLVM generation, native
+The self-host now contains its source model, token representation, lexical
+scanner, uniform syntax-tree representation and parser foundations. Complete
+grammar coverage, semantic analysis, typed Sol IR, LLVM generation, native
 object emission, linking, and the final compiler CLI will be implemented
 incrementally in later issues.
 
@@ -52,7 +53,8 @@ selfhost/build/stage1/solc
 ```
 
 5. executes the generated program to verify that the native bootstrap artifact is runnable;
-6. compiles and runs the self-host lexical-analysis suite.
+6. compiles and runs the self-host lexical-analysis suite;
+7. compiles and runs the self-host syntax-tree and parser-foundation suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -103,3 +105,30 @@ Unicode scalar values, matching the indexing semantics of Sol strings.
 
 `selfhost/src/lexer_test.sol` is a separate native test entry point. Both
 bootstrap scripts compile and execute it with the frozen Sol 0.1.1 seed.
+
+## Syntax tree and parser foundations
+
+Sol 0.1.1 does not yet provide enums, sealed hierarchies or tagged unions. The
+self-host syntax tree therefore uses one uniform `SyntaxNode` value containing:
+
+* a stable integer node kind;
+* a kind-specific variant for operators, literals and declaration forms;
+* optional textual payload;
+* a source span;
+* an ordered `Vector<pointer<SyntaxNode>>` of owned children.
+
+The catalog covers every declaration, statement and expression shape in the
+current Java syntax model. Each node has one owner, and recursive destruction
+releases the complete tree without casts or untyped pointers.
+
+The parser foundation owns only its temporary cursor state and borrows the
+lexer's token vector. `ParseResult` owns the resulting syntax tree. It validates
+that token streams are non-empty and contain exactly one terminal EOF, skips
+top-level newlines, constructs empty or newline-only compilation units, and
+reports stable `SOL-P000` and `SOL-P001` diagnostics. `SOL-P002` expectation
+support and cursor primitives are ready for the complete grammar implementation.
+
+`selfhost/src/parser_test.sol` validates tree construction, navigation and
+recursive destruction, compilation-unit spans, newline consumption, unexpected
+top-level tokens and malformed token streams. Full Sol 0.1.x grammar parsing is
+the next self-host milestone and is intentionally outside these foundations.

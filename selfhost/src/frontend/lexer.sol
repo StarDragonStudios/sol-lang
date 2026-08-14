@@ -2,13 +2,13 @@ inject namespace std.memory as memory
 inject namespace std.string as strings
 inject std.collections.vector
 inject frontend.source only SourcePosition, SourceSpan, source_position, source_span
-inject frontend.diagnostic only LexicalDiagnostic, empty_lexical_diagnostic, lexical_diagnostic
+inject frontend.diagnostic only Diagnostic, diagnostic, empty_diagnostic
 inject frontend.token
 
 struct LexResult
     successful: boolean
     tokens: pointer<Vector<Token>>
-    diagnostic: LexicalDiagnostic
+    diagnostic: Diagnostic
 end
 
 struct Lexer
@@ -19,7 +19,7 @@ struct Lexer
     column: int
     successful: boolean
     tokens: pointer<Vector<Token>>
-    diagnostic: LexicalDiagnostic
+    diagnostic: Diagnostic
 end
 
 fn scan_source(source: string) -> LexResult
@@ -32,7 +32,7 @@ fn scan_source(source: string) -> LexResult
         return LexResult {
             successful: false,
             tokens: tokens,
-            diagnostic: lexical_diagnostic(
+            diagnostic: diagnostic(
                 "SOL-L000",
                 "Unable to allocate lexical scanner state.",
                 position,
@@ -48,7 +48,7 @@ fn scan_source(source: string) -> LexResult
     lexer->column = 1
     lexer->successful = true
     lexer->tokens = tokens
-    lexer->diagnostic = empty_lexical_diagnostic()
+    lexer->diagnostic = empty_diagnostic()
 
     while !lexer_is_at_end(lexer) && lexer->successful do
         scan_next_token(lexer)
@@ -673,7 +673,7 @@ end
 
 fn lexer_fail(lexer: pointer<Lexer>, code: string, message: string, start: SourcePosition) -> void
     lexer->successful = false
-    lexer->diagnostic = lexical_diagnostic(
+    lexer->diagnostic = diagnostic(
         code,
         message,
         start,

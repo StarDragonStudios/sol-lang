@@ -12,9 +12,11 @@ if defined SOLC (
 set "SOURCE=%SELFHOST_DIR%src\main.sol"
 set "BUILD_DIR=%SELFHOST_DIR%build\stage1"
 set "OUTPUT=%BUILD_DIR%\solc.exe"
-set "TEST_SOURCE=%SELFHOST_DIR%src\lexer_test.sol"
 set "TEST_BUILD_DIR=%SELFHOST_DIR%build\tests"
-set "TEST_OUTPUT=%TEST_BUILD_DIR%\lexer_test.exe"
+set "LEXER_TEST_SOURCE=%SELFHOST_DIR%src\lexer_test.sol"
+set "LEXER_TEST_OUTPUT=%TEST_BUILD_DIR%\lexer_test.exe"
+set "PARSER_TEST_SOURCE=%SELFHOST_DIR%src\parser_test.sol"
+set "PARSER_TEST_OUTPUT=%TEST_BUILD_DIR%\parser_test.exe"
 
 set "VERSION="
 for /f "delims=" %%V in ('call "%SEED_SOLC%" --version') do set "VERSION=%%V"
@@ -38,11 +40,19 @@ echo bootstrap: validating stage 1 executable
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host lexer tests
-call "%SEED_SOLC%" "%TEST_SOURCE%" -o "%TEST_OUTPUT%"
+call "%SEED_SOLC%" "%LEXER_TEST_SOURCE%" -o "%LEXER_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host lexer
-"%TEST_OUTPUT%"
+"%LEXER_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling self-host parser tests
+call "%SEED_SOLC%" "%PARSER_TEST_SOURCE%" -o "%PARSER_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating self-host parser foundations
+"%PARSER_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: stage 1 ready at %OUTPUT%
