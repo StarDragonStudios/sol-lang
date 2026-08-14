@@ -17,10 +17,10 @@ stage 1 native compiler executable
 ```
 
 The self-host now contains its source model, token representation, lexical
-scanner, uniform syntax-tree representation and parser foundations. Complete
-grammar coverage, semantic analysis, typed Sol IR, LLVM generation, native
-object emission, linking, and the final compiler CLI will be implemented
-incrementally in later issues.
+scanner, uniform syntax-tree representation and complete Sol 0.1.x grammar
+parser. Semantic analysis, typed Sol IR, LLVM generation, native object
+emission, linking, and the final compiler CLI will be implemented incrementally
+in later issues.
 
 The full compiler architecture remains:
 
@@ -54,7 +54,8 @@ selfhost/build/stage1/solc
 
 5. executes the generated program to verify that the native bootstrap artifact is runnable;
 6. compiles and runs the self-host lexical-analysis suite;
-7. compiles and runs the self-host syntax-tree and parser-foundation suite.
+7. compiles and runs the self-host syntax-tree and parser-foundation suite;
+8. compiles and runs the complete self-host grammar suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -106,7 +107,7 @@ Unicode scalar values, matching the indexing semantics of Sol strings.
 `selfhost/src/lexer_test.sol` is a separate native test entry point. Both
 bootstrap scripts compile and execute it with the frozen Sol 0.1.1 seed.
 
-## Syntax tree and parser foundations
+## Syntax tree and parser
 
 Sol 0.1.1 does not yet provide enums, sealed hierarchies or tagged unions. The
 self-host syntax tree therefore uses one uniform `SyntaxNode` value containing:
@@ -121,14 +122,62 @@ The catalog covers every declaration, statement and expression shape in the
 current Java syntax model. Each node has one owner, and recursive destruction
 releases the complete tree without casts or untyped pointers.
 
-The parser foundation owns only its temporary cursor state and borrows the
-lexer's token vector. `ParseResult` owns the resulting syntax tree. It validates
-that token streams are non-empty and contain exactly one terminal EOF, skips
-top-level newlines, constructs empty or newline-only compilation units, and
-reports stable `SOL-P000` and `SOL-P001` diagnostics. `SOL-P002` expectation
-support and cursor primitives are ready for the complete grammar implementation.
+The parser owns only its temporary cursor state and borrows the lexer's token
+vector. `ParseResult` owns the resulting syntax tree. It validates that token
+streams are non-empty and contain exactly one terminal EOF, then implements the
+complete released grammar for declarations, types and generics, injections,
+statements, blocks, expressions, calls, structs and supported multiline lists.
+Parsing is deliberately fail-fast and reports stable `SOL-P000`, `SOL-P001` and
+`SOL-P002` diagnostics with half-open source spans.
 
-`selfhost/src/parser_test.sol` validates tree construction, navigation and
-recursive destruction, compilation-unit spans, newline consumption, unexpected
-top-level tokens and malformed token streams. Full Sol 0.1.x grammar parsing is
-the next self-host milestone and is intentionally outside these foundations.
+### Uniform node contract
+
+Named syntactic forms keep their convenient identifier in `text` and also own
+a `Name` child when the exact identifier-token span is needed by later semantic
+diagnostics. Ordered children use the following contract:
+
+| Node kind | `text` / `variant` | Ordered children |
+| --- | --- | --- |
+| `CompilationUnit` | empty / none | declarations |
+| `Annotation` | annotation name / none | `Name` |
+| `TypeParameter` | parameter name / none | none |
+| `Parameter` | parameter name / none | `Name`, type reference |
+| `TypeReference` | type name / none | `Name`, explicit type arguments |
+| `ModulePath` | dotted path / none | segment `Name` nodes |
+| `FunctionDeclaration` | function name / bodyful or bodyless | annotations, `Name`, type parameters, parameters, return type, optional body block |
+| `StructDeclaration` | struct name / none | `Name`, type parameters, field declarations |
+| `StructFieldDeclaration` | field name / none | `Name`, field type |
+| `InjectionDeclaration` | namespace alias or empty / direct or namespace | module path, selected names or optional alias `Name` |
+| `Block` | empty / none | statements |
+| `VariableDeclarationStatement` | local name / `const`, `let` or mutable `let` | `Name`, declared type, initializer |
+| `AssignmentStatement` | target name / none | name expression, value |
+| Field, pointer-field and index assignments | empty / none | access target, value |
+| `CallStatement` | empty / none | call expression |
+| `ReturnStatement` | empty / none | optional returned expression |
+| `ConditionalStatement` | empty / none | condition, then block, optional else block |
+| `WhileStatement` | empty / none | condition, body block |
+| Name and literal expressions | source lexeme / literal variant where applicable | none |
+| `QualifiedNameExpression` | qualified spelling / none | qualifier and member name expressions |
+| `NullExpression` | `null` / none | none |
+| `ParenthesizedExpression` | empty / none | inner expression |
+| `UnaryExpression` | operator lexeme / unary operator | operand |
+| `BinaryExpression` | empty / binary operator | left and right operands |
+| `CallExpression` | empty / none | callee, explicit type arguments, value arguments |
+| Field and pointer-field access | field name / none | target, field `Name` |
+| `IndexExpression` | empty / none | target, index |
+| `StructConstructionExpression` | type name / none | type reference, field initializers |
+| `StructFieldInitializer` | field name / none | field `Name`, value |
+| `Name` | identifier / none | none |
+
+The child-kind boundaries make variable-length groups unambiguous without
+requiring enums, casts, unions or an object model. Each child has exactly one
+owning parent, and recursive destruction releases the entire tree. The lexer
+result must remain alive only while `parse_tokens` is executing; the completed
+tree does not retain token pointers.
+
+`selfhost/src/parser_test.sol` preserves the parser-foundation and malformed
+stream coverage. `selfhost/src/grammar_test.sol` validates every declaration and
+statement family, expression precedence, postfix and generic forms, empty and
+multiline forms, ordered payloads, exact spans and representative malformed
+grammar diagnostics. Symbol, scope and type construction are the next
+self-host milestone and remain outside the syntax layer.
