@@ -17,10 +17,11 @@ stage 1 native compiler executable
 ```
 
 The self-host now contains its source model, token representation, lexical
-scanner, uniform syntax-tree representation and complete Sol 0.1.x grammar
-parser. Semantic analysis, typed Sol IR, LLVM generation, native object
-emission, linking, and the final compiler CLI will be implemented incrementally
-in later issues.
+scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
+and the symbol, scope and semantic-type foundations needed by semantic analysis.
+AST traversal and name/type resolution, typed Sol IR, LLVM generation, native
+object emission, linking, and the final compiler CLI will be implemented
+incrementally in later issues.
 
 The full compiler architecture remains:
 
@@ -55,7 +56,8 @@ selfhost/build/stage1/solc
 5. executes the generated program to verify that the native bootstrap artifact is runnable;
 6. compiles and runs the self-host lexical-analysis suite;
 7. compiles and runs the self-host syntax-tree and parser-foundation suite;
-8. compiles and runs the complete self-host grammar suite.
+8. compiles and runs the complete self-host grammar suite;
+9. compiles and runs the self-host symbol, scope and semantic-type suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -179,5 +181,37 @@ tree does not retain token pointers.
 stream coverage. `selfhost/src/grammar_test.sol` validates every declaration and
 statement family, expression precedence, postfix and generic forms, empty and
 multiline forms, ordered payloads, exact spans and representative malformed
-grammar diagnostics. Symbol, scope and type construction are the next
-self-host milestone and remain outside the syntax layer.
+grammar diagnostics.
+
+## Semantic model foundations
+
+The semantic foundation under `selfhost/src/semantics/` supplies the stable
+model that the semantic-analysis pass will populate:
+
+* canonical `int`, `float`, `boolean`, `char`, `string`, `void` and error types;
+* structural pointer types and declaration-identified struct and type-parameter
+  types, including ordered generic arguments;
+* function, parameter, local-variable, imported-name, module-namespace, struct,
+  struct-field and type-parameter symbols;
+* ordered module, function and block scopes with local and lexical lookup,
+  duplicate rejection, shadowing and explicit freezing.
+
+Scope storage deliberately uses `Vector` and linear lookup. This preserves
+declaration order and avoids making a map implementation a prerequisite for the
+frontend; the representation can be replaced without changing the lookup API.
+
+Ownership is explicit. A scope owns every successfully declared symbol, and a
+symbol owns its child symbols and constructed semantic type. The type catalog
+owns its canonical primitive and error types. Parent scopes, syntax
+declarations, symbol owners, pointer element types and generic type arguments
+are borrowed. Consequently, child scopes must be destroyed before parents, the
+syntax tree must outlive its symbols and declaration-identified types, and the
+catalog must outlive all users of its canonical types.
+
+`selfhost/src/semantic_foundation_test.sol` validates the catalog, pointer and
+generic identity rules, every symbol kind, declaration order, duplicate and
+frozen-scope behavior, lexical shadowing, invalid inputs and destruction paths.
+Walking the AST, resolving declarations and type references, checking
+expressions, constructing module graphs and emitting semantic diagnostics remain
+the responsibility of issue #119; they are intentionally absent from this
+foundation layer.
