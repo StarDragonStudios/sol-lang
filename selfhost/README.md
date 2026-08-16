@@ -18,9 +18,10 @@ stage 1 native compiler executable
 
 The self-host now contains its source model, token representation, lexical
 scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
-and complete semantic analysis across ordered source modules. Typed Sol IR,
-LLVM generation, native object emission, linking, and the final compiler CLI
-will be implemented incrementally in later issues.
+complete semantic analysis across ordered source modules, and a validated,
+target-independent typed Sol IR model. Semantic-to-IR lowering, LLVM
+generation, native object emission, linking, and the final compiler CLI will be
+implemented incrementally in later issues.
 
 The full compiler architecture remains:
 
@@ -57,7 +58,8 @@ selfhost/build/stage1/solc
 7. compiles and runs the self-host syntax-tree and parser-foundation suite;
 8. compiles and runs the complete self-host grammar suite;
 9. compiles and runs the self-host symbol, scope and semantic-type suite;
-10. compiles and runs the self-host semantic-analysis and module-resolution suite.
+10. compiles and runs the self-host semantic-analysis and module-resolution suite;
+11. compiles and runs the self-host typed Sol IR suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -240,5 +242,44 @@ half-open source span.
 symbol and scope contracts. `selfhost/src/semantic_analysis_test.sol` validates
 successful single- and multi-module programs, every semantic diagnostic code,
 association lookup, scope freezing, generic recursion, representative source
-ordering and complete destruction. The next frontend boundary is lowering this
-bound model into typed Sol IR.
+ordering and complete destruction.
+
+## Typed Sol IR
+
+The target-independent representation under `selfhost/src/ir/` mirrors the
+canonical boundary documented in `docs/sol-ir.md` without depending on lexer,
+syntax, semantic, diagnostic, LLVM, C, ABI or platform types. It represents:
+
+* canonical primitive, concrete struct and typed pointer types;
+* deterministic function, block, local and value identifiers;
+* constants, typed operations, calls, locals, structs, pointers and immutable
+  string indexing;
+* explicit basic blocks with separate return and branch terminators;
+* bodyless declarations, definitions, ordered modules, libraries and executable
+  entry points;
+* deterministic text intended for tests and compiler inspection, not stable
+  serialization.
+
+Sol 0.1.1 has no enums, tagged unions, interfaces, exceptions or object model,
+so IR variants use stable integer kinds with explicitly validated payloads.
+Construction is incremental: blocks, functions, modules and programs become
+immutable by contract after they are sealed. Sealing verifies exact types,
+identifier uniqueness, value availability, local initialization and mutability,
+canonical block/function references, returns, calls, module ownership and entry
+point constraints.
+
+An `IrArena` owns every IR allocation. Programs, modules, functions, blocks and
+instructions borrow their cross-references from that arena, which permits cyclic
+control-flow graphs and canonical call references without recursive ownership or
+double frees. Destroying an `IrProgram` destroys its arena exactly once; callers
+that stop before creating a program destroy the arena directly.
+
+Open source generic parameters are intentionally absent. The lowering phase in
+#121 will discover reachable concrete applications and create monomorphized IR
+structs and functions. That phase may depend on semantic and syntax models, but
+the IR package remains independent and performs no name or type resolution.
+
+`selfhost/src/ir_test.sol` covers the type system, identities, values,
+instructions, structs, pointer operations, locals, calls, forward branches,
+loop back-edges, functions, modules, executable entry points, invalid graph
+rejection, deterministic formatting and complete arena destruction.
