@@ -18,10 +18,9 @@ stage 1 native compiler executable
 
 The self-host now contains its source model, token representation, lexical
 scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
-and the symbol, scope and semantic-type foundations needed by semantic analysis.
-AST traversal and name/type resolution, typed Sol IR, LLVM generation, native
-object emission, linking, and the final compiler CLI will be implemented
-incrementally in later issues.
+and complete semantic analysis across ordered source modules. Typed Sol IR,
+LLVM generation, native object emission, linking, and the final compiler CLI
+will be implemented incrementally in later issues.
 
 The full compiler architecture remains:
 
@@ -57,7 +56,8 @@ selfhost/build/stage1/solc
 6. compiles and runs the self-host lexical-analysis suite;
 7. compiles and runs the self-host syntax-tree and parser-foundation suite;
 8. compiles and runs the complete self-host grammar suite;
-9. compiles and runs the self-host symbol, scope and semantic-type suite.
+9. compiles and runs the self-host symbol, scope and semantic-type suite;
+10. compiles and runs the self-host semantic-analysis and module-resolution suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -183,7 +183,7 @@ statement family, expression precedence, postfix and generic forms, empty and
 multiline forms, ordered payloads, exact spans and representative malformed
 grammar diagnostics.
 
-## Semantic model foundations
+## Semantic model and analysis
 
 The semantic foundation under `selfhost/src/semantics/` supplies the stable
 model that the semantic-analysis pass will populate:
@@ -208,10 +208,37 @@ are borrowed. Consequently, child scopes must be destroyed before parents, the
 syntax tree must outlive its symbols and declaration-identified types, and the
 catalog must outlive all users of its canonical types.
 
-`selfhost/src/semantic_foundation_test.sol` validates the catalog, pointer and
-generic identity rules, every symbol kind, declaration order, duplicate and
-frozen-scope behavior, lexical shadowing, invalid inputs and destruction paths.
-Walking the AST, resolving declarations and type references, checking
-expressions, constructing module graphs and emitting semantic diagnostics remain
-the responsibility of issue #119; they are intentionally absent from this
-foundation layer.
+`model.sol` extends these foundations with ordered source modules, explicit
+entry-point state and syntax-identity associations for scopes, declarations,
+resolved names and types, calls, assignments, struct fields and injections. The
+program owns all modules, scopes, rejected symbols, constructed types,
+association tables and diagnostics while borrowing the parsed syntax trees.
+
+`analyzer.sol` binds a set of already parsed modules in deterministic passes:
+
+1. register modules and predeclare structs and functions;
+2. resolve direct, selective and namespace injections;
+3. bind struct fields and function signatures;
+4. validate recursive value layouts and executable entry points;
+5. bind function bodies and validate reachable generic specializations.
+
+Forward declarations and cyclic function-level module dependencies are valid.
+Only declarations made directly by a module are exports, so injected names are
+never re-exported transitively. Module discovery is intentionally outside this
+layer: callers provide an ordered `Vector<SourceModule>` after parsing all
+participating sources.
+
+Expression binding covers literals, contextual `null`, lexical and qualified
+names, unary and binary operators, calls, indexing, struct construction, field
+access and pointer-field access. Statement binding validates declarations,
+assignments and mutability, conditions, calls and returns. Invalid nodes receive
+the canonical error type to suppress avoidable cascades. Diagnostics preserve
+the released `SOL-S001` through `SOL-S047` catalog and are ordered by module and
+half-open source span.
+
+`selfhost/src/semantic_foundation_test.sol` validates the lower-level catalog,
+symbol and scope contracts. `selfhost/src/semantic_analysis_test.sol` validates
+successful single- and multi-module programs, every semantic diagnostic code,
+association lookup, scope freezing, generic recursion, representative source
+ordering and complete destruction. The next frontend boundary is lowering this
+bound model into typed Sol IR.
