@@ -19,8 +19,10 @@ set "PARSER_TEST_SOURCE=%SELFHOST_DIR%src\parser_test.sol"
 set "PARSER_TEST_OUTPUT=%TEST_BUILD_DIR%\parser_test.exe"
 set "GRAMMAR_TEST_SOURCE=%SELFHOST_DIR%src\grammar_test.sol"
 set "GRAMMAR_TEST_OUTPUT=%TEST_BUILD_DIR%\grammar_test.exe"
-set "SEMANTIC_TEST_SOURCE=%SELFHOST_DIR%src\semantic_foundation_test.sol"
-set "SEMANTIC_TEST_OUTPUT=%TEST_BUILD_DIR%\semantic_foundation_test.exe"
+set "SEMANTIC_FOUNDATION_TEST_SOURCE=%SELFHOST_DIR%src\semantic_foundation_test.sol"
+set "SEMANTIC_FOUNDATION_TEST_OUTPUT=%TEST_BUILD_DIR%\semantic_foundation_test.exe"
+set "SEMANTIC_ANALYSIS_TEST_SOURCE=%SELFHOST_DIR%src\semantic_analysis_test.sol"
+set "SEMANTIC_ANALYSIS_TEST_OUTPUT=%TEST_BUILD_DIR%\semantic_analysis_test.exe"
 
 set "VERSION="
 for /f "delims=" %%V in ('call "%SEED_SOLC%" --version') do set "VERSION=%%V"
@@ -68,11 +70,19 @@ echo bootstrap: validating complete self-host grammar
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host semantic foundation tests
-call "%SEED_SOLC%" "%SEMANTIC_TEST_SOURCE%" -o "%SEMANTIC_TEST_OUTPUT%"
+call "%SEED_SOLC%" "%SEMANTIC_FOUNDATION_TEST_SOURCE%" -o "%SEMANTIC_FOUNDATION_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host symbols, scopes, and types
-"%SEMANTIC_TEST_OUTPUT%"
+"%SEMANTIC_FOUNDATION_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling self-host semantic analysis tests
+call "%SEED_SOLC%" "%SEMANTIC_ANALYSIS_TEST_SOURCE%" -o "%SEMANTIC_ANALYSIS_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating self-host semantic analysis and module resolution
+"%SEMANTIC_ANALYSIS_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: stage 1 ready at %OUTPUT%
