@@ -18,10 +18,10 @@ stage 1 native compiler executable
 
 The self-host now contains its source model, token representation, lexical
 scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
-complete semantic analysis across ordered source modules, and a validated,
-target-independent typed Sol IR model. Semantic-to-IR lowering, LLVM
-generation, native object emission, linking, and the final compiler CLI will be
-implemented incrementally in later issues.
+complete semantic analysis across ordered source modules, a validated,
+target-independent typed Sol IR model, and deterministic semantic-to-IR
+lowering. LLVM generation, native object emission, linking, and the final
+compiler CLI will be implemented incrementally in later issues.
 
 The full compiler architecture remains:
 
@@ -60,6 +60,7 @@ selfhost/build/stage1/solc
 9. compiles and runs the self-host symbol, scope and semantic-type suite;
 10. compiles and runs the self-host semantic-analysis and module-resolution suite;
 11. compiles and runs the self-host typed Sol IR suite.
+12. compiles and runs the semantic-to-IR lowering suite.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -231,8 +232,8 @@ layer: callers provide an ordered `Vector<SourceModule>` after parsing all
 participating sources.
 
 Expression binding covers literals, contextual `null`, lexical and qualified
-names, unary and binary operators, calls, indexing, struct construction, field
-access and pointer-field access. Statement binding validates declarations,
+names, unary and binary operators, calls, string and raw-pointer indexing,
+struct construction, field access and pointer-field access. Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
 the released `SOL-S001` through `SOL-S047` catalog and are ordered by module and
@@ -274,12 +275,38 @@ control-flow graphs and canonical call references without recursive ownership or
 double frees. Destroying an `IrProgram` destroys its arena exactly once; callers
 that stop before creating a program destroy the arena directly.
 
-Open source generic parameters are intentionally absent. The lowering phase in
-#121 will discover reachable concrete applications and create monomorphized IR
-structs and functions. That phase may depend on semantic and syntax models, but
-the IR package remains independent and performs no name or type resolution.
+Open source generic parameters are intentionally absent. Semantic-to-IR
+lowering discovers reachable concrete applications and creates monomorphized IR
+structs and functions. Lowering depends on semantic and syntax models, but the
+IR package remains independent and performs no name or type resolution.
 
 `selfhost/src/ir_test.sol` covers the type system, identities, values,
 instructions, structs, pointer operations, locals, calls, forward branches,
 loop back-edges, functions, modules, executable entry points, invalid graph
 rejection, deterministic formatting and complete arena destruction.
+
+## Semantic-to-IR lowering
+
+The lowering implementation under `selfhost/src/lowering/` accepts only a
+complete, diagnostic-free `SemanticProgram`. It first builds a deterministic
+plan of concrete function and struct instances, assigns canonical IR identities
+for forward references, and then lowers every function body into sealed basic
+blocks. Generic functions and structs are monomorphized from the semantic call
+graph; open type parameters never cross the typed-IR boundary.
+
+Lowering covers literals, locals, unary and binary operations, direct and
+qualified calls, struct construction and value-field mutation, raw-pointer
+field and index loads/stores, immutable string indexing, returns, conditionals
+and loop back-edges. Modules retain semantic source order and every concrete
+definition stays with its declaring module. Executable entry points are mapped
+to their canonical lowered function; library programs remain entryless.
+
+The pass borrows the semantic program and never rewrites semantic types or
+symbols. Temporary specialization and ownership tables are released after the
+sealed `IrProgram` assumes ownership of its arena. Failures return a stable
+message and no partial program. LLVM types, target ABI decisions and native
+symbol mangling remain outside this layer.
+
+`selfhost/src/lowering_test.sol` exercises complete and rejected programs,
+deterministic repeated lowering, generic specialization, multiple modules,
+structs, raw pointers, primitive operations and explicit control flow.
