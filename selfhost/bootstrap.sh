@@ -14,6 +14,8 @@ PARSER_TEST_SOURCE="$SELFHOST_DIR/src/parser_test.sol"
 PARSER_TEST_OUTPUT="$TEST_BUILD_DIR/parser_test"
 GRAMMAR_TEST_SOURCE="$SELFHOST_DIR/src/grammar_test.sol"
 GRAMMAR_TEST_OUTPUT="$TEST_BUILD_DIR/grammar_test"
+SEMANTIC_TEST_SOURCE="$SELFHOST_DIR/src/semantic_foundation_test.sol"
+SEMANTIC_TEST_OUTPUT="$TEST_BUILD_DIR/semantic_foundation_test"
 
 VERSION=$("$SEED_SOLC" --version)
 
@@ -47,5 +49,11 @@ echo "bootstrap: compiling self-host grammar tests"
 
 echo "bootstrap: validating complete self-host grammar"
 "$GRAMMAR_TEST_OUTPUT"
+
+echo "bootstrap: compiling self-host semantic foundation tests"
+"$SEED_SOLC" "$SEMANTIC_TEST_SOURCE" -o "$SEMANTIC_TEST_OUTPUT"
+
+echo "bootstrap: validating self-host symbols, scopes, and types"
+"$SEMANTIC_TEST_OUTPUT"
 
 echo "bootstrap: stage 1 ready at $OUTPUT"
