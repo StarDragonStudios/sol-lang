@@ -18,6 +18,8 @@ SEMANTIC_FOUNDATION_TEST_SOURCE="$SELFHOST_DIR/src/semantic_foundation_test.sol"
 SEMANTIC_FOUNDATION_TEST_OUTPUT="$TEST_BUILD_DIR/semantic_foundation_test"
 SEMANTIC_ANALYSIS_TEST_SOURCE="$SELFHOST_DIR/src/semantic_analysis_test.sol"
 SEMANTIC_ANALYSIS_TEST_OUTPUT="$TEST_BUILD_DIR/semantic_analysis_test"
+IR_TEST_SOURCE="$SELFHOST_DIR/src/ir_test.sol"
+IR_TEST_OUTPUT="$TEST_BUILD_DIR/ir_test"
 
 VERSION=$("$SEED_SOLC" --version)
 
@@ -63,5 +65,11 @@ echo "bootstrap: compiling self-host semantic analysis tests"
 
 echo "bootstrap: validating self-host semantic analysis and module resolution"
 "$SEMANTIC_ANALYSIS_TEST_OUTPUT"
+
+echo "bootstrap: compiling self-host typed Sol IR tests"
+"$SEED_SOLC" "$IR_TEST_SOURCE" -o "$IR_TEST_OUTPUT"
+
+echo "bootstrap: validating self-host typed Sol IR"
+"$IR_TEST_OUTPUT"
 
 echo "bootstrap: stage 1 ready at $OUTPUT"
