@@ -3101,11 +3101,19 @@ fn semantic_bind_index_expression(
         return type_catalog_error(program->catalog)
     end
 
+    if target_type->kind == semantic_type_kind_pointer() then
+        if index_type->name == "int" then
+            return target_type->element_type
+        end
+
+        return type_catalog_error(program->catalog)
+    end
+
     semantic_report(
         program,
         module,
         "SOL-S045",
-        "Cannot index value of type '" + target_type->name + "'; only strings are indexable.",
+        "Cannot index value of type '" + target_type->name + "'; only strings and pointers are indexable.",
         target
     )
     return type_catalog_error(program->catalog)

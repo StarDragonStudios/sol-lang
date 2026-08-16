@@ -129,7 +129,7 @@ end
 
 fn test_successful_program() -> int
     let source: ParsedSemanticSource = parse_semantic_test_source(
-        "struct Box<T>\n    value: T\nend\nstruct Node\n    value: int\n    next: pointer<Node>\nend\nfn id<T>(value: T) -> T\n    return value\nend\n@init\nfn launch() -> int\n    @mut let box: Box<int> = Box<int> { value: 1 }\n    box.value = id<int>(2)\n    let node: Node = Node { value: box.value, next: null }\n    let pointer: pointer<Node> = null\n    if pointer == null then\n        pointer->value = node.value\n    end\n    let letter: char = \"Sol\"[0]\n    return box.value\nend"
+        "struct Box<T>\n    value: T\nend\nstruct Node\n    value: int\n    next: pointer<Node>\nend\nfn id<T>(value: T) -> T\n    return value\nend\n@init\nfn launch() -> int\n    @mut let box: Box<int> = Box<int> { value: 1 }\n    box.value = id<int>(2)\n    let node: Node = Node { value: box.value, next: null }\n    let pointer: pointer<Node> = null\n    if pointer == null then\n        pointer->value = node.value\n    end\n    let letter: char = \"Sol\"[0]\n    let integers: pointer<int> = null\n    let first: int = integers[0]\n    return box.value\nend"
     )
 
     if !semantic_test_parse_valid(source) then

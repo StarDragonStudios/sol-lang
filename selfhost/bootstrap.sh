@@ -20,6 +20,8 @@ SEMANTIC_ANALYSIS_TEST_SOURCE="$SELFHOST_DIR/src/semantic_analysis_test.sol"
 SEMANTIC_ANALYSIS_TEST_OUTPUT="$TEST_BUILD_DIR/semantic_analysis_test"
 IR_TEST_SOURCE="$SELFHOST_DIR/src/ir_test.sol"
 IR_TEST_OUTPUT="$TEST_BUILD_DIR/ir_test"
+LOWERING_TEST_SOURCE="$SELFHOST_DIR/src/lowering_test.sol"
+LOWERING_TEST_OUTPUT="$TEST_BUILD_DIR/lowering_test"
 
 VERSION=$("$SEED_SOLC" --version)
 
@@ -71,5 +73,11 @@ echo "bootstrap: compiling self-host typed Sol IR tests"
 
 echo "bootstrap: validating self-host typed Sol IR"
 "$IR_TEST_OUTPUT"
+
+echo "bootstrap: compiling self-host semantic-to-IR lowering tests"
+"$SEED_SOLC" "$LOWERING_TEST_SOURCE" -o "$LOWERING_TEST_OUTPUT"
+
+echo "bootstrap: validating self-host semantic-to-IR lowering"
+"$LOWERING_TEST_OUTPUT"
 
 echo "bootstrap: stage 1 ready at $OUTPUT"

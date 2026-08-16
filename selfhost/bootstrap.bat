@@ -25,6 +25,8 @@ set "SEMANTIC_ANALYSIS_TEST_SOURCE=%SELFHOST_DIR%src\semantic_analysis_test.sol"
 set "SEMANTIC_ANALYSIS_TEST_OUTPUT=%TEST_BUILD_DIR%\semantic_analysis_test.exe"
 set "IR_TEST_SOURCE=%SELFHOST_DIR%src\ir_test.sol"
 set "IR_TEST_OUTPUT=%TEST_BUILD_DIR%\ir_test.exe"
+set "LOWERING_TEST_SOURCE=%SELFHOST_DIR%src\lowering_test.sol"
+set "LOWERING_TEST_OUTPUT=%TEST_BUILD_DIR%\lowering_test.exe"
 
 set "VERSION="
 for /f "delims=" %%V in ('call "%SEED_SOLC%" --version') do set "VERSION=%%V"
@@ -93,6 +95,14 @@ if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host typed Sol IR
 "%IR_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling self-host semantic-to-IR lowering tests
+call "%SEED_SOLC%" "%LOWERING_TEST_SOURCE%" -o "%LOWERING_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating self-host semantic-to-IR lowering
+"%LOWERING_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: stage 1 ready at %OUTPUT%
