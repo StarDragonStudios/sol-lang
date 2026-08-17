@@ -121,6 +121,10 @@ try {
     $ProcessInfo.RedirectStandardInput = $true
     $ProcessInfo.RedirectStandardOutput = $true
     $ProcessInfo.RedirectStandardError = $true
+    $Utf8NoBom = [Text.UTF8Encoding]::new($false)
+    $ProcessInfo.StandardInputEncoding = $Utf8NoBom
+    $ProcessInfo.StandardOutputEncoding = $Utf8NoBom
+    $ProcessInfo.StandardErrorEncoding = $Utf8NoBom
     $Process = [Diagnostics.Process]::new()
     $Process.StartInfo = $ProcessInfo
     if (-not $Process.Start()) { throw "self-host compiler core did not start" }
