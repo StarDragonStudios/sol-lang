@@ -37,7 +37,9 @@ set "NATIVE_ARTIFACT_OUTPUT=%TEST_BUILD_DIR%\native_artifact_fixture.exe"
 set "NATIVE_FIXTURE_IR=%TEST_BUILD_DIR%\native_fixture.ll"
 set "NATIVE_FIXTURE_LITERALS=%TEST_BUILD_DIR%\native_literals.c"
 set "NATIVE_FIXTURE_OUTPUT=%TEST_BUILD_DIR%\native fixture.exe"
+set "NATIVE_INPUT=%TEST_BUILD_DIR%\native-input.txt"
 set "NATIVE_FAILURE_DIAGNOSTIC=%TEST_BUILD_DIR%\native-failure.txt"
+set "NATIVE_FAILURE_STDERR=%TEST_BUILD_DIR%\native-failure.stderr.txt"
 if defined SOL_CLANG (
     set "CLANG=%SOL_CLANG%"
 ) else if defined SOL_LINKER (
@@ -163,15 +165,17 @@ call "%SELFHOST_DIR%native-link.bat" "%NATIVE_FIXTURE_IR%" "%NATIVE_FIXTURE_LITE
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating linked native executable
+echo input>"%NATIVE_INPUT%"
 pushd "%SELFHOST_DIR%.."
-(echo input)| "%NATIVE_FIXTURE_OUTPUT%"
+"%NATIVE_FIXTURE_OUTPUT%" < "%NATIVE_INPUT%"
 set "NATIVE_RESULT=%errorlevel%"
 popd
 if not "!NATIVE_RESULT!"=="0" exit /b !NATIVE_RESULT!
 
 echo bootstrap: validating native runtime failure contract
+echo vector-failure>"%NATIVE_INPUT%"
 pushd "%SELFHOST_DIR%.."
-(echo vector-failure)| "%NATIVE_FIXTURE_OUTPUT%" >NUL 2>"%NATIVE_FAILURE_DIAGNOSTIC%"
+"%NATIVE_FIXTURE_OUTPUT%" < "%NATIVE_INPUT%" >"%NATIVE_FAILURE_DIAGNOSTIC%" 2>"%NATIVE_FAILURE_STDERR%"
 set "NATIVE_RESULT=!errorlevel!"
 popd
 if not "!NATIVE_RESULT!"=="70" (
@@ -181,6 +185,10 @@ if not "!NATIVE_RESULT!"=="70" (
 findstr /x /c:"Sol runtime error: vector index out of bounds." "%NATIVE_FAILURE_DIAGNOSTIC%" >nul
 if errorlevel 1 (
     echo bootstrap error: native runtime failure diagnostic did not match 1>&2
+    exit /b 1
+)
+for %%A in ("%NATIVE_FAILURE_STDERR%") do if not "%%~zA"=="0" (
+    echo bootstrap error: native runtime failure wrote to stderr 1>&2
     exit /b 1
 )
 
