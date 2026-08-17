@@ -27,6 +27,18 @@ set "IR_TEST_SOURCE=%SELFHOST_DIR%src\ir_test.sol"
 set "IR_TEST_OUTPUT=%TEST_BUILD_DIR%\ir_test.exe"
 set "LOWERING_TEST_SOURCE=%SELFHOST_DIR%src\lowering_test.sol"
 set "LOWERING_TEST_OUTPUT=%TEST_BUILD_DIR%\lowering_test.exe"
+set "LLVM_TEST_SOURCE=%SELFHOST_DIR%src\llvm_generation_test.sol"
+set "LLVM_TEST_OUTPUT=%TEST_BUILD_DIR%\llvm_generation_test.exe"
+set "LLVM_FIXTURE_SOURCE=%SELFHOST_DIR%src\llvm_fixture.sol"
+set "LLVM_FIXTURE_OUTPUT=%TEST_BUILD_DIR%\llvm_fixture.exe"
+set "LLVM_FIXTURE_IR=%TEST_BUILD_DIR%\llvm_fixture.ll"
+if defined SOL_CLANG (
+    set "CLANG=%SOL_CLANG%"
+) else if defined SOL_LINKER (
+    set "CLANG=%SOL_LINKER%"
+) else (
+    set "CLANG=clang"
+)
 
 set "VERSION="
 for /f "delims=" %%V in ('call "%SEED_SOLC%" --version') do set "VERSION=%%V"
@@ -103,6 +115,30 @@ if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host semantic-to-IR lowering
 "%LOWERING_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling self-host LLVM generation tests
+call "%SEED_SOLC%" "%LLVM_TEST_SOURCE%" -o "%LLVM_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating self-host LLVM generation
+"%LLVM_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+call "%CLANG%" --version >nul 2>nul
+if errorlevel 1 (
+    echo bootstrap error: LLVM verifier not found: %CLANG% 1>&2
+    exit /b 1
+)
+
+echo bootstrap: compiling LLVM verification fixture
+call "%SEED_SOLC%" "%LLVM_FIXTURE_SOURCE%" -o "%LLVM_FIXTURE_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: verifying generated textual LLVM IR
+"%LLVM_FIXTURE_OUTPUT%" > "%LLVM_FIXTURE_IR%"
+if errorlevel 1 exit /b %errorlevel%
+call "%CLANG%" -x ir -S -emit-llvm "%LLVM_FIXTURE_IR%" -o NUL
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: stage 1 ready at %OUTPUT%

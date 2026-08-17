@@ -22,6 +22,12 @@ IR_TEST_SOURCE="$SELFHOST_DIR/src/ir_test.sol"
 IR_TEST_OUTPUT="$TEST_BUILD_DIR/ir_test"
 LOWERING_TEST_SOURCE="$SELFHOST_DIR/src/lowering_test.sol"
 LOWERING_TEST_OUTPUT="$TEST_BUILD_DIR/lowering_test"
+LLVM_TEST_SOURCE="$SELFHOST_DIR/src/llvm_generation_test.sol"
+LLVM_TEST_OUTPUT="$TEST_BUILD_DIR/llvm_generation_test"
+LLVM_FIXTURE_SOURCE="$SELFHOST_DIR/src/llvm_fixture.sol"
+LLVM_FIXTURE_OUTPUT="$TEST_BUILD_DIR/llvm_fixture"
+LLVM_FIXTURE_IR="$TEST_BUILD_DIR/llvm_fixture.ll"
+CLANG=${SOL_CLANG:-clang}
 
 VERSION=$("$SEED_SOLC" --version)
 
@@ -79,5 +85,23 @@ echo "bootstrap: compiling self-host semantic-to-IR lowering tests"
 
 echo "bootstrap: validating self-host semantic-to-IR lowering"
 "$LOWERING_TEST_OUTPUT"
+
+echo "bootstrap: compiling self-host LLVM generation tests"
+"$SEED_SOLC" "$LLVM_TEST_SOURCE" -o "$LLVM_TEST_OUTPUT"
+
+echo "bootstrap: validating self-host LLVM generation"
+"$LLVM_TEST_OUTPUT"
+
+if ! command -v "$CLANG" >/dev/null 2>&1; then
+    echo "bootstrap error: LLVM verifier not found: $CLANG" >&2
+    exit 1
+fi
+
+echo "bootstrap: compiling LLVM verification fixture"
+"$SEED_SOLC" "$LLVM_FIXTURE_SOURCE" -o "$LLVM_FIXTURE_OUTPUT"
+
+echo "bootstrap: verifying generated textual LLVM IR"
+"$LLVM_FIXTURE_OUTPUT" > "$LLVM_FIXTURE_IR"
+"$CLANG" -x ir -S -emit-llvm "$LLVM_FIXTURE_IR" -o /dev/null
 
 echo "bootstrap: stage 1 ready at $OUTPUT"

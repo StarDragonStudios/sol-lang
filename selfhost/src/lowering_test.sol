@@ -9,6 +9,7 @@ inject ir.model
 inject ir.formatter
 inject lowering.model only IrLoweringResult
 inject lowering.program
+inject backend.llvm
 
 struct ParsedLoweringSource
     lexical: LexResult
@@ -97,6 +98,11 @@ fn test_complete_lowering() -> int
         if failure == 0 && (!lowering_text_contains(formatted, "struct application::Pair<int>") || !lowering_text_contains(formatted, "struct application::Wrapper<int>") || !lowering_text_contains(formatted, "store_field local2.pair.first") || !lowering_text_contains(formatted, "call @function2 id$int") || !lowering_text_contains(formatted, "call @function3 id$char") || !lowering_text_contains(formatted, "pointer_field_load") || !lowering_text_contains(formatted, "branch_if")) then
             failure = 6
         end
+        let generated: LlvmGenerationResult = generate_llvm_ir(lowered.program, "lowering-complete")
+        if failure == 0 && !llvm_generation_succeeded(generated) then
+            console::print_line(generated.error)
+            failure = 8
+        end
         let repeated: IrLoweringResult = lower_semantic_program(semantic)
         if failure == 0 then
             if repeated.program == null then
@@ -152,6 +158,14 @@ fn test_pointer_and_primitive_lowering() -> int
         if failure == 0 && (!lowering_text_contains(formatted, "declare @function0 external") || !lowering_text_contains(formatted, "logical_not") || !lowering_text_contains(formatted, "logical_or") || !lowering_text_contains(formatted, "logical_and") || !lowering_text_contains(formatted, "const 1.5") || !lowering_text_contains(formatted, "call @function1 touch")) then
             failure = 5
         end
+        let generated: LlvmGenerationResult = generate_llvm_ir(lowered.program, "lowering-operations")
+        if failure == 0 && !llvm_generation_succeeded(generated) then
+            console::print_line(generated.error)
+            failure = 6
+        end
+        if failure == 0 && lowering_text_contains(generated.text, "define i32 @main()") then
+            failure = 7
+        end
         destroy_ir_program(lowered.program)
     end
     destroy_semantic_program(semantic)
@@ -180,6 +194,10 @@ fn test_module_lowering() -> int
     else
         if vector_length<pointer<IrModule>>(lowered.program->modules) != 2 || lowered.program->entry_module->name != "application" || vector_get<pointer<IrModule>>(lowered.program->modules, 1)->name != "base" then
             failure = 3
+        end
+        let generated: LlvmGenerationResult = generate_llvm_ir(lowered.program, "lowering-modules")
+        if failure == 0 && (!llvm_generation_succeeded(generated) || !lowering_text_contains(generated.text, "call i64 @sol.function0()")) then
+            failure = 4
         end
         destroy_ir_program(lowered.program)
     end
