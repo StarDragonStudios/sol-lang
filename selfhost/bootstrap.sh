@@ -2,6 +2,7 @@
 set -eu
 
 SELFHOST_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "$SELFHOST_DIR/.." && pwd)
 
 SEED_SOLC=${SOLC:-solc}
 SOURCE="$SELFHOST_DIR/src/main.sol"
@@ -27,6 +28,12 @@ LLVM_TEST_OUTPUT="$TEST_BUILD_DIR/llvm_generation_test"
 LLVM_FIXTURE_SOURCE="$SELFHOST_DIR/src/llvm_fixture.sol"
 LLVM_FIXTURE_OUTPUT="$TEST_BUILD_DIR/llvm_fixture"
 LLVM_FIXTURE_IR="$TEST_BUILD_DIR/llvm_fixture.ll"
+NATIVE_ARTIFACT_SOURCE="$SELFHOST_DIR/src/native_artifact_fixture.sol"
+NATIVE_ARTIFACT_OUTPUT="$TEST_BUILD_DIR/native_artifact_fixture"
+NATIVE_FIXTURE_IR="$TEST_BUILD_DIR/native_fixture.ll"
+NATIVE_FIXTURE_LITERALS="$TEST_BUILD_DIR/native_literals.c"
+NATIVE_FIXTURE_OUTPUT="$TEST_BUILD_DIR/native fixture"
+NATIVE_FAILURE_DIAGNOSTIC="$TEST_BUILD_DIR/native-failure.txt"
 CLANG=${SOL_CLANG:-clang}
 
 VERSION=$("$SEED_SOLC" --version)
@@ -103,5 +110,31 @@ echo "bootstrap: compiling LLVM verification fixture"
 echo "bootstrap: verifying generated textual LLVM IR"
 "$LLVM_FIXTURE_OUTPUT" > "$LLVM_FIXTURE_IR"
 "$CLANG" -x ir -S -emit-llvm "$LLVM_FIXTURE_IR" -o /dev/null
+
+echo "bootstrap: compiling native artifact fixture"
+"$SEED_SOLC" "$NATIVE_ARTIFACT_SOURCE" -o "$NATIVE_ARTIFACT_OUTPUT"
+
+echo "bootstrap: generating deterministic native inputs"
+(cd "$REPO_ROOT" && "$NATIVE_ARTIFACT_OUTPUT")
+
+echo "bootstrap: compiling and linking native executable"
+"$SELFHOST_DIR/native-link.sh" "$NATIVE_FIXTURE_IR" "$NATIVE_FIXTURE_LITERALS" "$NATIVE_FIXTURE_OUTPUT"
+
+echo "bootstrap: validating linked native executable"
+printf '%s\n' input | (cd "$REPO_ROOT" && "$NATIVE_FIXTURE_OUTPUT")
+
+echo "bootstrap: validating native runtime failure contract"
+set +e
+printf '%s\n' vector-failure | (cd "$REPO_ROOT" && "$NATIVE_FIXTURE_OUTPUT") >/dev/null 2>"$NATIVE_FAILURE_DIAGNOSTIC"
+NATIVE_FAILURE_STATUS=$?
+set -e
+if [ "$NATIVE_FAILURE_STATUS" -ne 70 ]; then
+    echo "bootstrap error: expected native runtime status 70, got: $NATIVE_FAILURE_STATUS" >&2
+    exit 1
+fi
+if ! grep -Fx "Sol runtime error: vector index out of bounds." "$NATIVE_FAILURE_DIAGNOSTIC" >/dev/null; then
+    echo "bootstrap error: native runtime failure diagnostic did not match" >&2
+    exit 1
+fi
 
 echo "bootstrap: stage 1 ready at $OUTPUT"

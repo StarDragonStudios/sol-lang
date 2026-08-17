@@ -13,8 +13,9 @@ typed Sol IR
 → native executable
 ```
 
-Java orchestrates compilation and linking. The generated executable contains
-native machine code and does not require the JVM.
+The Java compiler and self-host bootstrap each orchestrate compilation and
+linking. The generated executable contains native machine code and does not
+require the JVM.
 
 The current implementation does not translate Sol to Java, C or Rust.
 

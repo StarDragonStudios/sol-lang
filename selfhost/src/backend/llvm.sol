@@ -205,12 +205,28 @@ fn emit_llvm_structs(context: pointer<LlvmGenerationContext>) -> void
 end
 
 fn emit_llvm_runtime_declarations(context: pointer<LlvmGenerationContext>) -> void
-    llvm_line(context, "; Runtime boundary. Literal storage and operations are provided by the native runtime in #123.")
-    llvm_line(context, "declare i32 @sol.runtime.char.literal(i64, i64)")
-    llvm_line(context, "declare %sol.string @sol.runtime.string.literal(i64, i64)")
-    llvm_line(context, "declare %sol.string @sol.runtime.string.concat(%sol.string, %sol.string)")
-    llvm_line(context, "declare i1 @sol.runtime.string.equal(%sol.string, %sol.string)")
-    llvm_line(context, "declare i32 @sol.runtime.string.index(%sol.string, i64)")
+    llvm_line(context, "; Runtime boundary. Literal storage and host operations are provided by the self-host native runtime.")
+    llvm_line(context, "declare i32 @sol_runtime_char_literal(i64, i64)")
+    llvm_line(context, "declare void @sol_runtime_string_literal(ptr, i64, i64)")
+    llvm_line(context, "declare void @sol_runtime_string_concat(ptr, ptr, i64, i64, ptr, i64, i64)")
+    llvm_line(context, "declare i1 @sol_runtime_string_equal(ptr, i64, ptr, i64)")
+    llvm_line(context, "declare i32 @sol_runtime_string_index(ptr, i64, i64, i64)")
+    llvm_line(context, "declare void @sol_runtime_string_slice(ptr, ptr, i64, i64, i64, i64)")
+    llvm_line(context, "declare void @sol_runtime_string_substring(ptr, ptr, i64, i64, i64, i64)")
+    llvm_line(context, "declare void @sol_runtime_console_print(ptr, i64)")
+    llvm_line(context, "declare void @sol_runtime_console_print_line(ptr, i64)")
+    llvm_line(context, "declare void @sol_runtime_console_read_line(ptr)")
+    llvm_line(context, "declare i1 @sol_runtime_file_exists(ptr, i64)")
+    llvm_line(context, "declare void @sol_runtime_file_read_text(ptr, ptr, i64)")
+    llvm_line(context, "declare i1 @sol_runtime_file_write_text(ptr, i64, ptr, i64)")
+    llvm_line(context, "declare i1 @sol_runtime_file_append_text(ptr, i64, ptr, i64)")
+    llvm_line(context, "declare void @sol_runtime_vector_fail_allocation()")
+    llvm_line(context, "declare void @sol_runtime_vector_fail_bounds()")
+    llvm_line(context, "declare void @sol_runtime_vector_fail_capacity()")
+    llvm_line(context, "declare void @sol_runtime_vector_fail_empty_pop()")
+    llvm_line(context, "declare ptr @malloc(i64)")
+    llvm_line(context, "declare ptr @realloc(ptr, i64)")
+    llvm_line(context, "declare void @free(ptr)")
     return
 end
 
@@ -231,8 +247,76 @@ fn emit_llvm_functions(context: pointer<LlvmGenerationContext>) -> void
     return
 end
 
-fn llvm_function_symbol(function_id: int) -> string
-    return "@sol.function" + format_ir_int(function_id)
+fn llvm_function_symbol(context: pointer<LlvmGenerationContext>, function_id: int) -> string
+    @mut let module_index: int = 0
+    while module_index < vector_length<pointer<IrModule>>(context->program->modules) do
+        let module: pointer<IrModule> = vector_get<pointer<IrModule>>(context->program->modules, module_index)
+        @mut let function_index: int = 0
+        while function_index < vector_length<pointer<IrFunction>>(module->functions) do
+            let function: pointer<IrFunction> = vector_get<pointer<IrFunction>>(module->functions, function_index)
+            if function->id == function_id then
+                return "@sol.function" + format_ir_int(function_id)
+            end
+            function_index = function_index + 1
+        end
+        module_index = module_index + 1
+    end
+    llvm_fail(context, "LLVM generation cannot resolve a canonical function symbol")
+    return "@sol.function.invalid"
+end
+
+fn llvm_standard_runtime_symbol(module_name: string, function_name: string) -> string
+    if module_name == "std.console" then
+        if function_name == "print" then
+            return "sol_runtime_console_print"
+        end
+        if function_name == "print_line" then
+            return "sol_runtime_console_print_line"
+        end
+        if function_name == "read_line" then
+            return "sol_runtime_console_read_line"
+        end
+    end
+    if module_name == "std.file" then
+        if function_name == "exists" then
+            return "sol_runtime_file_exists"
+        end
+        if function_name == "read_text" then
+            return "sol_runtime_file_read_text"
+        end
+        if function_name == "write_text" then
+            return "sol_runtime_file_write_text"
+        end
+        if function_name == "append_text" then
+            return "sol_runtime_file_append_text"
+        end
+    end
+    if module_name == "std.string" then
+        if function_name == "length" then
+            return "sol_runtime_string_length"
+        end
+        if function_name == "slice" then
+            return "sol_runtime_string_slice"
+        end
+        if function_name == "substring" then
+            return "sol_runtime_string_substring"
+        end
+    end
+    if module_name == "std.collections.vector" then
+        if function_name == "_vector_fail_allocation" then
+            return "sol_runtime_vector_fail_allocation"
+        end
+        if function_name == "_vector_fail_bounds" then
+            return "sol_runtime_vector_fail_bounds"
+        end
+        if function_name == "_vector_fail_capacity" then
+            return "sol_runtime_vector_fail_capacity"
+        end
+        if function_name == "_vector_fail_empty_pop" then
+            return "sol_runtime_vector_fail_empty_pop"
+        end
+    end
+    return ""
 end
 
 fn llvm_function_signature(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>, names: boolean) -> string
@@ -249,12 +333,20 @@ fn llvm_function_signature(context: pointer<LlvmGenerationContext>, function: po
         end
         index = index + 1
     end
-    return llvm_type(context, function->return_type) + " " + llvm_function_symbol(function->id) + "(" + parameters + ")"
+    return llvm_type(context, function->return_type) + " " + llvm_function_symbol(context, function->id) + "(" + parameters + ")"
 end
 
 fn emit_llvm_function(context: pointer<LlvmGenerationContext>, module: pointer<IrModule>, function: pointer<IrFunction>) -> void
     llvm_line(context, "; " + llvm_comment_text(module->name + "::" + function->name))
     if !function->has_body then
+        if module->name == "std.memory" then
+            emit_llvm_memory_function(context, function)
+            return
+        end
+        if module->name == "std.console" || module->name == "std.file" || module->name == "std.string" || module->name == "std.collections.vector" then
+            emit_llvm_standard_function(context, module, function)
+            return
+        end
         llvm_line(context, "declare " + llvm_function_signature(context, function, false))
         return
     end
@@ -264,6 +356,295 @@ fn emit_llvm_function(context: pointer<LlvmGenerationContext>, module: pointer<I
         emit_llvm_block(context, function, vector_get<pointer<IrBasicBlock>>(function->blocks, block_index), block_index == 0)
         block_index = block_index + 1
     end
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_standard_function(context: pointer<LlvmGenerationContext>, module: pointer<IrModule>, function: pointer<IrFunction>) -> void
+    if module->name == "std.console" then
+        emit_llvm_console_function(context, function)
+        return
+    end
+    if module->name == "std.file" then
+        emit_llvm_file_function(context, function)
+        return
+    end
+    if module->name == "std.string" then
+        emit_llvm_standard_string_function(context, function)
+        return
+    end
+    if module->name == "std.collections.vector" then
+        emit_llvm_vector_failure(context, function)
+        return
+    end
+    llvm_fail(context, "LLVM generation encountered an unsupported standard-library module")
+    return
+end
+
+fn emit_llvm_standard_string_fields(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>, parameter_index: int, prefix: string) -> void
+    let parameter: string = llvm_parameter_name(function, parameter_index)
+    llvm_line(context, "  %" + prefix + ".data = extractvalue %sol.string " + parameter + ", 0")
+    llvm_line(context, "  %" + prefix + ".bytes = extractvalue %sol.string " + parameter + ", 1")
+    llvm_line(context, "  %" + prefix + ".scalars = extractvalue %sol.string " + parameter + ", 2")
+    return
+end
+
+fn emit_llvm_console_function(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "runtime.entry:")
+    if function->name == "read_line" then
+        llvm_line(context, "  %runtime.result.address = alloca %sol.string")
+        llvm_line(context, "  call void @sol_runtime_console_read_line(ptr %runtime.result.address)")
+        llvm_line(context, "  %runtime.result = load %sol.string, ptr %runtime.result.address")
+        llvm_line(context, "  ret %sol.string %runtime.result")
+        llvm_line(context, "}")
+        return
+    end
+    emit_llvm_standard_string_fields(context, function, 0, "runtime.value")
+    if function->name == "print" then
+        llvm_line(context, "  call void @sol_runtime_console_print(ptr %runtime.value.data, i64 %runtime.value.bytes)")
+    else
+        if function->name == "print_line" then
+            llvm_line(context, "  call void @sol_runtime_console_print_line(ptr %runtime.value.data, i64 %runtime.value.bytes)")
+        else
+            llvm_fail(context, "LLVM generation encountered an unsupported std.console function")
+        end
+    end
+    llvm_line(context, "  ret void")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_standard_string_function(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "runtime.entry:")
+    emit_llvm_standard_string_fields(context, function, 0, "runtime.value")
+    if function->name == "length" then
+        llvm_line(context, "  ret i64 %runtime.value.scalars")
+        llvm_line(context, "}")
+        return
+    end
+    llvm_line(context, "  %runtime.result.address = alloca %sol.string")
+    if function->name == "slice" then
+        llvm_line(context, "  call void @sol_runtime_string_slice(ptr %runtime.result.address, ptr %runtime.value.data, i64 %runtime.value.bytes, i64 %runtime.value.scalars, i64 " + llvm_parameter_name(function, 1) + ", i64 " + llvm_parameter_name(function, 2) + ")")
+    else
+        if function->name == "substring" then
+            llvm_line(context, "  call void @sol_runtime_string_substring(ptr %runtime.result.address, ptr %runtime.value.data, i64 %runtime.value.bytes, i64 %runtime.value.scalars, i64 " + llvm_parameter_name(function, 1) + ", i64 " + llvm_parameter_name(function, 2) + ")")
+        else
+            llvm_fail(context, "LLVM generation encountered an unsupported std.string function")
+        end
+    end
+    llvm_line(context, "  %runtime.result = load %sol.string, ptr %runtime.result.address")
+    llvm_line(context, "  ret %sol.string %runtime.result")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_file_function(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "runtime.entry:")
+    emit_llvm_standard_string_fields(context, function, 0, "runtime.path")
+    if function->name == "exists" then
+        llvm_line(context, "  %runtime.result = call i1 @sol_runtime_file_exists(ptr %runtime.path.data, i64 %runtime.path.bytes)")
+        llvm_line(context, "  ret i1 %runtime.result")
+        llvm_line(context, "}")
+        return
+    end
+    if function->name == "read_text" then
+        llvm_line(context, "  %runtime.result.address = alloca %sol.string")
+        llvm_line(context, "  call void @sol_runtime_file_read_text(ptr %runtime.result.address, ptr %runtime.path.data, i64 %runtime.path.bytes)")
+        llvm_line(context, "  %runtime.result = load %sol.string, ptr %runtime.result.address")
+        llvm_line(context, "  ret %sol.string %runtime.result")
+        llvm_line(context, "}")
+        return
+    end
+    emit_llvm_standard_string_fields(context, function, 1, "runtime.content")
+    if function->name == "write_text" then
+        llvm_line(context, "  %runtime.result = call i1 @sol_runtime_file_write_text(ptr %runtime.path.data, i64 %runtime.path.bytes, ptr %runtime.content.data, i64 %runtime.content.bytes)")
+    else
+        if function->name == "append_text" then
+            llvm_line(context, "  %runtime.result = call i1 @sol_runtime_file_append_text(ptr %runtime.path.data, i64 %runtime.path.bytes, ptr %runtime.content.data, i64 %runtime.content.bytes)")
+        else
+            llvm_fail(context, "LLVM generation encountered an unsupported std.file function")
+        end
+    end
+    llvm_line(context, "  ret i1 %runtime.result")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_vector_failure(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    let runtime: string = llvm_standard_runtime_symbol("std.collections.vector", function->name)
+    if runtime == "" then
+        llvm_fail(context, "LLVM generation encountered an unsupported vector runtime function")
+        return
+    end
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "runtime.entry:")
+    llvm_line(context, "  call void @" + runtime + "()")
+    llvm_line(context, "  unreachable")
+    llvm_line(context, "}")
+    return
+end
+
+fn llvm_function_name_is(name: string, expected: string) -> boolean
+    if name == expected then
+        return true
+    end
+    let expected_length: int = strings::length(expected)
+    if strings::length(name) <= expected_length then
+        return false
+    end
+    return strings::slice(name, 0, expected_length + 1) == expected + "$"
+end
+
+fn emit_llvm_memory_function(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    if llvm_function_name_is(function->name, "allocate") then
+        emit_llvm_memory_allocate(context, function)
+        return
+    end
+    if llvm_function_name_is(function->name, "reallocate") then
+        emit_llvm_memory_reallocate(context, function)
+        return
+    end
+    if llvm_function_name_is(function->name, "free") then
+        emit_llvm_memory_free(context, function)
+        return
+    end
+    if llvm_function_name_is(function->name, "load_at") then
+        emit_llvm_memory_load(context, function, true)
+        return
+    end
+    if llvm_function_name_is(function->name, "load") then
+        emit_llvm_memory_load(context, function, false)
+        return
+    end
+    if llvm_function_name_is(function->name, "store_at") then
+        emit_llvm_memory_store(context, function, true)
+        return
+    end
+    if llvm_function_name_is(function->name, "store") then
+        emit_llvm_memory_store(context, function, false)
+        return
+    end
+    llvm_fail(context, "LLVM generation encountered an unsupported std.memory function")
+    return
+end
+
+fn llvm_parameter_name(function: pointer<IrFunction>, index: int) -> string
+    return "%value" + format_ir_int(vector_get<pointer<IrParameter>>(function->parameters, index)->value->id)
+end
+
+fn llvm_memory_element_type(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> pointer<IrType>
+    if function->return_type->kind == ir_type_pointer() then
+        return function->return_type->element_type
+    end
+    let first: pointer<IrType> = vector_get<pointer<IrParameter>>(function->parameters, 0)->value->type
+    if first->kind == ir_type_pointer() then
+        return first->element_type
+    end
+    llvm_fail(context, "LLVM std.memory function has no concrete element type")
+    return null
+end
+
+fn emit_llvm_memory_size(context: pointer<LlvmGenerationContext>, element: pointer<IrType>) -> void
+    let type: string = llvm_type(context, element)
+    llvm_line(context, "  %element.size = ptrtoint ptr getelementptr (" + type + ", ptr null, i32 1) to i64")
+    return
+end
+
+fn emit_llvm_memory_allocate(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    let count: string = llvm_parameter_name(function, 0)
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "memory.entry:")
+    llvm_line(context, "  %count.positive = icmp sgt i64 " + count + ", 0")
+    llvm_line(context, "  br i1 %count.positive, label %memory.size, label %memory.invalid")
+    llvm_line(context, "memory.size:")
+    emit_llvm_memory_size(context, llvm_memory_element_type(context, function))
+    llvm_line(context, "  %size.positive = icmp sgt i64 %element.size, 0")
+    llvm_line(context, "  br i1 %size.positive, label %memory.bounds, label %memory.invalid")
+    llvm_line(context, "memory.bounds:")
+    llvm_line(context, "  %maximum.count = udiv i64 9223372036854775807, %element.size")
+    llvm_line(context, "  %count.fits = icmp sle i64 " + count + ", %maximum.count")
+    llvm_line(context, "  br i1 %count.fits, label %memory.allocate, label %memory.invalid")
+    llvm_line(context, "memory.allocate:")
+    llvm_line(context, "  %allocation.bytes = mul i64 " + count + ", %element.size")
+    llvm_line(context, "  %allocation.result = call ptr @malloc(i64 %allocation.bytes)")
+    llvm_line(context, "  ret ptr %allocation.result")
+    llvm_line(context, "memory.invalid:")
+    llvm_line(context, "  ret ptr null")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_memory_reallocate(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    let pointer_value: string = llvm_parameter_name(function, 0)
+    let count: string = llvm_parameter_name(function, 1)
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "memory.entry:")
+    llvm_line(context, "  %count.zero = icmp eq i64 " + count + ", 0")
+    llvm_line(context, "  br i1 %count.zero, label %memory.release, label %memory.positive")
+    llvm_line(context, "memory.release:")
+    llvm_line(context, "  call void @free(ptr " + pointer_value + ")")
+    llvm_line(context, "  ret ptr null")
+    llvm_line(context, "memory.positive:")
+    llvm_line(context, "  %count.valid = icmp sgt i64 " + count + ", 0")
+    llvm_line(context, "  br i1 %count.valid, label %memory.size, label %memory.invalid")
+    llvm_line(context, "memory.size:")
+    emit_llvm_memory_size(context, llvm_memory_element_type(context, function))
+    llvm_line(context, "  %size.positive = icmp sgt i64 %element.size, 0")
+    llvm_line(context, "  br i1 %size.positive, label %memory.bounds, label %memory.invalid")
+    llvm_line(context, "memory.bounds:")
+    llvm_line(context, "  %maximum.count = udiv i64 9223372036854775807, %element.size")
+    llvm_line(context, "  %count.fits = icmp sle i64 " + count + ", %maximum.count")
+    llvm_line(context, "  br i1 %count.fits, label %memory.resize, label %memory.invalid")
+    llvm_line(context, "memory.resize:")
+    llvm_line(context, "  %allocation.bytes = mul i64 " + count + ", %element.size")
+    llvm_line(context, "  %allocation.result = call ptr @realloc(ptr " + pointer_value + ", i64 %allocation.bytes)")
+    llvm_line(context, "  ret ptr %allocation.result")
+    llvm_line(context, "memory.invalid:")
+    llvm_line(context, "  ret ptr null")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_memory_free(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> void
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "memory.entry:")
+    llvm_line(context, "  call void @free(ptr " + llvm_parameter_name(function, 0) + ")")
+    llvm_line(context, "  ret void")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_memory_load(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>, indexed: boolean) -> void
+    let element: string = llvm_type(context, llvm_memory_element_type(context, function))
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "memory.entry:")
+    @mut let address: string = llvm_parameter_name(function, 0)
+    if indexed then
+        llvm_line(context, "  %memory.address = getelementptr " + element + ", ptr " + address + ", i64 " + llvm_parameter_name(function, 1))
+        address = "%memory.address"
+    end
+    llvm_line(context, "  %memory.value = load " + element + ", ptr " + address)
+    llvm_line(context, "  ret " + element + " %memory.value")
+    llvm_line(context, "}")
+    return
+end
+
+fn emit_llvm_memory_store(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>, indexed: boolean) -> void
+    let element: string = llvm_type(context, llvm_memory_element_type(context, function))
+    llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
+    llvm_line(context, "memory.entry:")
+    @mut let address: string = llvm_parameter_name(function, 0)
+    @mut let value_index: int = 1
+    if indexed then
+        llvm_line(context, "  %memory.address = getelementptr " + element + ", ptr " + address + ", i64 " + llvm_parameter_name(function, 1))
+        address = "%memory.address"
+        value_index = 2
+    end
+    llvm_line(context, "  store " + element + " " + llvm_parameter_name(function, value_index) + ", ptr " + address)
+    llvm_line(context, "  ret void")
     llvm_line(context, "}")
     return
 end
@@ -328,11 +709,13 @@ end
 fn emit_llvm_literal(context: pointer<LlvmGenerationContext>, value: pointer<IrValue>, function_id: int, block_id: int, instruction_id: int, operand_id: int) -> void
     if value->kind == ir_value_char_constant() then
         llvm_line(context, "  ; char literal " + llvm_comment_text(value->string_value))
-        llvm_line(context, "  " + llvm_literal_name(block_id, instruction_id, operand_id) + " = call i32 @sol.runtime.char.literal(i64 " + format_ir_int(function_id) + ", i64 " + format_ir_int(value->id) + ")")
+        llvm_line(context, "  " + llvm_literal_name(block_id, instruction_id, operand_id) + " = call i32 @sol_runtime_char_literal(i64 " + format_ir_int(function_id) + ", i64 " + format_ir_int(value->id) + ")")
     end
     if value->kind == ir_value_string_constant() then
         llvm_line(context, "  ; string literal " + llvm_comment_text(quote_ir_string(value->string_value)))
-        llvm_line(context, "  " + llvm_literal_name(block_id, instruction_id, operand_id) + " = call %sol.string @sol.runtime.string.literal(i64 " + format_ir_int(function_id) + ", i64 " + format_ir_int(value->id) + ")")
+        llvm_line(context, "  " + llvm_literal_name(block_id, instruction_id, operand_id) + ".address = alloca %sol.string")
+        llvm_line(context, "  call void @sol_runtime_string_literal(ptr " + llvm_literal_name(block_id, instruction_id, operand_id) + ".address, i64 " + format_ir_int(function_id) + ", i64 " + format_ir_int(value->id) + ")")
+        llvm_line(context, "  " + llvm_literal_name(block_id, instruction_id, operand_id) + " = load %sol.string, ptr " + llvm_literal_name(block_id, instruction_id, operand_id) + ".address")
     end
     return
 end
@@ -361,6 +744,19 @@ end
 
 fn llvm_operand(context: pointer<LlvmGenerationContext>, value: pointer<IrValue>, block_id: int, instruction_id: int, operand_id: int) -> string
     return llvm_type(context, value->type) + " " + llvm_value(value, block_id, instruction_id, operand_id)
+end
+
+fn llvm_string_temporary(block_id: int, instruction_id: int, operand_id: int) -> string
+    return "%string.b" + format_ir_int(block_id) + ".i" + format_ir_int(instruction_id) + ".o" + format_ir_int(operand_id)
+end
+
+fn emit_llvm_string_fields(context: pointer<LlvmGenerationContext>, value: pointer<IrValue>, block_id: int, instruction_id: int, operand_id: int) -> string
+    let temporary: string = llvm_string_temporary(block_id, instruction_id, operand_id)
+    let source: string = llvm_value(value, block_id, instruction_id, operand_id)
+    llvm_line(context, "  " + temporary + ".data = extractvalue %sol.string " + source + ", 0")
+    llvm_line(context, "  " + temporary + ".bytes = extractvalue %sol.string " + source + ", 1")
+    llvm_line(context, "  " + temporary + ".scalars = extractvalue %sol.string " + source + ", 2")
+    return temporary
 end
 
 fn emit_llvm_instruction(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, block_id: int, instruction_id: int) -> void
@@ -424,7 +820,8 @@ fn emit_llvm_instruction(context: pointer<LlvmGenerationContext>, instruction: p
     if instruction->kind == ir_instruction_string_index() then
         let text: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
         let index: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 1)
-        llvm_line(context, "  " + result + " = call i32 @sol.runtime.string.index(" + llvm_operand(context, text, block_id, instruction_id, 0) + ", " + llvm_operand(context, index, block_id, instruction_id, 1) + ")")
+        let fields: string = emit_llvm_string_fields(context, text, block_id, instruction_id, 0)
+        llvm_line(context, "  " + result + " = call i32 @sol_runtime_string_index(ptr " + fields + ".data, i64 " + fields + ".bytes, i64 " + fields + ".scalars, " + llvm_operand(context, index, block_id, instruction_id, 1) + ")")
         return
     end
     llvm_fail(context, "LLVM generation encountered an unsupported instruction")
@@ -466,15 +863,19 @@ fn emit_llvm_binary(context: pointer<LlvmGenerationContext>, instruction: pointe
     let right: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 1)
     let result: string = llvm_instruction_result(instruction)
     if left->type == context->program->arena->string_type then
+        let left_fields: string = emit_llvm_string_fields(context, left, block_id, instruction_id, 0)
+        let right_fields: string = emit_llvm_string_fields(context, right, block_id, instruction_id, 1)
         if instruction->operator == ir_binary_add() then
-            llvm_line(context, "  " + result + " = call %sol.string @sol.runtime.string.concat(" + llvm_operand(context, left, block_id, instruction_id, 0) + ", " + llvm_operand(context, right, block_id, instruction_id, 1) + ")")
+            llvm_line(context, "  " + result + ".address = alloca %sol.string")
+            llvm_line(context, "  call void @sol_runtime_string_concat(ptr " + result + ".address, ptr " + left_fields + ".data, i64 " + left_fields + ".bytes, i64 " + left_fields + ".scalars, ptr " + right_fields + ".data, i64 " + right_fields + ".bytes, i64 " + right_fields + ".scalars)")
+            llvm_line(context, "  " + result + " = load %sol.string, ptr " + result + ".address")
             return
         end
         if instruction->operator == ir_binary_not_equal() then
-            llvm_line(context, "  " + result + ".equal = call i1 @sol.runtime.string.equal(" + llvm_operand(context, left, block_id, instruction_id, 0) + ", " + llvm_operand(context, right, block_id, instruction_id, 1) + ")")
+            llvm_line(context, "  " + result + ".equal = call i1 @sol_runtime_string_equal(ptr " + left_fields + ".data, i64 " + left_fields + ".bytes, ptr " + right_fields + ".data, i64 " + right_fields + ".bytes)")
             llvm_line(context, "  " + result + " = xor i1 " + result + ".equal, true")
         else
-            llvm_line(context, "  " + result + " = call i1 @sol.runtime.string.equal(" + llvm_operand(context, left, block_id, instruction_id, 0) + ", " + llvm_operand(context, right, block_id, instruction_id, 1) + ")")
+            llvm_line(context, "  " + result + " = call i1 @sol_runtime_string_equal(ptr " + left_fields + ".data, i64 " + left_fields + ".bytes, ptr " + right_fields + ".data, i64 " + right_fields + ".bytes)")
         end
         return
     end
@@ -568,7 +969,7 @@ fn emit_llvm_call(context: pointer<LlvmGenerationContext>, instruction: pointer<
     if instruction->result != null then
         line = line + llvm_instruction_result(instruction) + " = "
     end
-    line = line + "call " + llvm_type(context, instruction->target->return_type) + " " + llvm_function_symbol(instruction->target->id) + "(" + arguments + ")"
+    line = line + "call " + llvm_type(context, instruction->target->return_type) + " " + llvm_function_symbol(context, instruction->target->id) + "(" + arguments + ")"
     llvm_line(context, line)
     return
 end
@@ -670,7 +1071,7 @@ fn emit_llvm_entry(context: pointer<LlvmGenerationContext>) -> void
     end
     llvm_line(context, "define i32 @main() {")
     llvm_line(context, "entry:")
-    llvm_line(context, "  %sol.status64 = call i64 " + llvm_function_symbol(entry->id) + "()")
+    llvm_line(context, "  %sol.status64 = call i64 " + llvm_function_symbol(context, entry->id) + "()")
     llvm_line(context, "  %sol.status = trunc i64 %sol.status64 to i32")
     llvm_line(context, "  ret i32 %sol.status")
     llvm_line(context, "}")
