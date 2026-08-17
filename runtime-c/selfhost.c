@@ -6,9 +6,9 @@
 #include <string.h>
 
 static void sol_runtime_panic(const char *message) {
-    fputs(message, stderr);
-    fputc('\n', stderr);
-    fflush(stderr);
+    fputs(message, stdout);
+    fputc('\n', stdout);
+    fflush(stdout);
     exit(70);
 }
 
