@@ -215,4 +215,7 @@ if [ "$CLI_STATUS" -ne 29 ]; then
     exit 1
 fi
 
+echo "bootstrap: running released-versus-self-host conformance"
+SOLC="$SEED_SOLC" SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/conformance/run.sh"
+
 echo "bootstrap: stage 1 ready at $OUTPUT"

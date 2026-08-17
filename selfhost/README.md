@@ -68,7 +68,8 @@ selfhost/build/stage1/solc-core
 16. compiles the LLVM, runtime and literal registry to native objects;
 17. links and executes the resulting Unicode/file/memory smoke-test program;
 18. compiles and runs a multi-module program through self-host `solc`;
-19. validates retained artifacts, CLI rejection, source diagnostics and `sol run` status propagation.
+19. validates retained artifacts, CLI rejection, source diagnostics and `sol run` status propagation;
+20. runs the released-versus-self-host language, runtime and CLI conformance gate.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -89,6 +90,8 @@ boundary, and
 object generation and linking. The public commands and private bootstrap
 request are documented in
 [`docs/selfhost-cli.md`](../docs/selfhost-cli.md).
+The portable conformance catalog and comparison rules are documented in
+[`docs/selfhost-conformance.md`](../docs/selfhost-conformance.md).
 
 ### Windows
 
