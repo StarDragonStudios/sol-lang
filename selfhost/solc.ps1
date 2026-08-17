@@ -1,8 +1,12 @@
 $ErrorActionPreference = "Stop"
 $CliArguments = [string[]] $args
 $SelfhostDirectory = $PSScriptRoot
-$Core = if ($env:SOL_SELFHOST_CORE) { $env:SOL_SELFHOST_CORE } else { Join-Path $SelfhostDirectory "build\stage1\solc-core.exe" }
-$StandardLibrary = if ($env:SOL_SELFHOST_STDLIB) { $env:SOL_SELFHOST_STDLIB } else { Join-Path $SelfhostDirectory "stdlib" }
+$RepositoryCore = Join-Path $SelfhostDirectory "build\stage1\solc-core.exe"
+$SeedCore = Join-Path $SelfhostDirectory "..\libexec\solc-core.exe"
+$RepositoryStandardLibrary = Join-Path $SelfhostDirectory "stdlib"
+$SeedStandardLibrary = Join-Path $SelfhostDirectory "..\stdlib"
+$Core = if ($env:SOL_SELFHOST_CORE) { $env:SOL_SELFHOST_CORE } elseif ([IO.File]::Exists($RepositoryCore)) { $RepositoryCore } else { $SeedCore }
+$StandardLibrary = if ($env:SOL_SELFHOST_STDLIB) { $env:SOL_SELFHOST_STDLIB } elseif ([IO.Directory]::Exists($RepositoryStandardLibrary)) { $RepositoryStandardLibrary } else { $SeedStandardLibrary }
 $NativeLink = if ($env:SOL_SELFHOST_NATIVE_LINK) { $env:SOL_SELFHOST_NATIVE_LINK } else { Join-Path $SelfhostDirectory "native-link.bat" }
 
 function Exit-CommandError([string] $Message) {

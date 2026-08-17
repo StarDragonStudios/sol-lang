@@ -2,6 +2,17 @@ name: Release
 
 on:
     workflow_dispatch:
+        inputs:
+            release_tag:
+                description: Existing or new release tag that receives the verified native seeds
+                required: true
+                default: v0.1.1
+                type: string
+            publish:
+                description: Upload verified seeds to the designated GitHub release
+                required: true
+                default: false
+                type: boolean
     push:
         tags:
             - "v*"
@@ -22,43 +33,43 @@ jobs:
                         platform: linux-x86_64
                         gradle: ./gradlew
                         java_distribution: temurin
-                        asset: sol-0.1.1-linux-x86_64.tar.gz
                         linker: clang
+                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: ubuntu-24.04-arm
                         platform: linux-arm64
                         gradle: ./gradlew
                         java_distribution: temurin
-                        asset: sol-0.1.1-linux-arm64.tar.gz
                         linker: clang
+                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: macos-15-intel
                         platform: macosx-x86_64
                         gradle: ./gradlew
                         java_distribution: temurin
-                        asset: sol-0.1.1-macosx-x86_64.tar.gz
                         linker: clang
+                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: macos-15
                         platform: macosx-arm64
                         gradle: ./gradlew
                         java_distribution: temurin
-                        asset: sol-0.1.1-macosx-arm64.tar.gz
                         linker: clang
+                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: windows-2025
                         platform: windows-x86_64
                         gradle: ./gradlew.bat
                         java_distribution: temurin
-                        asset: sol-0.1.1-windows-x86_64.zip
                         linker: C:\Program Files\LLVM\bin\clang.exe
+                        seed: ${{ github.workspace }}\compiler\build\install\sol\bin\solc.bat
 
                     -   runner: windows-11-arm
                         platform: windows-arm64
                         gradle: ./gradlew.bat
                         java_distribution: zulu
-                        asset: sol-0.1.1-windows-arm64.zip
                         linker: C:\Program Files\LLVM\bin\clang.exe
+                        seed: ${{ github.workspace }}\compiler\build\install\sol\bin\solc.bat
 
         steps:
             -   name: Checkout repository
@@ -82,20 +93,33 @@ jobs:
                     distributionSmokeTest
                     assembleDist
 
-            -   name: Upload release asset
+            -   name: Build and verify reproducible native seed
+                env:
+                    SOLC: ${{ matrix.seed }}
+                    SOL_LINKER: ${{ matrix.linker }}
+                    SOL_SEED_TARGET: ${{ matrix.platform }}
+                run: |
+                    python selfhost/seed/test_seed.py
+                    python selfhost/seed/build.py
+
+            -   name: Upload native seed release asset
                 uses: actions/upload-artifact@v7
                 with:
-                    name: release-${{ matrix.platform }}
-                    path: compiler/build/distributions/${{ matrix.asset }}
+                    name: seed-${{ matrix.platform }}
+                    path: |
+                        selfhost/build/seed artifacts/dist/sol-bootstrap-*-${{ matrix.platform }}*
                     if-no-files-found: error
                     compression-level: 0
                     retention-days: 7
 
     publish:
         name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
         needs: build
         runs-on: ubuntu-latest
+
+        env:
+            RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
         permissions:
             contents: write
@@ -107,7 +131,7 @@ jobs:
             -   name: Download release assets
                 uses: actions/download-artifact@v8
                 with:
-                    pattern: release-*
+                    pattern: seed-*
                     path: dist
                     merge-multiple: true
 
@@ -116,54 +140,84 @@ jobs:
                 run: |
                     set -euo pipefail
 
-                    version="${GITHUB_REF_NAME#v}"
+                    version="${RELEASE_TAG#v}"
+                    metadata_version="$(python -c 'import json; print(json.load(open("selfhost/seed/metadata.json"))["version"])')"
 
-                    if [[ "${version}" != "0.1.1" ]]; then
-                        echo "::error::This release workflow is prepared for v0.1.1, not ${GITHUB_REF_NAME}."
+                    if [[ "${RELEASE_TAG}" != "v${metadata_version}" || "${version}" != "${metadata_version}" ]]; then
+                        echo "::error::Tag ${RELEASE_TAG} does not match seed metadata ${metadata_version}."
                         exit 1
                     fi
 
-                    expected=(
-                        "sol-${version}-linux-x86_64.tar.gz"
-                        "sol-${version}-linux-arm64.tar.gz"
-                        "sol-${version}-macosx-x86_64.tar.gz"
-                        "sol-${version}-macosx-arm64.tar.gz"
-                        "sol-${version}-windows-x86_64.zip"
-                        "sol-${version}-windows-arm64.zip"
+                    expected_seeds=(
+                        "sol-bootstrap-${version}-linux-x86_64.tar.gz"
+                        "sol-bootstrap-${version}-linux-arm64.tar.gz"
+                        "sol-bootstrap-${version}-macosx-x86_64.tar.gz"
+                        "sol-bootstrap-${version}-macosx-arm64.tar.gz"
+                        "sol-bootstrap-${version}-windows-x86_64.zip"
+                        "sol-bootstrap-${version}-windows-arm64.zip"
                     )
 
-                    for asset in "${expected[@]}"; do
+                    for asset in "${expected_seeds[@]}"; do
                         if [[ ! -f "dist/${asset}" ]]; then
                             echo "::error::Missing release asset: ${asset}"
                             exit 1
                         fi
                     done
 
+                    targets=(
+                        linux-x86_64
+                        linux-arm64
+                        macosx-x86_64
+                        macosx-arm64
+                        windows-x86_64
+                        windows-arm64
+                    )
+
+                    for target in "${targets[@]}"; do
+                        provenance="sol-bootstrap-${version}-${target}.provenance.json"
+                        if [[ ! -f "dist/${provenance}" ]]; then
+                            echo "::error::Missing release provenance: ${provenance}"
+                            exit 1
+                        fi
+                    done
+
             -   name: Generate SHA-256 checksums
                 working-directory: dist
-                run: sha256sum sol-* > SHA256SUMS.txt
+                run: sha256sum sol-bootstrap-*.tar.gz sol-bootstrap-*.zip | sort -k2 > SHA256SUMS
 
             -   name: Record bootstrap seed provenance
                 shell: bash
                 run: |
                     cat > dist/SEED-PROVENANCE.txt <<EOF
                     Sol 0.1.1 bootstrap seed
-                    tag: ${GITHUB_REF_NAME}
+                    tag: ${RELEASE_TAG}
                     commit: ${GITHUB_SHA}
                     repository: https://github.com/${GITHUB_REPOSITORY}
                     workflow: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
                     builders: GitHub-hosted runners, Java 25, Gradle wrapper
                     targets: linux-x86_64, linux-arm64, macosx-x86_64, macosx-arm64, windows-x86_64, windows-arm64
-                    checksums: SHA256SUMS.txt
+                    checksums: SHA256SUMS
+                    artifact type: native stage-3 bootstrap seeds (no JVM)
                     EOF
 
             -   name: Publish release
                 env:
                     GH_TOKEN: ${{ github.token }}
                 run: |
-                    gh release create "${GITHUB_REF_NAME}" \
-                        dist/* \
-                        --repo "${GITHUB_REPOSITORY}" \
-                        --verify-tag \
-                        --title "Sol ${GITHUB_REF_NAME#v}" \
-                        --notes-file docs/releases/sol-0.1.1.md
+                    if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+                        gh release upload "${RELEASE_TAG}" \
+                            dist/* \
+                            --repo "${GITHUB_REPOSITORY}" \
+                            --clobber
+                        gh release edit "${RELEASE_TAG}" \
+                            --repo "${GITHUB_REPOSITORY}" \
+                            --title "Sol ${RELEASE_TAG#v}" \
+                            --notes-file docs/releases/sol-0.1.1.md
+                    else
+                        gh release create "${RELEASE_TAG}" \
+                            dist/* \
+                            --repo "${GITHUB_REPOSITORY}" \
+                            --verify-tag \
+                            --title "Sol ${RELEASE_TAG#v}" \
+                            --notes-file docs/releases/sol-0.1.1.md
+                    fi

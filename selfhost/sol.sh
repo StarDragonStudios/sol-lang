@@ -2,7 +2,14 @@
 set -eu
 
 SELFHOST_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-SOLC=${SOL_SELFHOST_SOLC:-$SELFHOST_DIR/solc.sh}
+if [ "${SOL_SELFHOST_SOLC+x}" = x ]; then
+    SOLC=$SOL_SELFHOST_SOLC
+else
+    SOLC=$SELFHOST_DIR/solc.sh
+    if [ ! -f "$SOLC" ] && [ -f "$SELFHOST_DIR/solc" ]; then
+        SOLC=$SELFHOST_DIR/solc
+    fi
+fi
 
 command_error() {
     echo "command-line error: $1" >&2
