@@ -2,8 +2,16 @@
 set -eu
 
 SELFHOST_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-CORE=${SOL_SELFHOST_CORE:-$SELFHOST_DIR/build/stage1/solc-core}
-STANDARD_LIBRARY=${SOL_SELFHOST_STDLIB:-$SELFHOST_DIR/stdlib}
+DEFAULT_CORE=$SELFHOST_DIR/build/stage1/solc-core
+DEFAULT_STANDARD_LIBRARY=$SELFHOST_DIR/stdlib
+if [ ! -f "$DEFAULT_CORE" ] && [ -f "$SELFHOST_DIR/../libexec/solc-core" ]; then
+    DEFAULT_CORE=$SELFHOST_DIR/../libexec/solc-core
+fi
+if [ ! -d "$DEFAULT_STANDARD_LIBRARY" ] && [ -d "$SELFHOST_DIR/../stdlib" ]; then
+    DEFAULT_STANDARD_LIBRARY=$SELFHOST_DIR/../stdlib
+fi
+CORE=${SOL_SELFHOST_CORE:-$DEFAULT_CORE}
+STANDARD_LIBRARY=${SOL_SELFHOST_STDLIB:-$DEFAULT_STANDARD_LIBRARY}
 NATIVE_LINK=${SOL_SELFHOST_NATIVE_LINK:-$SELFHOST_DIR/native-link.sh}
 
 command_error() {
