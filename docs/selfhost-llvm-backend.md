@@ -10,8 +10,9 @@ fn generate_llvm_ir(program: pointer<IrProgram>, module_name: string) -> LlvmGen
 Generation is deliberately independent of the lexer, parser, semantic model
 and host target. It consumes only validated Sol IR and returns either the
 complete module text or one stable error message. It does not initialize an
-LLVM target, choose a data layout, optimize, emit an object file or invoke a
-linker. Those responsibilities belong to the native-output work in #123.
+LLVM target or choose a data layout. Native artifact generation and the host
+driver are described in
+[`selfhost-native-toolchain.md`](selfhost-native-toolchain.md).
 
 ## Type and identity mapping
 
@@ -64,25 +65,24 @@ The native adapter calls the zero-parameter Sol entry function, truncates its
 
 ## Runtime boundary
 
-String operations are emitted as calls to stable `sol.runtime.string.*`
+String operations are emitted as calls to stable C-compatible
+`sol_runtime_string_*`
 declarations. Unicode `char` and `string` constants are materialized through
 runtime declarations keyed by the globally unique function id and the
 function-local IR value id. Their exact decoded value is also preserved in a
 deterministic LLVM comment.
 
-Other bodyless functions—including the canonical memory, console, file and
-vector-failure boundaries—remain explicit `@sol.functionN` declarations and
-ordinary typed calls. Their canonical function identities are preserved for
-the runtime resolver in #123; the textual pass does not substitute host calls
-or target-dependent allocator sizes.
+Canonical bodyless standard-library functions receive typed LLVM adapters.
+Memory operations lower directly to allocation, typed load/store and typed
+indexing instructions. Console, file, string and vector-failure adapters cross
+the C boundary using only pointers and scalar fields; `%sol.string` aggregate
+values never depend on a platform-specific C aggregate calling convention.
 
 This boundary is intentional. Sol 0.1.1 exposes string length in Unicode
 scalars, but it does not expose raw UTF-8 bytes or a numeric `char` conversion
-to self-hosted code. The textual backend therefore does not guess byte lengths,
-reinterpret opaque string storage or add a hidden language intrinsic. Issue
-#123 will provide the native literal registry and runtime definitions while it
-adds object emission and linking. LLVM verification does not require those
-external declarations to be linked.
+to self-hosted code. The native artifact pass therefore emits a deterministic C
+literal registry with exact UTF-8 byte and scalar lengths. The separately
+compiled runtime validates UTF-8 at host input boundaries.
 
 ## Verification
 
@@ -100,6 +100,7 @@ clang -x ir -S -emit-llvm generated.ll -o <discard>
 ```
 
 Set `SOL_CLANG` when Clang is not available as `clang` on `PATH`. This is the
-authoritative syntax and verifier gate on both Linux and Windows. Target
-triples, data layouts, archives and executable smoke tests remain part of
-#123 and the 0.1.1 release gate.
+authoritative syntax and verifier gate on both Linux and Windows. The bootstrap
+then compiles the generated LLVM module, runtime and literal registry to
+objects, links them, and executes the result. Target archives and release smoke
+tests remain part of the 0.1.1 release gate.

@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "SELFHOST_DIR=%~dp0"
 
@@ -32,6 +32,14 @@ set "LLVM_TEST_OUTPUT=%TEST_BUILD_DIR%\llvm_generation_test.exe"
 set "LLVM_FIXTURE_SOURCE=%SELFHOST_DIR%src\llvm_fixture.sol"
 set "LLVM_FIXTURE_OUTPUT=%TEST_BUILD_DIR%\llvm_fixture.exe"
 set "LLVM_FIXTURE_IR=%TEST_BUILD_DIR%\llvm_fixture.ll"
+set "NATIVE_ARTIFACT_SOURCE=%SELFHOST_DIR%src\native_artifact_fixture.sol"
+set "NATIVE_ARTIFACT_OUTPUT=%TEST_BUILD_DIR%\native_artifact_fixture.exe"
+set "NATIVE_FIXTURE_IR=%TEST_BUILD_DIR%\native_fixture.ll"
+set "NATIVE_FIXTURE_LITERALS=%TEST_BUILD_DIR%\native_literals.c"
+set "NATIVE_FIXTURE_OUTPUT=%TEST_BUILD_DIR%\native fixture.exe"
+set "NATIVE_INPUT=%TEST_BUILD_DIR%\native-input.txt"
+set "NATIVE_FAILURE_DIAGNOSTIC=%TEST_BUILD_DIR%\native-failure.txt"
+set "NATIVE_FAILURE_STDERR=%TEST_BUILD_DIR%\native-failure.stderr.txt"
 if defined SOL_CLANG (
     set "CLANG=%SOL_CLANG%"
 ) else if defined SOL_LINKER (
@@ -140,6 +148,49 @@ echo bootstrap: verifying generated textual LLVM IR
 if errorlevel 1 exit /b %errorlevel%
 call "%CLANG%" -x ir -S -emit-llvm "%LLVM_FIXTURE_IR%" -o NUL
 if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling native artifact fixture
+call "%SEED_SOLC%" "%NATIVE_ARTIFACT_SOURCE%" -o "%NATIVE_ARTIFACT_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: generating deterministic native inputs
+pushd "%SELFHOST_DIR%.."
+"%NATIVE_ARTIFACT_OUTPUT%"
+set "NATIVE_RESULT=%errorlevel%"
+popd
+if not "!NATIVE_RESULT!"=="0" exit /b !NATIVE_RESULT!
+
+echo bootstrap: compiling and linking native executable
+call "%SELFHOST_DIR%native-link.bat" "%NATIVE_FIXTURE_IR%" "%NATIVE_FIXTURE_LITERALS%" "%NATIVE_FIXTURE_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating linked native executable
+echo input>"%NATIVE_INPUT%"
+pushd "%SELFHOST_DIR%.."
+"%NATIVE_FIXTURE_OUTPUT%" < "%NATIVE_INPUT%"
+set "NATIVE_RESULT=%errorlevel%"
+popd
+if not "!NATIVE_RESULT!"=="0" exit /b !NATIVE_RESULT!
+
+echo bootstrap: validating native runtime failure contract
+echo vector-failure>"%NATIVE_INPUT%"
+pushd "%SELFHOST_DIR%.."
+"%NATIVE_FIXTURE_OUTPUT%" < "%NATIVE_INPUT%" >"%NATIVE_FAILURE_DIAGNOSTIC%" 2>"%NATIVE_FAILURE_STDERR%"
+set "NATIVE_RESULT=!errorlevel!"
+popd
+if not "!NATIVE_RESULT!"=="70" (
+    echo bootstrap error: expected native runtime status 70, got: !NATIVE_RESULT! 1>&2
+    exit /b 1
+)
+findstr /x /c:"Sol runtime error: vector index out of bounds." "%NATIVE_FAILURE_DIAGNOSTIC%" >nul
+if errorlevel 1 (
+    echo bootstrap error: native runtime failure diagnostic did not match 1>&2
+    exit /b 1
+)
+for %%A in ("%NATIVE_FAILURE_STDERR%") do if not "%%~zA"=="0" (
+    echo bootstrap error: native runtime failure wrote to stderr 1>&2
+    exit /b 1
+)
 
 echo bootstrap: stage 1 ready at %OUTPUT%
 exit /b 0

@@ -20,9 +20,9 @@ The self-host now contains its source model, token representation, lexical
 scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
 complete semantic analysis across ordered source modules, a validated,
 target-independent typed Sol IR model, and deterministic semantic-to-IR
-lowering, and deterministic textual LLVM IR generation from the sealed IR.
-Native object emission, linking, and the final compiler CLI will be implemented
-incrementally in later issues.
+lowering, deterministic textual LLVM IR generation from the sealed IR, and a
+portable native runtime/link pipeline. The final compiler CLI will be added in
+the next roadmap issue.
 
 The full compiler architecture remains:
 
@@ -63,7 +63,10 @@ selfhost/build/stage1/solc
 11. compiles and runs the self-host typed Sol IR suite;
 12. compiles and runs the semantic-to-IR lowering suite;
 13. compiles and runs the textual LLVM generation suite;
-14. generates a representative LLVM module and verifies it with host Clang.
+14. generates a representative LLVM module and verifies it with host Clang;
+15. generates deterministic LLVM and C literal artifacts for a complete program;
+16. compiles the LLVM, runtime and literal registry to native objects;
+17. links and executes the resulting Unicode/file/memory smoke-test program.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -74,10 +77,14 @@ SOLC=/path/to/sol-0.1.1/bin/solc ./selfhost/bootstrap.sh
 Generated bootstrap artifacts under `selfhost/build/` are not committed to the repository.
 
 The verifier defaults to `clang`. Select another Clang executable explicitly
-with `SOL_CLANG=/path/to/clang`. See
+with `SOL_CLANG=/path/to/clang`. The native linker driver is selected with
+`SOL_LINKER` and otherwise discovered as `clang`, then `cc`. Set
+`SOL_KEEP_INTERMEDIATES=1` to retain its deterministic object files. See
 [`docs/selfhost-llvm-backend.md`](../docs/selfhost-llvm-backend.md) for the
 target-independent type mapping, deterministic naming rules and native-runtime
-boundary.
+boundary, and
+[`docs/selfhost-native-toolchain.md`](../docs/selfhost-native-toolchain.md) for
+object generation and linking.
 
 ### Windows
 
