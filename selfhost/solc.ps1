@@ -145,7 +145,8 @@ try {
     if ($null -eq $PreviousKeep) { Remove-Item Env:SOL_KEEP_INTERMEDIATES -ErrorAction SilentlyContinue } else { $env:SOL_KEEP_INTERMEDIATES = $PreviousKeep }
     if ($LinkStatus -ne 0) {
         Remove-Item -LiteralPath $LlvmOutput, $LiteralOutput -Force -ErrorAction SilentlyContinue
-        exit $LinkStatus
+        [Console]::Error.WriteLine("toolchain error: native compiler driver failed with exit code $LinkStatus.")
+        exit 7
     }
     if (-not $Keep) { Remove-Item -LiteralPath $LlvmOutput, $LiteralOutput -Force -ErrorAction SilentlyContinue }
     exit 0

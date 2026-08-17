@@ -146,7 +146,8 @@ LINK_STATUS=$?
 set -e
 if [ "$LINK_STATUS" -ne 0 ]; then
     rm -f -- "$LLVM_OUTPUT" "$LITERAL_OUTPUT"
-    exit "$LINK_STATUS"
+    echo "toolchain error: native compiler driver failed with exit code $LINK_STATUS." >&2
+    exit 7
 fi
 if [ "$KEEP" -eq 0 ]; then
     rm -f -- "$LLVM_OUTPUT" "$LITERAL_OUTPUT"
