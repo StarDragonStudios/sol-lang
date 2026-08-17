@@ -34,6 +34,7 @@ NATIVE_FIXTURE_IR="$TEST_BUILD_DIR/native_fixture.ll"
 NATIVE_FIXTURE_LITERALS="$TEST_BUILD_DIR/native_literals.c"
 NATIVE_FIXTURE_OUTPUT="$TEST_BUILD_DIR/native fixture"
 NATIVE_FAILURE_DIAGNOSTIC="$TEST_BUILD_DIR/native-failure.txt"
+NATIVE_FAILURE_STDERR="$TEST_BUILD_DIR/native-failure.stderr.txt"
 CLI_FIXTURE_SOURCE="$SELFHOST_DIR/fixtures/cli/main.sol"
 CLI_FIXTURE_OUTPUT="$TEST_BUILD_DIR/cli fixture"
 CLI_INVALID_SOURCE="$SELFHOST_DIR/fixtures/cli-invalid.sol"
@@ -133,7 +134,7 @@ printf '%s\n' input | (cd "$REPO_ROOT" && "$NATIVE_FIXTURE_OUTPUT")
 
 echo "bootstrap: validating native runtime failure contract"
 set +e
-printf '%s\n' vector-failure | (cd "$REPO_ROOT" && "$NATIVE_FIXTURE_OUTPUT") >/dev/null 2>"$NATIVE_FAILURE_DIAGNOSTIC"
+printf '%s\n' vector-failure | (cd "$REPO_ROOT" && "$NATIVE_FIXTURE_OUTPUT") >"$NATIVE_FAILURE_DIAGNOSTIC" 2>"$NATIVE_FAILURE_STDERR"
 NATIVE_FAILURE_STATUS=$?
 set -e
 if [ "$NATIVE_FAILURE_STATUS" -ne 70 ]; then
@@ -142,6 +143,10 @@ if [ "$NATIVE_FAILURE_STATUS" -ne 70 ]; then
 fi
 if ! grep -Fx "Sol runtime error: vector index out of bounds." "$NATIVE_FAILURE_DIAGNOSTIC" >/dev/null; then
     echo "bootstrap error: native runtime failure diagnostic did not match" >&2
+    exit 1
+fi
+if [ -s "$NATIVE_FAILURE_STDERR" ]; then
+    echo "bootstrap error: native runtime failure wrote to stderr" >&2
     exit 1
 fi
 
