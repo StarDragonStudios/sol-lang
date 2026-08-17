@@ -74,6 +74,8 @@ final class LlvmStringRuntime {
         withBuilder(byteOffset, builder -> {
             var function = byteOffset.value();
             var entry = appendBlock(function, "entry");
+            var selectPath = appendBlock(function, "select_path");
+            var ascii = appendBlock(function, "ascii");
             var initialize = appendBlock(function, "initialize");
             var loop = appendBlock(function, "loop");
             var advance = appendBlock(function, "advance");
@@ -92,7 +94,15 @@ final class LlvmStringRuntime {
             var byteSlot = LLVMBuildAlloca(builder, i64, "byte_offset_slot");
             var scalarSlot = LLVMBuildAlloca(builder, i64, "scalar_index_slot");
 
-            requireValue(LLVMBuildCondBr(builder, targetInvalid, invalid, initialize), "string offset validation branch");
+            requireValue(LLVMBuildCondBr(builder, targetInvalid, invalid, selectPath), "string offset validation branch");
+
+            LLVMPositionBuilderAtEnd(builder, selectPath);
+            var byteLength = extract(builder, string, 1, "byte_length");
+            var allAscii = LLVMBuildICmp(builder, LLVMIntEQ, byteLength, scalarLength, "all_ascii");
+            requireValue(LLVMBuildCondBr(builder, allAscii, ascii, initialize), "string offset path selection branch");
+
+            LLVMPositionBuilderAtEnd(builder, ascii);
+            requireValue(LLVMBuildRet(builder, target), "ASCII string byte offset return");
 
             LLVMPositionBuilderAtEnd(builder, initialize);
             requireValue(LLVMBuildStore(builder, zero, byteSlot), "initial string byte offset");
