@@ -20,8 +20,9 @@ The self-host now contains its source model, token representation, lexical
 scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
 complete semantic analysis across ordered source modules, a validated,
 target-independent typed Sol IR model, and deterministic semantic-to-IR
-lowering. LLVM generation, native object emission, linking, and the final
-compiler CLI will be implemented incrementally in later issues.
+lowering, and deterministic textual LLVM IR generation from the sealed IR.
+Native object emission, linking, and the final compiler CLI will be implemented
+incrementally in later issues.
 
 The full compiler architecture remains:
 
@@ -59,8 +60,10 @@ selfhost/build/stage1/solc
 8. compiles and runs the complete self-host grammar suite;
 9. compiles and runs the self-host symbol, scope and semantic-type suite;
 10. compiles and runs the self-host semantic-analysis and module-resolution suite;
-11. compiles and runs the self-host typed Sol IR suite.
-12. compiles and runs the semantic-to-IR lowering suite.
+11. compiles and runs the self-host typed Sol IR suite;
+12. compiles and runs the semantic-to-IR lowering suite;
+13. compiles and runs the textual LLVM generation suite;
+14. generates a representative LLVM module and verifies it with host Clang.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -69,6 +72,12 @@ SOLC=/path/to/sol-0.1.1/bin/solc ./selfhost/bootstrap.sh
 ```
 
 Generated bootstrap artifacts under `selfhost/build/` are not committed to the repository.
+
+The verifier defaults to `clang`. Select another Clang executable explicitly
+with `SOL_CLANG=/path/to/clang`. See
+[`docs/selfhost-llvm-backend.md`](../docs/selfhost-llvm-backend.md) for the
+target-independent type mapping, deterministic naming rules and native-runtime
+boundary.
 
 ### Windows
 
