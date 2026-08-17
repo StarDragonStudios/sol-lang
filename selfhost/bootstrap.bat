@@ -11,7 +11,7 @@ if defined SOLC (
 
 set "SOURCE=%SELFHOST_DIR%src\main.sol"
 set "BUILD_DIR=%SELFHOST_DIR%build\stage1"
-set "OUTPUT=%BUILD_DIR%\solc.exe"
+set "OUTPUT=%BUILD_DIR%\solc-core.exe"
 set "TEST_BUILD_DIR=%SELFHOST_DIR%build\tests"
 set "LEXER_TEST_SOURCE=%SELFHOST_DIR%src\lexer_test.sol"
 set "LEXER_TEST_OUTPUT=%TEST_BUILD_DIR%\lexer_test.exe"
@@ -38,6 +38,14 @@ set "NATIVE_FIXTURE_IR=%TEST_BUILD_DIR%\native_fixture.ll"
 set "NATIVE_FIXTURE_LITERALS=%TEST_BUILD_DIR%\native_literals.c"
 set "NATIVE_FIXTURE_OUTPUT=%TEST_BUILD_DIR%\native fixture.exe"
 set "NATIVE_FAILURE_DIAGNOSTIC=%TEST_BUILD_DIR%\native-failure.txt"
+set "CLI_FIXTURE_SOURCE=%SELFHOST_DIR%fixtures\cli\main.sol"
+set "CLI_FIXTURE_OUTPUT=%TEST_BUILD_DIR%\cli fixture.exe"
+set "CLI_INVALID_SOURCE=%SELFHOST_DIR%fixtures\cli-invalid.sol"
+set "CLI_DIAGNOSTIC=%TEST_BUILD_DIR%\cli-diagnostic.txt"
+set "CLI_TEST_SOURCE=%SELFHOST_DIR%src\cli_test.sol"
+set "CLI_TEST_OUTPUT=%TEST_BUILD_DIR%\cli_test.exe"
+set "CLI_STDIN_SOURCE=%SELFHOST_DIR%fixtures\cli-stdin.sol"
+set "CLI_STDIN_INPUT=%TEST_BUILD_DIR%\cli-stdin.txt"
 if defined SOL_CLANG (
     set "CLANG=%SOL_CLANG%"
 ) else if defined SOL_LINKER (
@@ -63,8 +71,11 @@ echo bootstrap: compiling stage 1 with %VERSION%
 call "%SEED_SOLC%" "%SOURCE%" -o "%OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
-echo bootstrap: validating stage 1 executable
-"%OUTPUT%"
+echo bootstrap: validating stage 1 command launchers
+set "SOL_SELFHOST_CORE=%OUTPUT%"
+call "%SELFHOST_DIR%solc.bat" --version
+if errorlevel 1 exit /b %errorlevel%
+call "%SELFHOST_DIR%sol.bat" --version
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host lexer tests
@@ -181,6 +192,72 @@ if not "!NATIVE_RESULT!"=="70" (
 findstr /x /c:"Sol runtime error: vector index out of bounds." "%NATIVE_FAILURE_DIAGNOSTIC%" >nul
 if errorlevel 1 (
     echo bootstrap error: native runtime failure diagnostic did not match 1>&2
+    exit /b 1
+)
+
+echo bootstrap: compiling a multi-module program through self-host solc
+call "%SELFHOST_DIR%solc.bat" --keep-intermediates --output "%CLI_FIXTURE_OUTPUT%" "%CLI_FIXTURE_SOURCE%"
+if errorlevel 1 exit /b %errorlevel%
+
+for %%F in (
+    "%CLI_FIXTURE_OUTPUT%.sol-selfhost.ll"
+    "%CLI_FIXTURE_OUTPUT%.sol-selfhost-literals.c"
+    "%CLI_FIXTURE_OUTPUT%.sol-link.obj"
+    "%CLI_FIXTURE_OUTPUT%.sol-runtime.obj"
+    "%CLI_FIXTURE_OUTPUT%.sol-literals.obj"
+) do (
+    if not exist "%%~F" (
+        echo bootstrap error: expected retained self-host artifact: %%~F 1>&2
+        exit /b 1
+    )
+    for %%S in ("%%~F") do if %%~zS LEQ 0 (
+        echo bootstrap error: retained self-host artifact is empty: %%~F 1>&2
+        exit /b 1
+    )
+)
+
+echo bootstrap: validating self-host solc executable output
+"%CLI_FIXTURE_OUTPUT%"
+set "CLI_STATUS=!errorlevel!"
+if not "!CLI_STATUS!"=="37" (
+    echo bootstrap error: expected self-host solc program status 37, got: !CLI_STATUS! 1>&2
+    exit /b 1
+)
+del /q "%CLI_FIXTURE_OUTPUT%.sol-selfhost.ll" "%CLI_FIXTURE_OUTPUT%.sol-selfhost-literals.c" "%CLI_FIXTURE_OUTPUT%.sol-link.obj" "%CLI_FIXTURE_OUTPUT%.sol-runtime.obj" "%CLI_FIXTURE_OUTPUT%.sol-literals.obj"
+
+echo bootstrap: compiling self-host CLI protocol tests
+call "%SEED_SOLC%" "%CLI_TEST_SOURCE%" -o "%CLI_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+"%CLI_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: validating self-host command-line rejection
+call "%SELFHOST_DIR%solc.bat" --unknown >NUL 2>NUL
+set "CLI_STATUS=!errorlevel!"
+if not "!CLI_STATUS!"=="2" (
+    echo bootstrap error: expected command-line status 2, got: !CLI_STATUS! 1>&2
+    exit /b 1
+)
+
+echo bootstrap: validating self-host frontend diagnostics
+call "%SELFHOST_DIR%solc.bat" "%CLI_INVALID_SOURCE%" -o "%TEST_BUILD_DIR%\invalid-output.exe" 2>"%CLI_DIAGNOSTIC%"
+set "CLI_STATUS=!errorlevel!"
+if not "!CLI_STATUS!"=="4" (
+    echo bootstrap error: expected self-host frontend status 4, got: !CLI_STATUS! 1>&2
+    exit /b 1
+)
+findstr /l /c:": error [SOL-S019]: Cannot resolve module 'missing.module'." "%CLI_DIAGNOSTIC%" >nul
+if errorlevel 1 (
+    echo bootstrap error: self-host diagnostic did not preserve source location and code 1>&2
+    exit /b 1
+)
+
+echo bootstrap: validating sol run status propagation
+echo input>"%CLI_STDIN_INPUT%"
+call "%SELFHOST_DIR%sol.bat" run "%CLI_STDIN_SOURCE%" < "%CLI_STDIN_INPUT%"
+set "CLI_STATUS=!errorlevel!"
+if not "!CLI_STATUS!"=="29" (
+    echo bootstrap error: expected sol run status 29, got: !CLI_STATUS! 1>&2
     exit /b 1
 )
 

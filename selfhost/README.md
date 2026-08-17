@@ -20,9 +20,9 @@ The self-host now contains its source model, token representation, lexical
 scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
 complete semantic analysis across ordered source modules, a validated,
 target-independent typed Sol IR model, and deterministic semantic-to-IR
-lowering, deterministic textual LLVM IR generation from the sealed IR, and a
-portable native runtime/link pipeline. The final compiler CLI will be added in
-the next roadmap issue.
+lowering, deterministic textual LLVM IR generation from the sealed IR, a
+portable native runtime/link pipeline, recursive source discovery and public
+`solc`/`sol run` launchers.
 
 The full compiler architecture remains:
 
@@ -51,10 +51,10 @@ The bootstrap script:
 3. compiles `selfhost/src/main.sol`;
 4. writes the stage 1 executable to:
 ```text
-selfhost/build/stage1/solc
+selfhost/build/stage1/solc-core
 ```
 
-5. executes the generated program to verify that the native bootstrap artifact is runnable;
+5. validates the public `solc` and `sol` launchers against the generated core;
 6. compiles and runs the self-host lexical-analysis suite;
 7. compiles and runs the self-host syntax-tree and parser-foundation suite;
 8. compiles and runs the complete self-host grammar suite;
@@ -66,7 +66,9 @@ selfhost/build/stage1/solc
 14. generates a representative LLVM module and verifies it with host Clang;
 15. generates deterministic LLVM and C literal artifacts for a complete program;
 16. compiles the LLVM, runtime and literal registry to native objects;
-17. links and executes the resulting Unicode/file/memory smoke-test program.
+17. links and executes the resulting Unicode/file/memory smoke-test program;
+18. compiles and runs a multi-module program through self-host `solc`;
+19. validates retained artifacts, CLI rejection, source diagnostics and `sol run` status propagation.
 
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
@@ -84,7 +86,9 @@ with `SOL_CLANG=/path/to/clang`. The native linker driver is selected with
 target-independent type mapping, deterministic naming rules and native-runtime
 boundary, and
 [`docs/selfhost-native-toolchain.md`](../docs/selfhost-native-toolchain.md) for
-object generation and linking.
+object generation and linking. The public commands and private bootstrap
+request are documented in
+[`docs/selfhost-cli.md`](../docs/selfhost-cli.md).
 
 ### Windows
 
@@ -104,7 +108,7 @@ selfhost\bootstrap.bat
 The generated stage 1 executable is written to:
 
 ```text
-selfhost\build\stage1\solc.exe
+selfhost\build\stage1\solc-core.exe
 ```
 
 ## Source model and lexer

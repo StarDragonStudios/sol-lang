@@ -165,7 +165,8 @@ compilation failure as suppressed exceptions.
 
 ## Command-line integration
 
-The native executable pipeline is exposed through the bootstrap compiler CLI.
+The native executable pipeline is exposed through both the Java bootstrap CLI
+and the compatible self-host CLI.
 
 A command equivalent to:
 

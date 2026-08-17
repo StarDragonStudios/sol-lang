@@ -7,7 +7,7 @@ REPO_ROOT=$(cd "$SELFHOST_DIR/.." && pwd)
 SEED_SOLC=${SOLC:-solc}
 SOURCE="$SELFHOST_DIR/src/main.sol"
 BUILD_DIR="$SELFHOST_DIR/build/stage1"
-OUTPUT="$BUILD_DIR/solc"
+OUTPUT="$BUILD_DIR/solc-core"
 TEST_BUILD_DIR="$SELFHOST_DIR/build/tests"
 LEXER_TEST_SOURCE="$SELFHOST_DIR/src/lexer_test.sol"
 LEXER_TEST_OUTPUT="$TEST_BUILD_DIR/lexer_test"
@@ -34,6 +34,13 @@ NATIVE_FIXTURE_IR="$TEST_BUILD_DIR/native_fixture.ll"
 NATIVE_FIXTURE_LITERALS="$TEST_BUILD_DIR/native_literals.c"
 NATIVE_FIXTURE_OUTPUT="$TEST_BUILD_DIR/native fixture"
 NATIVE_FAILURE_DIAGNOSTIC="$TEST_BUILD_DIR/native-failure.txt"
+CLI_FIXTURE_SOURCE="$SELFHOST_DIR/fixtures/cli/main.sol"
+CLI_FIXTURE_OUTPUT="$TEST_BUILD_DIR/cli fixture"
+CLI_INVALID_SOURCE="$SELFHOST_DIR/fixtures/cli-invalid.sol"
+CLI_DIAGNOSTIC="$TEST_BUILD_DIR/cli-diagnostic.txt"
+CLI_TEST_SOURCE="$SELFHOST_DIR/src/cli_test.sol"
+CLI_TEST_OUTPUT="$TEST_BUILD_DIR/cli_test"
+CLI_STDIN_SOURCE="$SELFHOST_DIR/fixtures/cli-stdin.sol"
 CLANG=${SOL_CLANG:-clang}
 
 VERSION=$("$SEED_SOLC" --version)
@@ -48,8 +55,9 @@ mkdir -p "$BUILD_DIR" "$TEST_BUILD_DIR"
 echo "bootstrap: compiling stage 1 with $VERSION"
 "$SEED_SOLC" "$SOURCE" -o "$OUTPUT"
 
-echo "bootstrap: validating stage 1 executable"
-"$OUTPUT"
+echo "bootstrap: validating stage 1 command launchers"
+SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/solc.sh" --version
+SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/sol.sh" --version
 
 echo "bootstrap: compiling self-host lexer tests"
 "$SEED_SOLC" "$LEXER_TEST_SOURCE" -o "$LEXER_TEST_OUTPUT"
@@ -134,6 +142,76 @@ if [ "$NATIVE_FAILURE_STATUS" -ne 70 ]; then
 fi
 if ! grep -Fx "Sol runtime error: vector index out of bounds." "$NATIVE_FAILURE_DIAGNOSTIC" >/dev/null; then
     echo "bootstrap error: native runtime failure diagnostic did not match" >&2
+    exit 1
+fi
+
+echo "bootstrap: compiling a multi-module program through self-host solc"
+SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/solc.sh" --keep-intermediates "--output=$CLI_FIXTURE_OUTPUT" "$CLI_FIXTURE_SOURCE"
+
+for CLI_ARTIFACT in \
+    "$CLI_FIXTURE_OUTPUT.sol-selfhost.ll" \
+    "$CLI_FIXTURE_OUTPUT.sol-selfhost-literals.c" \
+    "$CLI_FIXTURE_OUTPUT.sol-link.o" \
+    "$CLI_FIXTURE_OUTPUT.sol-runtime.o" \
+    "$CLI_FIXTURE_OUTPUT.sol-literals.o"
+do
+    if [ ! -s "$CLI_ARTIFACT" ]; then
+        echo "bootstrap error: expected retained self-host artifact: $CLI_ARTIFACT" >&2
+        exit 1
+    fi
+done
+
+echo "bootstrap: validating self-host solc executable output"
+set +e
+"$CLI_FIXTURE_OUTPUT"
+CLI_STATUS=$?
+set -e
+if [ "$CLI_STATUS" -ne 37 ]; then
+    echo "bootstrap error: expected self-host solc program status 37, got: $CLI_STATUS" >&2
+    exit 1
+fi
+rm -f -- \
+    "$CLI_FIXTURE_OUTPUT.sol-selfhost.ll" \
+    "$CLI_FIXTURE_OUTPUT.sol-selfhost-literals.c" \
+    "$CLI_FIXTURE_OUTPUT.sol-link.o" \
+    "$CLI_FIXTURE_OUTPUT.sol-runtime.o" \
+    "$CLI_FIXTURE_OUTPUT.sol-literals.o"
+
+echo "bootstrap: compiling self-host CLI protocol tests"
+"$SEED_SOLC" "$CLI_TEST_SOURCE" -o "$CLI_TEST_OUTPUT"
+"$CLI_TEST_OUTPUT"
+
+echo "bootstrap: validating self-host command-line rejection"
+set +e
+SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/solc.sh" --unknown >/dev/null 2>&1
+CLI_STATUS=$?
+set -e
+if [ "$CLI_STATUS" -ne 2 ]; then
+    echo "bootstrap error: expected command-line status 2, got: $CLI_STATUS" >&2
+    exit 1
+fi
+
+echo "bootstrap: validating self-host frontend diagnostics"
+set +e
+SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/solc.sh" "$CLI_INVALID_SOURCE" -o "$TEST_BUILD_DIR/invalid-output" 2>"$CLI_DIAGNOSTIC"
+CLI_STATUS=$?
+set -e
+if [ "$CLI_STATUS" -ne 4 ]; then
+    echo "bootstrap error: expected self-host frontend status 4, got: $CLI_STATUS" >&2
+    exit 1
+fi
+if ! grep -F ": error [SOL-S019]: Cannot resolve module 'missing.module'." "$CLI_DIAGNOSTIC" >/dev/null; then
+    echo "bootstrap error: self-host diagnostic did not preserve source location and code" >&2
+    exit 1
+fi
+
+echo "bootstrap: validating sol run status propagation"
+set +e
+printf '%s\n' input | SOL_SELFHOST_CORE="$OUTPUT" "$SELFHOST_DIR/sol.sh" run "$CLI_STDIN_SOURCE"
+CLI_STATUS=$?
+set -e
+if [ "$CLI_STATUS" -ne 29 ]; then
+    echo "bootstrap error: expected sol run status 29, got: $CLI_STATUS" >&2
     exit 1
 fi
 
