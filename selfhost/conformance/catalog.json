@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "language-runtime",
+      "kind": "run",
+      "source": "positive/language/main.sol",
+      "run_status": 41,
+      "stdin": "",
+      "stdout": "conformance 🐉\n",
+      "stderr": "",
+      "files": {"conformance-output.txt": "file 🐉"}
+    },
+    {
+      "id": "cyclic-modules",
+      "kind": "run",
+      "source": "positive/modules/main.sol",
+      "run_status": 37,
+      "stdin": "",
+      "stdout": "module cycle\n",
+      "stderr": "",
+      "files": {}
+    },
+    {
+      "id": "stdin-preservation",
+      "kind": "run",
+      "source": "positive/stdin/main.sol",
+      "run_status": 29,
+      "stdin": "input\n",
+      "stdout": "input\n",
+      "stderr": "",
+      "files": {}
+    },
+    {
+      "id": "lexical-error",
+      "kind": "reject",
+      "source": "negative/lexical.sol",
+      "compile_status": 4,
+      "diagnostic": ":3:26: error [SOL-L002]: Unterminated string literal."
+    },
+    {
+      "id": "parsing-error",
+      "kind": "reject",
+      "source": "negative/parsing.sol",
+      "compile_status": 4,
+      "diagnostic": ":6:1: error [SOL-P002]: Expected 'end' to close the function declaration, but found end of file."
+    },
+    {
+      "id": "semantic-error",
+      "kind": "reject",
+      "source": "negative/semantic.sol",
+      "compile_status": 4,
+      "diagnostic": ":3:22: error [SOL-S008]: Cannot initialize variable 'value' of type 'int' with value of type 'string'."
+    },
+    {
+      "id": "vector-bounds-runtime",
+      "kind": "runtime-failure",
+      "source": "runtime/vector-bounds.sol",
+      "run_status": 70,
+      "stdout": "Sol runtime error: vector index out of bounds.\n",
+      "stderr": ""
+    },
+    {
+      "id": "vector-empty-pop-runtime",
+      "kind": "runtime-failure",
+      "source": "runtime/vector-empty-pop.sol",
+      "run_status": 70,
+      "stdout": "Sol runtime error: cannot pop an empty vector.\n",
+      "stderr": ""
+    },
+    {
+      "id": "vector-capacity-runtime",
+      "kind": "runtime-failure",
+      "source": "runtime/vector-capacity.sol",
+      "run_status": 70,
+      "stdout": "Sol runtime error: invalid or overflowing vector capacity.\n",
+      "stderr": ""
+    },
+    {
+      "id": "string-index-runtime",
+      "kind": "runtime-failure",
+      "source": "runtime/string-index.sol",
+      "run_status": 70,
+      "stdout": "Sol runtime error: string index out of bounds.\n",
+      "stderr": ""
+    },
+    {
+      "id": "console-eof-runtime",
+      "kind": "runtime-failure",
+      "source": "runtime/console-eof.sol",
+      "run_status": 70,
+      "stdout": "Sol runtime error: std.console.read_line reached EOF before a line was available.\n",
+      "stderr": ""
+    },
+    {
+      "id": "file-missing-runtime",
+      "kind": "runtime-failure",
+      "source": "runtime/file-missing.sol",
+      "run_status": 70,
+      "stdout": "Sol runtime error: std.file.read_text could not open the file.\n",
+      "stderr": ""
+    }
+  ]
+}

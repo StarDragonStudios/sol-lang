@@ -269,5 +269,9 @@ if not "!CLI_STATUS!"=="29" (
     exit /b 1
 )
 
+echo bootstrap: running released-versus-self-host conformance
+call "%SELFHOST_DIR%conformance\run.bat"
+if errorlevel 1 exit /b %errorlevel%
+
 echo bootstrap: stage 1 ready at %OUTPUT%
 exit /b 0
