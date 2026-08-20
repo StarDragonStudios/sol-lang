@@ -58,7 +58,7 @@ if exist "%LITERAL_OBJECT%" del /q "%LITERAL_OBJECT%"
 
 call "%DRIVER%" -Wno-override-module -x ir -c "%LLVM_SOURCE%" -o "%LLVM_OBJECT%"
 if errorlevel 1 goto :failure
-call "%DRIVER%" -std=c11 -I"%RUNTIME_DIR%" -c "%RUNTIME_DIR%\selfhost.c" -o "%RUNTIME_OBJECT%"
+call "%DRIVER%" -std=c11 -D_CRT_SECURE_NO_WARNINGS -I"%RUNTIME_DIR%" -c "%RUNTIME_DIR%\selfhost.c" -o "%RUNTIME_OBJECT%"
 if errorlevel 1 goto :failure
 call "%DRIVER%" -std=c11 -I"%RUNTIME_DIR%" -c "%LITERAL_SOURCE%" -o "%LITERAL_OBJECT%"
 if errorlevel 1 goto :failure
