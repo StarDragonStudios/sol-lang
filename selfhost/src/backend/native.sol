@@ -119,38 +119,42 @@ fn native_literal_name(entry: pointer<NativeLiteralEntry>) -> string
 end
 
 fn generate_native_literal_c(entries: pointer<Vector<pointer<NativeLiteralEntry>>>) -> string
-    @mut let text: string = "#include \"selfhost.h\"\n\n"
+    let lines: pointer<Vector<string>> = create_vector<string>()
+    vector_push<string>(lines, "#include \"selfhost.h\"\n\n")
     @mut let index: int = 0
     while index < vector_length<pointer<NativeLiteralEntry>>(entries) do
         let entry: pointer<NativeLiteralEntry> = vector_get<pointer<NativeLiteralEntry>>(entries, index)
         let content: string = native_literal_content(entry->value)
-        text = text + "static const unsigned char " + native_literal_name(entry) + "[] = \"" + native_c_string(content) + "\";\n"
+        vector_push<string>(lines, "static const unsigned char " + native_literal_name(entry) + "[] = \"" + native_c_string(content) + "\";\n")
         index = index + 1
     end
-    text = text + "\nint32_t sol_runtime_char_literal(int64_t function_id, int64_t value_id) {\n"
-    text = text + "    (void)function_id;\n    (void)value_id;\n"
+    vector_push<string>(lines, "\nint32_t sol_runtime_char_literal(int64_t function_id, int64_t value_id) {\n")
+    vector_push<string>(lines, "    (void)function_id;\n    (void)value_id;\n")
     index = 0
     while index < vector_length<pointer<NativeLiteralEntry>>(entries) do
         let entry: pointer<NativeLiteralEntry> = vector_get<pointer<NativeLiteralEntry>>(entries, index)
         if entry->value->kind == ir_value_char_constant() then
             let name: string = native_literal_name(entry)
-            text = text + "    if (function_id == " + format_ir_int(entry->function_id) + " && value_id == " + format_ir_int(entry->value->id) + ") return sol_runtime_decode_literal_scalar(" + name + ", (int64_t)(sizeof(" + name + ") - 1));\n"
+            vector_push<string>(lines, "    if (function_id == " + format_ir_int(entry->function_id) + " && value_id == " + format_ir_int(entry->value->id) + ") return sol_runtime_decode_literal_scalar(" + name + ", (int64_t)(sizeof(" + name + ") - 1));\n")
         end
         index = index + 1
     end
-    text = text + "    sol_runtime_unknown_literal();\n    return 0;\n}\n\n"
-    text = text + "void sol_runtime_string_literal(SolString *result, int64_t function_id, int64_t value_id) {\n"
-    text = text + "    (void)function_id;\n    (void)value_id;\n"
+    vector_push<string>(lines, "    sol_runtime_unknown_literal();\n    return 0;\n}\n\n")
+    vector_push<string>(lines, "void sol_runtime_string_literal(SolString *result, int64_t function_id, int64_t value_id) {\n")
+    vector_push<string>(lines, "    (void)function_id;\n    (void)value_id;\n")
     index = 0
     while index < vector_length<pointer<NativeLiteralEntry>>(entries) do
         let entry: pointer<NativeLiteralEntry> = vector_get<pointer<NativeLiteralEntry>>(entries, index)
         if entry->value->kind == ir_value_string_constant() then
             let name: string = native_literal_name(entry)
-            text = text + "    if (function_id == " + format_ir_int(entry->function_id) + " && value_id == " + format_ir_int(entry->value->id) + ") { *result = (SolString){" + name + ", (int64_t)(sizeof(" + name + ") - 1), " + format_ir_int(strings::length(entry->value->string_value)) + "}; return; }\n"
+            vector_push<string>(lines, "    if (function_id == " + format_ir_int(entry->function_id) + " && value_id == " + format_ir_int(entry->value->id) + ") { *result = (SolString){" + name + ", (int64_t)(sizeof(" + name + ") - 1), " + format_ir_int(strings::length(entry->value->string_value)) + "}; return; }\n")
         end
         index = index + 1
     end
-    return text + "    sol_runtime_unknown_literal();\n    *result = (SolString){0, 0, 0};\n}\n"
+    vector_push<string>(lines, "    sol_runtime_unknown_literal();\n    *result = (SolString){0, 0, 0};\n}\n")
+    let result: string = join_llvm_lines(lines, 0, vector_length<string>(lines))
+    destroy_vector<string>(lines)
+    return result
 end
 
 fn native_literal_content(value: pointer<IrValue>) -> string
@@ -184,26 +188,26 @@ fn native_literal_content(value: pointer<IrValue>) -> string
 end
 
 fn native_c_string(value: string) -> string
-    @mut let result: string = ""
+    let fragments: pointer<Vector<string>> = create_vector<string>()
     @mut let index: int = 0
     while index < strings::length(value) do
         let scalar: char = value[index]
         if scalar == '\\' then
-            result = result + "\\\\"
+            vector_push<string>(fragments, "\\\\")
         else
             if scalar == '"' then
-                result = result + "\\\""
+                vector_push<string>(fragments, "\\\"")
             else
                 if scalar == '\n' then
-                    result = result + "\\n"
+                    vector_push<string>(fragments, "\\n")
                 else
                     if scalar == '\r' then
-                        result = result + "\\r"
+                        vector_push<string>(fragments, "\\r")
                     else
                         if scalar == '\t' then
-                            result = result + "\\t"
+                            vector_push<string>(fragments, "\\t")
                         else
-                            result = result + strings::slice(value, index, index + 1)
+                            vector_push<string>(fragments, strings::slice(value, index, index + 1))
                         end
                     end
                 end
@@ -211,5 +215,7 @@ fn native_c_string(value: string) -> string
         end
         index = index + 1
     end
+    let result: string = join_llvm_lines(fragments, 0, vector_length<string>(fragments))
+    destroy_vector<string>(fragments)
     return result
 end

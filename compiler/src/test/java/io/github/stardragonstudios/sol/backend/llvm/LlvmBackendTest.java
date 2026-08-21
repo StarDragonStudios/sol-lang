@@ -346,6 +346,7 @@ class LlvmBackendTest {
             assertTrue(text.contains("define internal i1 @sol.runtime.string.equal"));
             assertTrue(text.contains("define internal i32 @sol.runtime.string.index"));
             assertTrue(text.contains("define internal i64 @sol.runtime.string.byte_offset"));
+            assertTrue(text.contains("%all_ascii = icmp eq i64 %byte_length, %scalar_length"));
             assertTrue(text.contains("call ptr @malloc(i64"));
             assertTrue(text.contains("call i32 @memcmp"));
             assertTrue(text.contains("Sol runtime error: string index out of bounds."));

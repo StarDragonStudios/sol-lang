@@ -91,7 +91,10 @@ object generation and linking. The public commands and private bootstrap
 request are documented in
 [`docs/selfhost-cli.md`](../docs/selfhost-cli.md).
 The portable conformance catalog and comparison rules are documented in
-[`docs/selfhost-conformance.md`](../docs/selfhost-conformance.md).
+[`docs/selfhost-conformance.md`](../docs/selfhost-conformance.md). The isolated
+stage 1 → stage 2 → stage 3 fixed-point gate, deterministic source inventory
+and provenance manifests are documented in
+[`docs/repeated-bootstrap.md`](../docs/repeated-bootstrap.md).
 
 ### Windows
 

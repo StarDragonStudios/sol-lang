@@ -64,6 +64,9 @@ static int64_t sol_utf8_offset(SolString value, int64_t scalar, _Bool allow_end,
     if (scalar < 0 || scalar > value.scalar_length || (!allow_end && scalar == value.scalar_length)) {
         sol_runtime_panic(message);
     }
+    if (value.byte_length == value.scalar_length) {
+        return scalar;
+    }
     int64_t offset = 0;
     int64_t index = 0;
     while (index < scalar) {

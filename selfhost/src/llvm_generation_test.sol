@@ -68,6 +68,9 @@ fn launch() -> int
     if failure == 0 && !text_contains(generated.text, "define i32 @main()") then
         failure = 9
     end
+    if failure == 0 && !text_contains(generated.text, "%memory.value = load ptr, ptr %memory.address") then
+        failure = 11
+    end
     let repeated: LlvmGenerationResult = generate_llvm_ir(program, "selfhost-test")
     if failure == 0 && repeated.text != generated.text then
         failure = 10
@@ -105,6 +108,7 @@ fn create_llvm_test_program() -> pointer<IrProgram>
 
     let node: pointer<IrType> = create_ir_struct_type(arena, "fixture.Node")
     let node_pointer: pointer<IrType> = create_ir_pointer_type(arena, node)
+    let node_pointer_pointer: pointer<IrType> = create_ir_pointer_type(arena, node_pointer)
     let fields: pointer<Vector<pointer<IrStructField>>> = create_vector<pointer<IrStructField>>()
     vector_push<pointer<IrStructField>>(fields, create_ir_struct_field(arena, 0, "value", arena->integer_type))
     vector_push<pointer<IrStructField>>(fields, create_ir_struct_field(arena, 1, "next", node_pointer))
@@ -126,8 +130,17 @@ fn create_llvm_test_program() -> pointer<IrProgram>
     ir_module_add_function(arena, module, function)
     seal_ir_module(arena, module)
 
+    let load_at: pointer<IrFunction> = create_ir_function(arena, 1, "load_at$pointer<fixture.Node>", node_pointer, false)
+    ir_function_add_parameter(arena, load_at, create_ir_parameter(arena, 3, "values", node_pointer_pointer))
+    ir_function_add_parameter(arena, load_at, create_ir_parameter(arena, 4, "index", arena->integer_type))
+    seal_ir_function(arena, load_at)
+    let memory_module: pointer<IrModule> = create_ir_module(arena, "std.memory")
+    ir_module_add_function(arena, memory_module, load_at)
+    seal_ir_module(arena, memory_module)
+
     let program: pointer<IrProgram> = create_ir_program(arena)
     ir_program_add_module(program, module)
+    ir_program_add_module(program, memory_module)
     ir_program_set_entry(program, module, function)
     if !seal_ir_program(program) then
         destroy_ir_program(program)

@@ -17,7 +17,7 @@ end
 struct LlvmGenerationContext
     program: pointer<IrProgram>
     types: pointer<Vector<pointer<LlvmTypeBinding>>>
-    text: string
+    lines: pointer<Vector<string>>
     error: string
 end
 
@@ -47,7 +47,10 @@ fn generate_llvm_ir(program: pointer<IrProgram>, module_name: string) -> LlvmGen
         emit_llvm_program(context, module_name)
     end
 
-    @mut let result: LlvmGenerationResult = LlvmGenerationResult { text: context->text, error: context->error }
+    @mut let result: LlvmGenerationResult = LlvmGenerationResult {
+        text: join_llvm_lines(context->lines, 0, vector_length<string>(context->lines)),
+        error: context->error
+    }
     if context->error != "" then
         result.text = ""
     end
@@ -66,7 +69,7 @@ fn create_llvm_context(program: pointer<IrProgram>) -> pointer<LlvmGenerationCon
     end
     context->program = program
     context->types = create_vector<pointer<LlvmTypeBinding>>()
-    context->text = ""
+    context->lines = create_vector<string>()
     context->error = ""
     return context
 end
@@ -81,6 +84,7 @@ fn destroy_llvm_context(context: pointer<LlvmGenerationContext>) -> void
         memory::free<LlvmTypeBinding>(vector_get<pointer<LlvmTypeBinding>>(context->types, index))
     end
     destroy_vector<pointer<LlvmTypeBinding>>(context->types)
+    destroy_vector<string>(context->lines)
     memory::free<LlvmGenerationContext>(context)
     return
 end
@@ -97,8 +101,19 @@ fn llvm_failed(context: pointer<LlvmGenerationContext>) -> boolean
 end
 
 fn llvm_line(context: pointer<LlvmGenerationContext>, text: string) -> void
-    context->text = context->text + text + "\n"
+    vector_push<string>(context->lines, text + "\n")
     return
+end
+
+fn join_llvm_lines(lines: pointer<Vector<string>>, start: int, end_index: int) -> string
+    if start >= end_index then
+        return ""
+    end
+    if end_index - start == 1 then
+        return vector_get<string>(lines, start)
+    end
+    let middle: int = start + (end_index - start) / 2
+    return join_llvm_lines(lines, start, middle) + join_llvm_lines(lines, middle, end_index)
 end
 
 fn collect_llvm_types(context: pointer<LlvmGenerationContext>) -> void
@@ -536,8 +551,15 @@ fn llvm_parameter_name(function: pointer<IrFunction>, index: int) -> string
 end
 
 fn llvm_memory_element_type(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>) -> pointer<IrType>
-    if function->return_type->kind == ir_type_pointer() then
+    if llvm_function_name_is(function->name, "allocate") || llvm_function_name_is(function->name, "reallocate") then
+        if function->return_type->kind != ir_type_pointer() then
+            llvm_fail(context, "LLVM allocation function does not return a pointer")
+            return null
+        end
         return function->return_type->element_type
+    end
+    if llvm_function_name_is(function->name, "load") || llvm_function_name_is(function->name, "load_at") then
+        return function->return_type
     end
     let first: pointer<IrType> = vector_get<pointer<IrParameter>>(function->parameters, 0)->value->type
     if first->kind == ir_type_pointer() then

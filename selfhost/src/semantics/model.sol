@@ -41,6 +41,7 @@ struct SemanticProgram
     owned_symbols: pointer<Vector<pointer<SemanticSymbol>>>
     owned_types: pointer<Vector<pointer<SemanticType>>>
     bindings: pointer<Vector<pointer<SemanticBinding>>>
+    binding_buckets: pointer<Vector<pointer<Vector<pointer<SemanticBinding>>>>>
     diagnostics: pointer<Vector<SemanticDiagnostic>>
     entry_module: pointer<SemanticModule>
     entry_function: pointer<SemanticSymbol>
@@ -68,6 +69,15 @@ fn create_semantic_program(require_entry_point: boolean) -> pointer<SemanticProg
     program->owned_symbols = create_vector<pointer<SemanticSymbol>>()
     program->owned_types = create_vector<pointer<SemanticType>>()
     program->bindings = create_vector<pointer<SemanticBinding>>()
+    program->binding_buckets = create_vector<pointer<Vector<pointer<SemanticBinding>>>>()
+    @mut let binding_kind: int = 0
+    while binding_kind < 19 do
+        vector_push<pointer<Vector<pointer<SemanticBinding>>>>(
+            program->binding_buckets,
+            create_vector<pointer<SemanticBinding>>()
+        )
+        binding_kind = binding_kind + 1
+    end
     program->diagnostics = create_vector<SemanticDiagnostic>()
     program->entry_module = null
     program->entry_function = null
@@ -97,6 +107,22 @@ fn destroy_semantic_program(program: pointer<SemanticProgram>) -> void
     end
 
     destroy_vector<pointer<SemanticBinding>>(program->bindings)
+
+    index = vector_length<pointer<Vector<pointer<SemanticBinding>>>>(
+        program->binding_buckets
+    )
+    while index > 0 do
+        index = index - 1
+        destroy_vector<pointer<SemanticBinding>>(
+            vector_get<pointer<Vector<pointer<SemanticBinding>>>>(
+                program->binding_buckets,
+                index
+            )
+        )
+    end
+    destroy_vector<pointer<Vector<pointer<SemanticBinding>>>>(
+        program->binding_buckets
+    )
 
     index = vector_length<pointer<Scope>>(program->scopes)
 
@@ -147,6 +173,7 @@ fn destroy_semantic_program(program: pointer<SemanticProgram>) -> void
     program->owned_symbols = null
     program->owned_types = null
     program->bindings = null
+    program->binding_buckets = null
     program->diagnostics = null
     program->entry_module = null
     program->entry_function = null
@@ -360,6 +387,13 @@ fn semantic_program_add_binding(
 
     if binding != null then
         vector_push<pointer<SemanticBinding>>(program->bindings, binding)
+        vector_push<pointer<SemanticBinding>>(
+            vector_get<pointer<Vector<pointer<SemanticBinding>>>>(
+                program->binding_buckets,
+                kind
+            ),
+            binding
+        )
     end
 
     return binding
@@ -374,12 +408,20 @@ fn semantic_program_binding(
         return null
     end
 
+    if kind < 1 || kind >= 19 then
+        return null
+    end
+
+    let bucket: pointer<Vector<pointer<SemanticBinding>>> = vector_get<pointer<Vector<pointer<SemanticBinding>>>>(
+        program->binding_buckets,
+        kind
+    )
     @mut let index: int = 0
-    let count: int = vector_length<pointer<SemanticBinding>>(program->bindings)
+    let count: int = vector_length<pointer<SemanticBinding>>(bucket)
 
     while index < count do
         let binding: pointer<SemanticBinding> = vector_get<pointer<SemanticBinding>>(
-            program->bindings,
+            bucket,
             index
         )
 
