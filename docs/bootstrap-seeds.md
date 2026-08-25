@@ -58,8 +58,10 @@ supplemental seed publication.
 
 Archive entries use sorted POSIX paths, fixed permissions and timestamps, zero
 tar ownership, and deterministic gzip/ZIP compression metadata. Linux seeds
-use a content-derived ELF build ID, macOS seeds suppress Mach-O UUIDs, and
-Windows seeds request reproducible PE/COFF linking.
+use a content-derived ELF build ID, macOS seeds use a reproducible content-based
+Mach-O UUID, and Windows seeds request reproducible PE/COFF linking and reserve
+a 16 MiB native stack so the self-host compiler can process the complete
+bootstrap source tree.
 
 The release checksum identifies bytes delivered by GitHub; the embedded
 manifest identifies every extracted file. SHA-256 checksums detect corruption

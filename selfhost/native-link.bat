@@ -63,9 +63,9 @@ if errorlevel 1 goto :failure
 call "%DRIVER%" -std=c11 -I"%RUNTIME_DIR%" -c "%LITERAL_SOURCE%" -o "%LITERAL_OBJECT%"
 if errorlevel 1 goto :failure
 if "%SOL_REPRODUCIBLE_LINK%"=="1" (
-    call "%DRIVER%" "%LLVM_OBJECT%" "%RUNTIME_OBJECT%" "%LITERAL_OBJECT%" -Wl,/Brepro -o "%OUTPUT%"
+    call "%DRIVER%" "%LLVM_OBJECT%" "%RUNTIME_OBJECT%" "%LITERAL_OBJECT%" -Wl,/Brepro -Wl,/STACK:16777216 -o "%OUTPUT%"
 ) else (
-    call "%DRIVER%" "%LLVM_OBJECT%" "%RUNTIME_OBJECT%" "%LITERAL_OBJECT%" -o "%OUTPUT%"
+    call "%DRIVER%" "%LLVM_OBJECT%" "%RUNTIME_OBJECT%" "%LITERAL_OBJECT%" -Wl,/STACK:16777216 -o "%OUTPUT%"
 )
 if errorlevel 1 goto :failure
 
