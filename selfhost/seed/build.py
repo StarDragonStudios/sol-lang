@@ -435,6 +435,9 @@ def verify_extracted_seed(archive: Path, root: Path, seed_environment: dict[str,
     )
     if marker.exists():
         fail("the extracted seed or its bootstrap descendants invoked Java")
+    rebuilt_core = output_executable(rebuild / "stage3" / "solc-core")
+    if not rebuilt_core.is_file() or rebuilt_core.read_bytes() != core.read_bytes():
+        fail("the extracted seed did not reproduce its packaged stage3 compiler")
     if sha256(core) != json.loads((package / "share" / "sol" / "seed-provenance.json").read_text(encoding="utf-8"))["stage3_core_sha256"]:
         fail("extracted compiler does not match seed provenance")
 

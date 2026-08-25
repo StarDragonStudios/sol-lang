@@ -35,6 +35,7 @@ jobs:
                   test -f selfhost/README.md
                   test -f selfhost/repeated-bootstrap/run.py
                   test -f selfhost/seed/build.py
+                  test -f selfhost/seed/download.py
                   test -f selfhost/seed/metadata.json
 
     compiler-tests:
@@ -179,42 +180,36 @@ jobs:
                         gradle: ./gradlew
                         java_distribution: temurin
                         linker: clang
-                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: ubuntu-24.04-arm
                         platform: linux-arm64
                         gradle: ./gradlew
                         java_distribution: temurin
                         linker: clang
-                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: macos-15-intel
                         platform: macosx-x86_64
                         gradle: ./gradlew
                         java_distribution: temurin
                         linker: clang
-                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: macos-15
                         platform: macosx-arm64
                         gradle: ./gradlew
                         java_distribution: temurin
                         linker: clang
-                        seed: ${{ github.workspace }}/compiler/build/install/sol/bin/solc
 
                     -   runner: windows-2025
                         platform: windows-x86_64
                         gradle: ./gradlew.bat
                         java_distribution: temurin
                         linker: C:\Program Files\LLVM\bin\clang.exe
-                        seed: ${{ github.workspace }}\compiler\build\install\sol\bin\solc.bat
 
                     -   runner: windows-11-arm
                         platform: windows-arm64
                         gradle: ./gradlew.bat
                         java_distribution: zulu
                         linker: C:\Program Files\LLVM\bin\clang.exe
-                        seed: ${{ github.workspace }}\compiler\build\install\sol\bin\solc.bat
 
         steps:
             -   name: Checkout repository
@@ -236,9 +231,14 @@ jobs:
                     distributionSmokeTest
                     assembleDist
 
+            -   name: Download trusted Sol 0.1.1 compiler
+                env:
+                    GH_TOKEN: ${{ github.token }}
+                    SOL_SEED_TARGET: ${{ matrix.platform }}
+                run: python selfhost/seed/download.py
+
             -   name: Build and verify reproducible native seed
                 env:
-                    SOLC: ${{ matrix.seed }}
                     SOL_LINKER: ${{ matrix.linker }}
                     SOL_SEED_TARGET: ${{ matrix.platform }}
                 run: |

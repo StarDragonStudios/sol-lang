@@ -36,7 +36,7 @@ required to compile programs.
 The six `sol-bootstrap-0.1.1-*` platform archives published alongside the JVM
 distributions are the official Sol 0.1.1 bootstrap seeds. `SHA256SUMS` records
 the native bootstrap archive SHA-256 digests,
-`SEED-PROVENANCE.txt` records the tag, source commit and release workflow, and
+`NATIVE-SEED-PROVENANCE.txt` records the tag, source commit and release workflow, and
 the target-specific JSON manifests record the fixed-point compiler provenance.
 
 After downloading an archive and the checksum file, verify that archive from

@@ -6,9 +6,16 @@ import unittest
 from pathlib import Path
 
 import build as seed
+import download as trusted_seed
 
 
 class SeedArchiveTest(unittest.TestCase):
+    def test_released_archive_paths_must_be_canonical(self) -> None:
+        self.assertTrue(trusted_seed.safe_member("sol-0.1.1/bin/solc"))
+        self.assertFalse(trusted_seed.safe_member("../solc"))
+        self.assertFalse(trusted_seed.safe_member("/absolute/solc"))
+        self.assertFalse(trusted_seed.safe_member("windows\\solc.bat"))
+
     def test_declared_target_matrix_is_complete_and_sorted(self) -> None:
         version, targets = seed.load_metadata()
         self.assertEqual("0.1.1", version)

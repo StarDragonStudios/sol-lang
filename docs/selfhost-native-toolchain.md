@@ -87,5 +87,5 @@ the platform driver, then execute the linked program. The fixture exercises:
 - deterministic artifact generation and stable invalid-input rejection.
 
 This proves the stage-1 backend can cross the native boundary on every CI host.
-The public orchestration is documented in
+The public `solc` and `sol run` orchestration is documented in
 [`selfhost-cli.md`](selfhost-cli.md).

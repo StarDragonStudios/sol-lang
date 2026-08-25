@@ -105,6 +105,10 @@ if (-not [IO.Directory]::Exists($StandardLibrary)) {
 }
 
 $Request = [IO.Path]::GetTempFileName()
+$CoreInput = [IO.Path]::GetTempFileName()
+$CoreOutput = [IO.Path]::GetTempFileName()
+$CoreError = [IO.Path]::GetTempFileName()
+$Utf8NoBom = [Text.UTF8Encoding]::new($false)
 $LlvmOutput = "$Output.sol-selfhost.ll"
 $LiteralOutput = "$Output.sol-selfhost-literals.c"
 try {
@@ -116,25 +120,16 @@ try {
         [IO.Path]::GetFullPath($StandardLibrary),
         $LlvmOutput,
         $LiteralOutput
-    ), [Text.UTF8Encoding]::new($false))
+    ), $Utf8NoBom)
+    [IO.File]::WriteAllText($CoreInput, "$Request`n", $Utf8NoBom)
     Remove-Item -LiteralPath $LlvmOutput, $LiteralOutput -Force -ErrorAction SilentlyContinue
 
-    $ProcessInfo = [Diagnostics.ProcessStartInfo]::new()
-    $ProcessInfo.FileName = $Core
-    $ProcessInfo.UseShellExecute = $false
-    $ProcessInfo.RedirectStandardInput = $true
-    $ProcessInfo.RedirectStandardOutput = $true
-    $ProcessInfo.RedirectStandardError = $true
-    $Process = [Diagnostics.Process]::new()
-    $Process.StartInfo = $ProcessInfo
-    if (-not $Process.Start()) { throw "self-host compiler core did not start" }
-    $StandardOutput = $Process.StandardOutput.ReadToEndAsync()
-    $StandardError = $Process.StandardError.ReadToEndAsync()
-    $Process.StandardInput.WriteLine($Request)
-    $Process.StandardInput.Close()
-    $Process.WaitForExit()
-    [Console]::Error.Write($StandardOutput.Result)
-    [Console]::Error.Write($StandardError.Result)
+    $Process = Start-Process -FilePath $Core -NoNewWindow -Wait -PassThru `
+        -RedirectStandardInput $CoreInput `
+        -RedirectStandardOutput $CoreOutput `
+        -RedirectStandardError $CoreError
+    [Console]::Error.Write([IO.File]::ReadAllText($CoreOutput, $Utf8NoBom))
+    [Console]::Error.Write([IO.File]::ReadAllText($CoreError, $Utf8NoBom))
     $CoreStatus = $Process.ExitCode
     $Process.Dispose()
     if ($CoreStatus -ne 0) {
@@ -155,5 +150,5 @@ try {
     if (-not $Keep) { Remove-Item -LiteralPath $LlvmOutput, $LiteralOutput -Force -ErrorAction SilentlyContinue }
     exit 0
 } finally {
-    Remove-Item -LiteralPath $Request -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $Request, $CoreInput, $CoreOutput, $CoreError -Force -ErrorAction SilentlyContinue
 }

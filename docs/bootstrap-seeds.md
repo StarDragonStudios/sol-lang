@@ -50,6 +50,12 @@ and requires byte-identical stage-3 binaries, manifests and final archives.
 The extracted seed then rebuilds the compiler and passes conformance with a
 `java` failure shim first on `PATH`.
 
+CI downloads that frozen compiler from the v0.1.1 release and verifies its
+published checksum before starting seed construction. Manual seed publication
+is restricted to `main`, and existing native seed assets are never overwritten;
+the recorded source revision therefore remains the immutable authority for the
+supplemental seed publication.
+
 Archive entries use sorted POSIX paths, fixed permissions and timestamps, zero
 tar ownership, and deterministic gzip/ZIP compression metadata. Linux seeds
 use a content-derived ELF build ID, macOS seeds suppress Mach-O UUIDs, and
