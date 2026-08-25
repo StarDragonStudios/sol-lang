@@ -33,6 +33,10 @@ jobs:
                   test -f selfhost/bootstrap.sh
                   test -f selfhost/bootstrap.bat
                   test -f selfhost/README.md
+                  test -f selfhost/repeated-bootstrap/run.py
+                  test -f selfhost/seed/build.py
+                  test -f selfhost/seed/download.py
+                  test -f selfhost/seed/metadata.json
 
     compiler-tests:
         name: Compiler tests
@@ -226,3 +230,26 @@ jobs:
                     ${{ matrix.gradle }}
                     distributionSmokeTest
                     assembleDist
+
+            -   name: Download trusted Sol 0.1.1 compiler
+                env:
+                    GH_TOKEN: ${{ github.token }}
+                    SOL_SEED_TARGET: ${{ matrix.platform }}
+                run: python selfhost/seed/download.py
+
+            -   name: Build and verify reproducible native seed
+                env:
+                    SOL_LINKER: ${{ matrix.linker }}
+                    SOL_SEED_TARGET: ${{ matrix.platform }}
+                run: |
+                    python selfhost/seed/test_seed.py
+                    python selfhost/seed/build.py
+
+            -   name: Retain verified native seed
+                uses: actions/upload-artifact@v7
+                with:
+                    name: seed-${{ matrix.platform }}
+                    path: selfhost/build/seed artifacts/dist/*
+                    if-no-files-found: error
+                    compression-level: 0
+                    retention-days: 7

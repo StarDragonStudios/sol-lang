@@ -12,7 +12,7 @@ from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 SELFHOST = REPOSITORY / "selfhost"
-BUILD = SELFHOST / "build" / "repeated bootstrap"
+BUILD = Path(os.environ.get("SOL_REPEATED_BOOTSTRAP_BUILD", SELFHOST / "build" / "repeated bootstrap")).resolve()
 SOURCE = SELFHOST / "src" / "main.sol"
 STDLIB = SELFHOST / "stdlib"
 IS_WINDOWS = os.name == "nt"

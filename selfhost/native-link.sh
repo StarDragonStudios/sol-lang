@@ -68,7 +68,19 @@ rm -f -- "$OUTPUT" "$LLVM_OBJECT" "$RUNTIME_OBJECT" "$LITERAL_OBJECT"
 run_driver -Wno-override-module -x ir -c "$LLVM_SOURCE" -o "$LLVM_OBJECT"
 run_driver -std=c11 -I"$RUNTIME_DIR" -c "$RUNTIME_DIR/selfhost.c" -o "$RUNTIME_OBJECT"
 run_driver -std=c11 -I"$RUNTIME_DIR" -c "$LITERAL_SOURCE" -o "$LITERAL_OBJECT"
-run_driver "$LLVM_OBJECT" "$RUNTIME_OBJECT" "$LITERAL_OBJECT" -o "$OUTPUT"
+if [ "${SOL_REPRODUCIBLE_LINK:-0}" = "1" ]; then
+    case "$(uname -s)" in
+        Darwin) run_driver "$LLVM_OBJECT" "$RUNTIME_OBJECT" "$LITERAL_OBJECT" -Wl,-reproducible -o "$OUTPUT" ;;
+        Linux) run_driver "$LLVM_OBJECT" "$RUNTIME_OBJECT" "$LITERAL_OBJECT" -Wl,--build-id=sha1 -o "$OUTPUT" ;;
+        *)
+            cleanup_failure
+            echo "native link error: reproducible link mode is unsupported on this host" >&2
+            exit 69
+            ;;
+    esac
+else
+    run_driver "$LLVM_OBJECT" "$RUNTIME_OBJECT" "$LITERAL_OBJECT" -o "$OUTPUT"
+fi
 
 if [ ! -f "$OUTPUT" ] || [ ! -s "$OUTPUT" ]; then
     cleanup_failure

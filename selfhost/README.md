@@ -95,6 +95,9 @@ The portable conformance catalog and comparison rules are documented in
 stage 1 → stage 2 → stage 3 fixed-point gate, deterministic source inventory
 and provenance manifests are documented in
 [`docs/repeated-bootstrap.md`](../docs/repeated-bootstrap.md).
+Reproducible native seed construction, archive verification, the six-target
+matrix and offline recovery are documented in
+[`docs/bootstrap-seeds.md`](../docs/bootstrap-seeds.md).
 
 ### Windows
 

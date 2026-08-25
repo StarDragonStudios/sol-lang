@@ -26,27 +26,30 @@ ownership are reserved for future releases.
 
 ## Supported platforms
 
-Prebuilt distributions are published for Linux, macOS and Windows on both
-x86_64 and ARM64. Java 25 and a native linker driver (`clang`, `cc`, or one
-selected with `SOL_LINKER`) are required to run the compiler. Programs compiled
-by Sol are native executables and do not require the JVM.
+Native bootstrap seeds are published for Linux, macOS and Windows on both
+x86_64 and ARM64. They contain the stage-3 compiler and do not require Java.
+A native linker driver (`clang`, `cc`, or one selected with `SOL_LINKER`) is
+required to compile programs.
 
 ## Bootstrap seed and integrity
 
-The six platform archives published with this release are the official Sol
-0.1.1 bootstrap seeds. `SHA256SUMS.txt` records their SHA-256 digests, and
-`SEED-PROVENANCE.txt` records the tag, source commit and release workflow used
-to build them.
+The six `sol-bootstrap-0.1.1-*` platform archives published alongside the JVM
+distributions are the official Sol 0.1.1 bootstrap seeds. `SHA256SUMS` records
+the native bootstrap archive SHA-256 digests,
+`NATIVE-SEED-PROVENANCE.txt` records the tag, source commit and release workflow, and
+the target-specific JSON manifests record the fixed-point compiler provenance.
 
 After downloading an archive and the checksum file, verify that archive from
 their directory (replace the filename with the selected platform archive):
 
 ```text
-grep 'sol-0.1.1-linux-x86_64.tar.gz' SHA256SUMS.txt | sha256sum --check
+grep 'sol-bootstrap-0.1.1-linux-x86_64.tar.gz' SHA256SUMS | sha256sum --check
 ```
 
 On systems without `sha256sum`, compare the archive with the corresponding
 entry using the platform's SHA-256 utility.
 
-The self-host build will remain pinned to this published release while issues
-#115–#127 implement and stabilize the compiler written in Sol.
+Each archive is built twice from clean stage directories and accepted only when
+the stage-3 compiler, manifests and final archive are byte-identical. See
+`BOOTSTRAP.md` inside the seed for verification, offline bootstrap and recovery
+instructions. SHA-256 checksums are integrity identifiers, not signatures.
