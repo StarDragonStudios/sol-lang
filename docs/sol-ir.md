@@ -628,10 +628,8 @@ the lowering layer.
 
 ## LLVM backend
 
-The target-independent LLVM generation layer is documented in
-[`llvm-backend.md`](llvm-backend.md). The Sol 0.1.1 self-host implements its
-own target-independent textual boundary, documented in
-[`selfhost-llvm-backend.md`](selfhost-llvm-backend.md).
+The official target-independent textual LLVM generation layer is documented in
+[`compiler-llvm-backend.md`](compiler-llvm-backend.md).
 
 The backend consumes only validated Sol IR and does not expose LLVM objects
 through the Sol IR package boundary.
