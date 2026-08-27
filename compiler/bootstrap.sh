@@ -60,50 +60,56 @@ echo "bootstrap: validating stage 1 command launchers"
 SOL_SELFHOST_CORE="$OUTPUT" "$COMPILER_DIR/solc.sh" --version
 SOL_SELFHOST_CORE="$OUTPUT" "$COMPILER_DIR/sol.sh" --version
 
+# The published seed builds stage 1; stage 1 compiles the test suite so that
+# compiler improvements are exercised without replacing the trusted seed.
+compile_test() {
+    SOL_SELFHOST_CORE="$OUTPUT" "$COMPILER_DIR/solc.sh" "$@"
+}
+
 echo "bootstrap: compiling self-host lexer tests"
-"$SEED_SOLC" "$LEXER_TEST_SOURCE" -o "$LEXER_TEST_OUTPUT"
+compile_test "$LEXER_TEST_SOURCE" -o "$LEXER_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host lexer"
 "$LEXER_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host parser tests"
-"$SEED_SOLC" "$PARSER_TEST_SOURCE" -o "$PARSER_TEST_OUTPUT"
+compile_test "$PARSER_TEST_SOURCE" -o "$PARSER_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host parser foundations"
 "$PARSER_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host grammar tests"
-"$SEED_SOLC" "$GRAMMAR_TEST_SOURCE" -o "$GRAMMAR_TEST_OUTPUT"
+compile_test "$GRAMMAR_TEST_SOURCE" -o "$GRAMMAR_TEST_OUTPUT"
 
 echo "bootstrap: validating complete self-host grammar"
 "$GRAMMAR_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host semantic foundation tests"
-"$SEED_SOLC" "$SEMANTIC_FOUNDATION_TEST_SOURCE" -o "$SEMANTIC_FOUNDATION_TEST_OUTPUT"
+compile_test "$SEMANTIC_FOUNDATION_TEST_SOURCE" -o "$SEMANTIC_FOUNDATION_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host symbols, scopes, and types"
 "$SEMANTIC_FOUNDATION_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host semantic analysis tests"
-"$SEED_SOLC" "$SEMANTIC_ANALYSIS_TEST_SOURCE" -o "$SEMANTIC_ANALYSIS_TEST_OUTPUT"
+compile_test "$SEMANTIC_ANALYSIS_TEST_SOURCE" -o "$SEMANTIC_ANALYSIS_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host semantic analysis and module resolution"
 "$SEMANTIC_ANALYSIS_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host typed Sol IR tests"
-"$SEED_SOLC" "$IR_TEST_SOURCE" -o "$IR_TEST_OUTPUT"
+compile_test "$IR_TEST_SOURCE" -o "$IR_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host typed Sol IR"
 "$IR_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host semantic-to-IR lowering tests"
-"$SEED_SOLC" "$LOWERING_TEST_SOURCE" -o "$LOWERING_TEST_OUTPUT"
+compile_test "$LOWERING_TEST_SOURCE" -o "$LOWERING_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host semantic-to-IR lowering"
 "$LOWERING_TEST_OUTPUT"
 
 echo "bootstrap: compiling self-host LLVM generation tests"
-"$SEED_SOLC" "$LLVM_TEST_SOURCE" -o "$LLVM_TEST_OUTPUT"
+compile_test "$LLVM_TEST_SOURCE" -o "$LLVM_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host LLVM generation"
 "$LLVM_TEST_OUTPUT"
@@ -114,14 +120,14 @@ if ! command -v "$CLANG" >/dev/null 2>&1; then
 fi
 
 echo "bootstrap: compiling LLVM verification fixture"
-"$SEED_SOLC" "$LLVM_FIXTURE_SOURCE" -o "$LLVM_FIXTURE_OUTPUT"
+compile_test "$LLVM_FIXTURE_SOURCE" -o "$LLVM_FIXTURE_OUTPUT"
 
 echo "bootstrap: verifying generated textual LLVM IR"
 "$LLVM_FIXTURE_OUTPUT" > "$LLVM_FIXTURE_IR"
 "$CLANG" -x ir -S -emit-llvm "$LLVM_FIXTURE_IR" -o /dev/null
 
 echo "bootstrap: compiling native artifact fixture"
-"$SEED_SOLC" "$NATIVE_ARTIFACT_SOURCE" -o "$NATIVE_ARTIFACT_OUTPUT"
+compile_test "$NATIVE_ARTIFACT_SOURCE" -o "$NATIVE_ARTIFACT_OUTPUT"
 
 echo "bootstrap: generating deterministic native inputs"
 (cd "$REPO_ROOT" && "$NATIVE_ARTIFACT_OUTPUT")
@@ -183,7 +189,7 @@ rm -f -- \
     "$CLI_FIXTURE_OUTPUT.sol-literals.o"
 
 echo "bootstrap: compiling self-host CLI protocol tests"
-"$SEED_SOLC" "$CLI_TEST_SOURCE" -o "$CLI_TEST_OUTPUT"
+compile_test "$CLI_TEST_SOURCE" -o "$CLI_TEST_OUTPUT"
 "$CLI_TEST_OUTPUT"
 
 echo "bootstrap: validating self-host command-line rejection"

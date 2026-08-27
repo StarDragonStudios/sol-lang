@@ -75,6 +75,13 @@ compiler/build/stage1/solc-core
 19. validates retained artifacts, CLI rejection, source diagnostics and `sol run` status propagation;
 20. runs the seed-versus-current language, runtime and CLI conformance gate.
 
+After building stage 1 with the immutable seed, the script uses stage 1 to
+compile the test suites. The conformance gate still compares against the
+actual published seed: candidate core, standard-library and native-link
+overrides are removed from the seed's environment.
+See [compiler performance](../docs/compiler-performance.md) for the binding
+index invariants and a reproducible before/after compilation comparison.
+
 The seed compiler can be selected explicitly with the `SOLC` environment variable:
 
 ```bash

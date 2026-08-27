@@ -27,6 +27,18 @@ def fail(message: str) -> None:
     raise ConformanceFailure(message)
 
 
+def make_seed_environment(environment: dict[str, str]) -> dict[str, str]:
+    # Native seeds honor these overrides too. Never compare the candidate
+    # against itself when the bootstrap passes SOL_SELFHOST_CORE to this suite.
+    return {
+        key: value
+        for key, value in environment.items()
+        if key.upper() not in {
+            "SOL_SELFHOST_CORE", "SOL_SELFHOST_STDLIB", "SOL_SELFHOST_NATIVE_LINK"
+        }
+    }
+
+
 def load_catalog() -> list[dict[str, object]]:
     document = json.loads(CATALOG.read_text(encoding="utf-8"))
     if document.get("version") != 1 or not isinstance(document.get("cases"), list):
@@ -316,8 +328,8 @@ def main() -> int:
     if BUILD.exists():
         shutil.rmtree(BUILD)
     BUILD.mkdir(parents=True)
-    seed_environment = dict(os.environ)
-    selfhost_environment, java_marker = make_no_java_environment(seed_environment)
+    seed_environment = make_seed_environment(dict(os.environ))
+    selfhost_environment, java_marker = make_no_java_environment(dict(os.environ))
     selfhost_environment["SOL_SELFHOST_CORE"] = str(core)
 
     cases = load_catalog()
