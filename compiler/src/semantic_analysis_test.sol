@@ -3,6 +3,7 @@ inject std.collections.vector
 inject frontend.lexer only LexResult, destroy_lex_result, scan_source
 inject frontend.parser only ParseResult, destroy_parse_result, parse_tokens
 inject frontend.syntax
+inject frontend.source only SourcePosition, source_position, source_span
 inject semantics.types
 inject semantics.symbol
 inject semantics.scope
@@ -16,6 +17,13 @@ end
 
 @init
 fn launch() -> int
+    let bindings: int = test_binding_index()
+
+    if bindings != 0 then
+        console::print_line("semantic analysis test failed: binding index")
+        return 150 + bindings
+    end
+
     let successful: int = test_successful_program()
 
     if successful != 0 then
@@ -52,6 +60,105 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_binding_index() -> int
+    let program: pointer<SemanticProgram> = create_semantic_program(false)
+    let nodes: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+    @mut let failure: int = 0
+    @mut let index: int = 0
+
+    // More nodes than buckets exercises collisions and bucket-vector growth.
+    while index < 5000 do
+        @mut let offset: int = index
+        if index >= 4900 then
+            offset = (index - 4900) * semantic_binding_bucket_count()
+        end
+        if index == 4999 then
+            offset = -1
+        end
+        let position: SourcePosition = source_position(offset, 1, index + 1)
+        let node: pointer<SyntaxNode> = create_syntax_name("value", source_span(position, position))
+        vector_push<pointer<SyntaxNode>>(nodes, node)
+        let binding: pointer<SemanticBinding> = semantic_program_add_binding(program, 13, node)
+        binding->type = type_catalog_lookup(program->catalog, "int")
+        index = index + 1
+    end
+
+    index = 4999
+    while index >= 0 do
+        let node: pointer<SyntaxNode> = vector_get<pointer<SyntaxNode>>(nodes, index)
+        let binding: pointer<SemanticBinding> = semantic_program_binding(program, 13, node)
+        if binding == null then
+            failure = 1
+        else
+            if binding->node != node || binding->type != type_catalog_lookup(program->catalog, "int") || semantic_program_add_binding(program, 13, node) != binding then
+                failure = 2
+            end
+        end
+        index = index - 1
+    end
+
+    if vector_length<pointer<SemanticBinding>>(program->bindings) != 5000 then
+        failure = 3
+    end
+
+    // Separate syntax trees can have identical spans, text, and node kinds.
+    let position: SourcePosition = source_position(0, 1, 1)
+    let same_span: pointer<SyntaxNode> = create_syntax_name("value", source_span(position, position))
+    let absent: pointer<SyntaxNode> = create_syntax_name("value", source_span(position, position))
+    let first: pointer<SyntaxNode> = vector_get<pointer<SyntaxNode>>(nodes, 0)
+    let original: pointer<SemanticBinding> = semantic_program_binding(program, 13, first)
+    let collision: pointer<SemanticBinding> = semantic_program_add_binding(program, 13, same_span)
+
+    if collision == original || semantic_program_binding(program, 13, first) != original || semantic_program_binding(program, 13, same_span) != collision || semantic_program_binding(program, 13, absent) != null then
+        failure = 4
+    end
+
+    // Every supported binding kind remains independent on the same node.
+    index = 1
+    while index < 19 do
+        let binding: pointer<SemanticBinding> = semantic_program_add_binding(program, index, first)
+        if binding == null then
+            failure = 5
+        else
+            if binding->kind != index || binding->node != first || semantic_program_binding(program, index, first) != binding then
+                failure = 6
+            end
+        end
+        index = index + 1
+    end
+
+    let count: int = vector_length<pointer<SemanticBinding>>(program->bindings)
+    if semantic_program_add_binding(program, 0, first) != null || semantic_program_add_binding(program, 19, first) != null || semantic_program_add_binding(program, -1, first) != null || semantic_program_add_binding(program, 1, null) != null || semantic_program_add_binding(null, 1, first) != null then
+        failure = 7
+    end
+    if semantic_program_binding(program, 0, first) != null || semantic_program_binding(program, 19, first) != null || semantic_program_binding(program, -1, first) != null || semantic_program_binding(program, 1, null) != null || semantic_program_binding(null, 1, first) != null || vector_length<pointer<SemanticBinding>>(program->bindings) != count then
+        failure = 8
+    end
+
+    // Updating a binding does not insert duplicates or reorder the model.
+    semantic_program_record_type(program, 13, first, type_catalog_lookup(program->catalog, "string"))
+    if semantic_program_binding(program, 13, first) != original || original->type != type_catalog_lookup(program->catalog, "string") || vector_get<pointer<SemanticBinding>>(program->bindings, 0) != original || vector_length<pointer<SemanticBinding>>(program->bindings) != count then
+        failure = 9
+    end
+
+    let other: pointer<SemanticProgram> = create_semantic_program(false)
+    if semantic_program_binding(other, 13, first) != null || semantic_program_add_binding(other, 13, first) == original then
+        failure = 10
+    end
+    destroy_semantic_program(other)
+    destroy_semantic_program(program)
+
+    index = 0
+    while index < vector_length<pointer<SyntaxNode>>(nodes) do
+        destroy_syntax_tree(vector_get<pointer<SyntaxNode>>(nodes, index))
+        index = index + 1
+    end
+    destroy_vector<pointer<SyntaxNode>>(nodes)
+    destroy_syntax_tree(same_span)
+    destroy_syntax_tree(absent)
+    return failure
 end
 
 fn parse_semantic_test_source(source: string) -> ParsedSemanticSource

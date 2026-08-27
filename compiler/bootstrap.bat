@@ -81,7 +81,7 @@ call "%COMPILER_DIR%sol.bat" --version
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host lexer tests
-call "%SEED_SOLC%" "%LEXER_TEST_SOURCE%" -o "%LEXER_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%LEXER_TEST_SOURCE%" -o "%LEXER_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host lexer
@@ -89,7 +89,7 @@ echo bootstrap: validating self-host lexer
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host parser tests
-call "%SEED_SOLC%" "%PARSER_TEST_SOURCE%" -o "%PARSER_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%PARSER_TEST_SOURCE%" -o "%PARSER_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host parser foundations
@@ -97,7 +97,7 @@ echo bootstrap: validating self-host parser foundations
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host grammar tests
-call "%SEED_SOLC%" "%GRAMMAR_TEST_SOURCE%" -o "%GRAMMAR_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%GRAMMAR_TEST_SOURCE%" -o "%GRAMMAR_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating complete self-host grammar
@@ -105,7 +105,7 @@ echo bootstrap: validating complete self-host grammar
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host semantic foundation tests
-call "%SEED_SOLC%" "%SEMANTIC_FOUNDATION_TEST_SOURCE%" -o "%SEMANTIC_FOUNDATION_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%SEMANTIC_FOUNDATION_TEST_SOURCE%" -o "%SEMANTIC_FOUNDATION_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host symbols, scopes, and types
@@ -113,7 +113,7 @@ echo bootstrap: validating self-host symbols, scopes, and types
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host semantic analysis tests
-call "%SEED_SOLC%" "%SEMANTIC_ANALYSIS_TEST_SOURCE%" -o "%SEMANTIC_ANALYSIS_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%SEMANTIC_ANALYSIS_TEST_SOURCE%" -o "%SEMANTIC_ANALYSIS_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host semantic analysis and module resolution
@@ -121,7 +121,7 @@ echo bootstrap: validating self-host semantic analysis and module resolution
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host typed Sol IR tests
-call "%SEED_SOLC%" "%IR_TEST_SOURCE%" -o "%IR_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%IR_TEST_SOURCE%" -o "%IR_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host typed Sol IR
@@ -129,7 +129,7 @@ echo bootstrap: validating self-host typed Sol IR
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host semantic-to-IR lowering tests
-call "%SEED_SOLC%" "%LOWERING_TEST_SOURCE%" -o "%LOWERING_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%LOWERING_TEST_SOURCE%" -o "%LOWERING_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host semantic-to-IR lowering
@@ -137,7 +137,7 @@ echo bootstrap: validating self-host semantic-to-IR lowering
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host LLVM generation tests
-call "%SEED_SOLC%" "%LLVM_TEST_SOURCE%" -o "%LLVM_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%LLVM_TEST_SOURCE%" -o "%LLVM_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating self-host LLVM generation
@@ -151,7 +151,7 @@ if errorlevel 1 (
 )
 
 echo bootstrap: compiling LLVM verification fixture
-call "%SEED_SOLC%" "%LLVM_FIXTURE_SOURCE%" -o "%LLVM_FIXTURE_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%LLVM_FIXTURE_SOURCE%" -o "%LLVM_FIXTURE_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: verifying generated textual LLVM IR
@@ -161,7 +161,7 @@ call "%CLANG%" -x ir -S -emit-llvm "%LLVM_FIXTURE_IR%" -o NUL
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling native artifact fixture
-call "%SEED_SOLC%" "%NATIVE_ARTIFACT_SOURCE%" -o "%NATIVE_ARTIFACT_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%NATIVE_ARTIFACT_SOURCE%" -o "%NATIVE_ARTIFACT_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: generating deterministic native inputs
@@ -234,7 +234,7 @@ if not "!CLI_STATUS!"=="37" (
 del /q "%CLI_FIXTURE_OUTPUT%.sol-selfhost.ll" "%CLI_FIXTURE_OUTPUT%.sol-selfhost-literals.c" "%CLI_FIXTURE_OUTPUT%.sol-link.obj" "%CLI_FIXTURE_OUTPUT%.sol-runtime.obj" "%CLI_FIXTURE_OUTPUT%.sol-literals.obj"
 
 echo bootstrap: compiling self-host CLI protocol tests
-call "%SEED_SOLC%" "%CLI_TEST_SOURCE%" -o "%CLI_TEST_OUTPUT%"
+call "%COMPILER_DIR%solc.bat" "%CLI_TEST_SOURCE%" -o "%CLI_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 "%CLI_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%

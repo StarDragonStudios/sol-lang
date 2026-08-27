@@ -44,7 +44,9 @@ jobs:
                     fi
 
             -   name: Test bootstrap orchestration
-                run: python compiler/seed/test_seed.py
+                run: |
+                    python compiler/seed/test_seed.py
+                    python compiler/conformance/test_conformance.py
 
     compiler-bootstrap:
         name: Compiler bootstrap (Linux)

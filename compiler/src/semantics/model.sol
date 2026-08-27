@@ -70,13 +70,13 @@ fn create_semantic_program(require_entry_point: boolean) -> pointer<SemanticProg
     program->owned_types = create_vector<pointer<SemanticType>>()
     program->bindings = create_vector<pointer<SemanticBinding>>()
     program->binding_buckets = create_vector<pointer<Vector<pointer<SemanticBinding>>>>()
-    @mut let binding_kind: int = 0
-    while binding_kind < 19 do
+    @mut let bucket_index: int = 0
+    while bucket_index < semantic_binding_bucket_count() do
         vector_push<pointer<Vector<pointer<SemanticBinding>>>>(
             program->binding_buckets,
-            create_vector<pointer<SemanticBinding>>()
+            null
         )
-        binding_kind = binding_kind + 1
+        bucket_index = bucket_index + 1
     end
     program->diagnostics = create_vector<SemanticDiagnostic>()
     program->entry_module = null
@@ -369,7 +369,7 @@ fn semantic_program_add_binding(
     kind: int,
     node: pointer<SyntaxNode>
 ) -> pointer<SemanticBinding>
-    if program == null then
+    if program == null || node == null || kind < 1 || kind >= 19 then
         return null
     end
 
@@ -386,17 +386,44 @@ fn semantic_program_add_binding(
     let binding: pointer<SemanticBinding> = create_semantic_binding(kind, node)
 
     if binding != null then
-        vector_push<pointer<SemanticBinding>>(program->bindings, binding)
-        vector_push<pointer<SemanticBinding>>(
-            vector_get<pointer<Vector<pointer<SemanticBinding>>>>(
-                program->binding_buckets,
-                kind
-            ),
-            binding
+        let bucket_index: int = semantic_binding_bucket_index(kind, node)
+        @mut let bucket: pointer<Vector<pointer<SemanticBinding>>> = vector_get<pointer<Vector<pointer<SemanticBinding>>>>(
+            program->binding_buckets,
+            bucket_index
         )
+
+        if bucket == null then
+            bucket = create_vector<pointer<SemanticBinding>>()
+            vector_set<pointer<Vector<pointer<SemanticBinding>>>>(
+                program->binding_buckets,
+                bucket_index,
+                bucket
+            )
+        end
+
+        vector_push<pointer<SemanticBinding>>(program->bindings, binding)
+        vector_push<pointer<SemanticBinding>>(bucket, binding)
     end
 
     return binding
+end
+
+fn semantic_binding_bucket_count() -> int
+    return 4093
+end
+
+fn semantic_binding_bucket_index(kind: int, node: pointer<SyntaxNode>) -> int
+    // Semantic analysis consumes finalized syntax trees: source offsets stay
+    // fixed while bindings are alive. Offsets only select a bucket; pointer
+    // identity below still distinguishes nodes and modules with equal spans.
+    let count: int = semantic_binding_bucket_count()
+    @mut let offset: int = node->span.start.offset % count
+
+    if offset < 0 then
+        offset = offset + count
+    end
+
+    return (offset * 19 + kind) % count
 end
 
 fn semantic_program_binding(
@@ -414,8 +441,13 @@ fn semantic_program_binding(
 
     let bucket: pointer<Vector<pointer<SemanticBinding>>> = vector_get<pointer<Vector<pointer<SemanticBinding>>>>(
         program->binding_buckets,
-        kind
+        semantic_binding_bucket_index(kind, node)
     )
+
+    if bucket == null then
+        return null
+    end
+
     @mut let index: int = 0
     let count: int = vector_length<pointer<SemanticBinding>>(bucket)
 
