@@ -37,9 +37,10 @@ jobs:
                     fi
 
     build:
-        name: Build (${{ matrix.platform }})
+        name: Build native compiler (${{ matrix.platform }})
         needs: validate-source
         runs-on: ${{ matrix.runner }}
+        timeout-minutes: 90
 
         strategy:
             fail-fast: false
@@ -47,82 +48,52 @@ jobs:
                 include:
                     -   runner: ubuntu-24.04
                         platform: linux-x86_64
-                        gradle: ./gradlew
-                        java_distribution: temurin
                         linker: clang
 
                     -   runner: ubuntu-24.04-arm
                         platform: linux-arm64
-                        gradle: ./gradlew
-                        java_distribution: temurin
                         linker: clang
 
                     -   runner: macos-15-intel
                         platform: macosx-x86_64
-                        gradle: ./gradlew
-                        java_distribution: temurin
                         linker: clang
 
                     -   runner: macos-15
                         platform: macosx-arm64
-                        gradle: ./gradlew
-                        java_distribution: temurin
                         linker: clang
 
                     -   runner: windows-2025
                         platform: windows-x86_64
-                        gradle: ./gradlew.bat
-                        java_distribution: temurin
                         linker: C:\Program Files\LLVM\bin\clang.exe
 
                     -   runner: windows-11-arm
                         platform: windows-arm64
-                        gradle: ./gradlew.bat
-                        java_distribution: zulu
                         linker: C:\Program Files\LLVM\bin\clang.exe
 
         steps:
             -   name: Checkout repository
                 uses: actions/checkout@v6
 
-            -   name: Set up Java 25
-                uses: actions/setup-java@v5
-                with:
-                    distribution: ${{ matrix.java_distribution }}
-                    java-version: "25"
-
-            -   name: Build and smoke-test distribution
-                working-directory: compiler
-                env:
-                    ORG_GRADLE_PROJECT_solNativePlatform: ${{ matrix.platform }}
-                    SOL_LINKER: ${{ matrix.linker }}
-                run: >
-                    ${{ matrix.gradle }}
-                    clean
-                    test
-                    distributionSmokeTest
-                    assembleDist
-
-            -   name: Download trusted Sol 0.1.1 compiler
+            -   name: Download verified native Sol 0.1.1 seed
                 env:
                     GH_TOKEN: ${{ github.token }}
                     SOL_SEED_TARGET: ${{ matrix.platform }}
-                run: python selfhost/seed/download.py
+                run: python compiler/seed/download.py
 
-            -   name: Build and verify reproducible native seed
+            -   name: Build and verify reproducible native compiler
                 env:
                     SOL_LINKER: ${{ matrix.linker }}
                     SOL_SEED_TARGET: ${{ matrix.platform }}
                 run: |
-                    python selfhost/seed/test_seed.py
-                    python selfhost/seed/build.py
+                    python compiler/seed/test_seed.py
+                    python compiler/seed/build.py
 
-            -   name: Upload native seed release asset
+            -   name: Upload native compiler release asset
                 uses: actions/upload-artifact@v7
                 with:
-                    name: seed-${{ matrix.platform }}
+                    name: compiler-${{ matrix.platform }}
                     path: |
-                        selfhost/build/seed artifacts/dist/sol-bootstrap-*-${{ matrix.platform }}*
+                        compiler/build/seed artifacts/dist/sol-bootstrap-*-${{ matrix.platform }}*
                     if-no-files-found: error
                     compression-level: 0
                     retention-days: 7
@@ -146,7 +117,7 @@ jobs:
             -   name: Download release assets
                 uses: actions/download-artifact@v8
                 with:
-                    pattern: seed-*
+                    pattern: compiler-*
                     path: dist
                     merge-multiple: true
 
@@ -156,7 +127,7 @@ jobs:
                     set -euo pipefail
 
                     version="${RELEASE_TAG#v}"
-                    metadata_version="$(python -c 'import json; print(json.load(open("selfhost/seed/metadata.json"))["version"])')"
+                    metadata_version="$(python -c 'import json; print(json.load(open("compiler/seed/metadata.json"))["version"])')"
 
                     if [[ "${RELEASE_TAG}" != "v${metadata_version}" || "${version}" != "${metadata_version}" ]]; then
                         echo "::error::Tag ${RELEASE_TAG} does not match seed metadata ${metadata_version}."
@@ -204,15 +175,15 @@ jobs:
                 shell: bash
                 run: |
                     cat > dist/NATIVE-SEED-PROVENANCE.txt <<EOF
-                    Sol 0.1.1 bootstrap seed
+                    Sol 0.1.1 native compiler seed
                     tag: ${RELEASE_TAG}
                     commit: ${GITHUB_SHA}
                     repository: https://github.com/${GITHUB_REPOSITORY}
                     workflow: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-                    builders: GitHub-hosted runners, Java 25, Gradle wrapper
+                    builders: GitHub-hosted runners, published native Sol seed, host Clang-compatible linker
                     targets: linux-x86_64, linux-arm64, macosx-x86_64, macosx-arm64, windows-x86_64, windows-arm64
                     checksums: SHA256SUMS
-                    artifact type: native stage-3 bootstrap seeds (no JVM)
+                    artifact type: official native stage-3 compiler seeds (no JVM)
                     EOF
 
             -   name: Publish release
@@ -231,15 +202,11 @@ jobs:
                         gh release upload "${RELEASE_TAG}" \
                             dist/* \
                             --repo "${GITHUB_REPOSITORY}"
-                        gh release edit "${RELEASE_TAG}" \
-                            --repo "${GITHUB_REPOSITORY}" \
-                            --title "Sol ${RELEASE_TAG#v}" \
-                            --notes-file docs/releases/sol-0.1.1.md
                     else
                         gh release create "${RELEASE_TAG}" \
                             dist/* \
                             --repo "${GITHUB_REPOSITORY}" \
                             --verify-tag \
                             --title "Sol ${RELEASE_TAG#v}" \
-                            --notes-file docs/releases/sol-0.1.1.md
+                            --generate-notes
                     fi

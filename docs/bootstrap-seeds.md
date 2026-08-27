@@ -11,7 +11,7 @@ Sol 0.1.1 publishes a minimal native bootstrap seed for each supported target:
 | Windows x86_64 | `sol-bootstrap-0.1.1-windows-x86_64.zip` |
 | Windows ARM64 | `sol-bootstrap-0.1.1-windows-arm64.zip` |
 
-These are bootstrap toolchains, not the JVM-based end-user distribution. Each
+These native stage-3 toolchains are the official compiler distributions. Each
 contains a native stage-3 compiler core, relocatable `solc` and `sol`
 launchers, the native link driver, C runtime, canonical standard library,
 license, documentation, source inventory, provenance and an embedded per-file
@@ -42,16 +42,19 @@ download them again from the designated GitHub release and repeat verification.
 
 ## Trust chain and reproducibility
 
-The initial native stage is built by the frozen Sol 0.1.1 Java bootstrap root.
-That native compiler builds stage 2, stage 2 builds stage 3, and the generated
+The published Sol 0.1.1 seeds retain provenance back to the frozen Java root
+that originally produced their initial native stage. From that immutable
+historical boundary onward, the native compiler builds stage 2, stage 2 builds
+stage 3, and the generated
 LLVM, C literal registry and source inventory must reach the repeated-bootstrap
 fixed point. Seed construction repeats this process in two clean directories
 and requires byte-identical stage-3 binaries, manifests and final archives.
 The extracted seed then rebuilds the compiler and passes conformance with a
 `java` failure shim first on `PATH`.
 
-CI downloads that frozen compiler from the v0.1.1 release and verifies its
-published checksum before starting seed construction. Manual seed publication
+CI downloads the published target-native seed from the v0.1.1 release, verifies
+the release checksum and embedded file manifest, and then starts seed
+construction without Java. Manual seed publication
 is restricted to `main`, and existing native seed assets are never overwritten;
 the recorded source revision therefore remains the immutable authority for the
 supplemental seed publication.
@@ -60,7 +63,7 @@ Archive entries use sorted POSIX paths, fixed permissions and timestamps, zero
 tar ownership, and deterministic gzip/ZIP compression metadata. Linux seeds
 use a content-derived ELF build ID, macOS seeds use a reproducible content-based
 Mach-O UUID, and Windows seeds request reproducible PE/COFF linking and reserve
-a 16 MiB native stack so the self-host compiler can process the complete
+a 16 MiB native stack so the compiler can process the complete
 bootstrap source tree.
 
 The release checksum identifies bytes delivered by GitHub; the embedded
@@ -77,7 +80,7 @@ select its `solc` as `SOLC`, and run the repeated-bootstrap gate:
 
 ```sh
 SOLC=/absolute/path/to/sol-bootstrap-0.1.1-linux-x86_64/bin/solc \
-  ./selfhost/repeated-bootstrap/run.sh
+  ./compiler/repeated-bootstrap/run.sh
 ```
 
 Keep the archive, its release checksum and the embedded provenance together.

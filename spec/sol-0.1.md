@@ -1,7 +1,7 @@
 # Sol 0.1 Language Specification
 
-Sol 0.1 defines the procedural bootstrap language implemented by the Java
-bootstrap compiler. Sol 0.1.1 extends the released 0.1.0 language with
+Sol 0.1 defines the procedural bootstrap language implemented by the official
+compiler written in Sol. Sol 0.1.1 extends the released 0.1.0 language with
 user-defined value-type structs, minimal compile-time generics and explicit raw
 memory facilities while preserving the procedural model.
 
@@ -1245,7 +1245,7 @@ company.project.utilities
 Sol 0.1 source syntax does not contain a `module` declaration. Module identity
 is assigned by the compilation environment.
 
-For command-line compilation, the Java bootstrap compiler derives and discovers
+For command-line compilation, the official compiler derives and discovers
 modules from the source filesystem as described below.
 
 Every function declared directly at the top level of a module is exported by
@@ -1660,7 +1660,7 @@ function to have zero parameters.
 However, the current native startup bridge does not yet define how operating
 system process arguments are converted into Sol values.
 
-Consequently, the Java bootstrap compiler can currently produce a native
+Consequently, the official compiler can currently produce a native
 executable only when the selected entry function has no parameters:
 
 ```sol

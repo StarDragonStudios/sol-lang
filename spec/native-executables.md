@@ -2,7 +2,7 @@
 
 ## Pipeline
 
-The Java bootstrap compiler produces host-native Sol executables through the
+The official compiler produces host-native Sol executables through the
 following pipeline:
 
 ```text
@@ -13,11 +13,13 @@ typed Sol IR
 → native executable
 ```
 
-The Java compiler and self-host bootstrap each orchestrate compilation and
-linking. The generated executable contains native machine code and does not
-require the JVM.
+The compiler core emits deterministic LLVM IR and a C literal registry. Small
+platform launchers invoke the native driver and manage intermediate files. The
+compiler and generated executable both contain native machine code and do not
+require a JVM.
 
-The current implementation does not translate Sol to Java, C or Rust.
+The current implementation does not translate Sol to Java or Rust. C is used
+only for the portable runtime boundary and generated literal registry.
 
 ## Executable programs
 
@@ -97,8 +99,8 @@ failures produce an actionable toolchain diagnostic.
 
 ## Link command
 
-Link commands are represented as argument lists and are passed directly to
-`ProcessBuilder`.
+Link commands are assembled by the platform launcher and passed to the selected
+driver as distinct arguments.
 
 For example:
 
@@ -165,8 +167,8 @@ compilation failure as suppressed exceptions.
 
 ## Command-line integration
 
-The native executable pipeline is exposed through both the Java bootstrap CLI
-and the compatible self-host CLI.
+The native executable pipeline is exposed through the official `solc` and
+`sol` commands.
 
 A command equivalent to:
 

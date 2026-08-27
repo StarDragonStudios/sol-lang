@@ -5,7 +5,7 @@ memory safety and systems programming.
 
 ## Current status
 
-Sol is in early bootstrap development.
+Sol is in early self-hosted development.
 
 The Sol 0.1 milestone focuses on establishing the initial procedural language
 and its native compilation pipeline:
@@ -14,18 +14,18 @@ and its native compilation pipeline:
 * functions;
 * variables and constants;
 * conditions and loops;
-* value-type structs on the Sol 0.1.1 development branch;
-* minimal monomorphized generics on the Sol 0.1.1 development branch;
-* typed raw pointers and explicit manual allocation on the Sol 0.1.1 development branch;
-* a Java bootstrap compiler;
+* value-type structs;
+* minimal monomorphized generics;
+* typed raw pointers and explicit manual allocation;
+* an official compiler implemented in Sol;
 * a typed, compiler-independent Sol IR;
 * LLVM IR generation;
 * native object-file emission;
 * host-native executable linking;
 * bundled native console, file and raw-memory standard-library modules.
 
-The compiler is implemented in Java, but generated Sol executables are native
-programs and do not depend on the JVM.
+The compiler core is implemented in Sol and distributed as a native executable.
+Neither the compiler nor generated Sol programs require a JVM.
 
 The current native compiler pipeline is:
 
@@ -46,15 +46,14 @@ command-line interface.
 
 ## Installation
 
-Sol 0.1.1 is distributed as a portable, platform-specific archive. The
-compiler itself runs on the JVM, while executables produced from Sol source are
-native programs and do not require Java at runtime.
+The official Sol 0.1.1 compiler is distributed through the portable native
+`sol-bootstrap-0.1.1-<platform>` archives. These are the verified stage-3
+toolchains produced by repeated self-compilation.
 
 ### Requirements
 
 To use the Sol compiler, the host system currently requires:
 
-* Java 25 or newer;
 * a native linker driver available through `PATH`, either `clang` or `cc`.
 
 The linker can also be selected explicitly with the `SOL_LINKER` environment
@@ -63,16 +62,19 @@ variable.
 Download the Sol 0.1.1 archive matching your operating system and architecture
 from the GitHub release and extract it to a directory of your choice.
 
-A distribution has the following layout:
+A native distribution has the following layout:
 
 ```text
-sol-0.1.1-<platform>/
+sol-bootstrap-0.1.1-<platform>/
 ├── bin/
 │   ├── sol
-│   ├── solc
-│   ├── sol.bat
-│   └── solc.bat
-├── lib/
+│   └── solc
+├── libexec/
+│   └── solc-core
+├── runtime-c/
+├── stdlib/
+├── share/sol/
+├── SHA256SUMS
 ├── LICENSE
 └── README.md
 ```
@@ -84,7 +86,7 @@ Add the extracted `bin` directory to `PATH`.
 For example:
 
 ```bash
-export PATH="/path/to/sol-0.1.1-<platform>/bin:$PATH"
+export PATH="/path/to/sol-bootstrap-0.1.1-<platform>/bin:$PATH"
 ```
 
 Verify the installation with:
@@ -150,7 +152,7 @@ hello.exe
 
 on Windows.
 
-The generated executable can then be run directly and does not require the JVM.
+The generated executable can then be run directly.
 
 Alternatively, compile and execute the source in one step with:
 
@@ -255,13 +257,6 @@ The Sol 0.1 bootstrap `run` command currently accepts exactly one source file.
 Program command-line arguments are not yet supported. Compiler output options
 such as `-o`, `--output` and `--keep-intermediates` are intentionally not
 available for `run`, because its native artifacts are temporary.
-
-During bootstrap development, the command can be invoked through Gradle with:
-
-```bash
-cd compiler
-./gradlew run --args="run /path/to/program.sol"
-```
 
 `solc` remains the direct compile-only command and continues to produce a
 persistent native executable.
@@ -503,31 +498,34 @@ entry-point convention, linking process and limitations.
 
 ## Repository layout
 
-* `compiler/`: Java bootstrap compiler, typed Sol IR, LLVM backend and native
-  toolchain.
+* `compiler/`: compiler written in Sol, canonical standard library, conformance
+  suite, bootstrap tooling and native command launchers.
+* `runtime-c/`: portable host runtime used by native compiler output.
 * `spec/`: language specifications and compiler design decisions.
 * `examples/`: example Sol programs.
 
 ## Development
 
-The compiler test suite can be run with:
+Build the compiler and run its focused, CLI and conformance suites with a
+verified Sol 0.1.1 native seed selected through `SOLC`:
 
 ```bash
-cd compiler
-./gradlew clean test
+SOLC=/path/to/sol-bootstrap-0.1.1-<platform>/bin/solc \
+  ./compiler/bootstrap.sh
 ```
 
-Release distribution changes should additionally pass:
+Prove repeated self-compilation independently with:
 
 ```bash
-cd compiler
-./gradlew clean test distributionSmokeTest assembleDist
+SOLC=/path/to/sol-bootstrap-0.1.1-<platform>/bin/solc \
+  ./compiler/repeated-bootstrap/run.sh
 ```
 
-This builds the platform-specific distribution and verifies that the installed
-`sol` and `solc` launchers can report their version, compile a native Sol
-program, execute the resulting binary and run the same program through
-`sol run`.
+Bootstrap archive orchestration tests run with
+`python compiler/seed/test_seed.py`. The six-target GitHub Actions matrix builds
+each native archive twice, requires byte-identical results, verifies its
+embedded manifest, smoke-tests `solc` and `sol`, and rebuilds the compiler with
+Java unavailable.
 
 Repository changes should also pass:
 

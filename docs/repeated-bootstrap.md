@@ -1,7 +1,7 @@
-# Repeated self-host bootstrap
+# Repeated compiler bootstrap
 
 The repeated-bootstrap gate proves that the native Sol compiler reaches a
-content fixed point without using Java after the initial seed compilation.
+content fixed point without using Java at any active build stage.
 It builds an isolated chain:
 
 ```text
@@ -9,7 +9,7 @@ released Sol 0.1.1 seed -> stage1 -> stage2 -> stage3
 ```
 
 Stage 1 is compiled by the released seed. Stage 1 compiles stage 2, and stage
-2 compiles stage 3 through the public self-hosted `solc` command. The gate then
+2 compiles stage 3 through the public native `solc` command. The gate then
 requires byte-for-byte equality between stage 2 and stage 3 for:
 
 - generated LLVM;
@@ -26,16 +26,16 @@ Run the gate from the repository root with the released compiler selected by
 `SOLC`:
 
 ```sh
-SOLC=/path/to/sol-0.1.1/bin/solc ./selfhost/repeated-bootstrap/run.sh
+SOLC=/path/to/sol-bootstrap-0.1.1-<platform>/bin/solc ./compiler/repeated-bootstrap/run.sh
 ```
 
 On Windows:
 
 ```bat
-set SOLC=C:\path\to\sol-0.1.1\bin\solc.bat
-selfhost\repeated-bootstrap\run.bat
+set SOLC=C:\path\to\sol-bootstrap-0.1.1-windows-x86_64\bin\solc.bat
+compiler\repeated-bootstrap\run.bat
 ```
 
-Outputs are written below `selfhost/build/repeated bootstrap/`. The runner
+Outputs are written below `compiler/build/repeated bootstrap/`. The runner
 deletes that directory before every invocation and fails closed on a missing
 input, compilation error, content mismatch, or conformance failure.
