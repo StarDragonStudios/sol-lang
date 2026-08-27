@@ -49,7 +49,7 @@ jobs:
     compiler-bootstrap:
         name: Compiler bootstrap (Linux)
         runs-on: ubuntu-24.04
-        timeout-minutes: 90
+        timeout-minutes: 180
 
         steps:
             -   name: Checkout repository
@@ -67,7 +67,7 @@ jobs:
     compiler-bootstrap-windows:
         name: Compiler bootstrap (Windows)
         runs-on: windows-2025
-        timeout-minutes: 90
+        timeout-minutes: 180
 
         steps:
             -   name: Checkout repository
