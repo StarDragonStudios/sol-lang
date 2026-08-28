@@ -44,6 +44,10 @@ Sol source
 The complete host-native compilation pipeline is exposed through the compiler
 command-line interface.
 
+The [Sol 0.2 object-model design draft](spec/sol-0.2-object-model.md) records
+agreed syntax, the provisional manual-memory model, and proposals still under
+review in #129. It is not implemented compiler functionality.
+
 ## Installation
 
 The official Sol 0.1.1 compiler is distributed through the portable native
