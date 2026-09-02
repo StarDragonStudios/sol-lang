@@ -52,6 +52,13 @@ fn launch() -> int
         return 45 + fields
     end
 
+    let methods: int = test_instance_methods_and_receivers()
+
+    if methods != 0 then
+        console::print_line("semantic analysis test failed: methods and receivers")
+        return 48 + methods
+    end
+
     let core: int = test_core_diagnostics()
 
     if core != 0 then
@@ -74,6 +81,107 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_instance_methods_and_receivers() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "@public\nclass Counter\n    @private\n    count: int\n    @public\n    fn get() -> int\n        return this.count\n    end\n    @private\n    fn reset() -> void\n        this.count = 0\n        return\n    end\n    @public\n    fn increment(delta: int) -> int\n        this.count = this.count + delta\n        this.reset()\n        return this.count\n    end\nend\nfn operate(counter: pointer<Counter>) -> int\n    counter->increment(2)\n    return counter->get()\nend"
+    )
+
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+
+    let program: pointer<SemanticProgram> = semantic_test_analyze(
+        "methods",
+        source,
+        false
+    )
+    @mut let failure: int = 0
+
+    if program == null || !semantic_program_successful(program) then
+        failure = 2
+    end
+
+    let root: pointer<SyntaxNode> = source.parsed.root
+    let class_declaration: pointer<SyntaxNode> = syntax_child(root, 0)
+    let get_declaration: pointer<SyntaxNode> = syntax_child(class_declaration, 3)
+    let reset_declaration: pointer<SyntaxNode> = syntax_child(class_declaration, 4)
+    let increment_declaration: pointer<SyntaxNode> = syntax_child(class_declaration, 5)
+    let operate_declaration: pointer<SyntaxNode> = syntax_child(root, 1)
+    let get_method: pointer<SemanticSymbol> = semantic_model_declared_symbol(
+        program,
+        get_declaration
+    )
+    let reset_method: pointer<SemanticSymbol> = semantic_model_declared_symbol(
+        program,
+        reset_declaration
+    )
+    let receiver: pointer<SemanticSymbol> = semantic_model_method_receiver(
+        program,
+        increment_declaration
+    )
+    let increment_body: pointer<SyntaxNode> = semantic_function_body(
+        increment_declaration
+    )
+    let reset_call: pointer<SyntaxNode> = syntax_child(
+        syntax_child(increment_body, 1),
+        0
+    )
+    let operate_body: pointer<SyntaxNode> = semantic_function_body(
+        operate_declaration
+    )
+    let pointer_call: pointer<SyntaxNode> = syntax_child(
+        syntax_child(operate_body, 0),
+        0
+    )
+
+    if failure == 0 && (get_method->kind != semantic_symbol_kind_method() || get_method->owner != semantic_model_declared_symbol(program, class_declaration) || !semantic_method_is_virtual(get_method) || semantic_method_is_virtual(reset_method)) then
+        failure = 3
+    end
+
+    if failure == 0 && (receiver == null || receiver->kind != semantic_symbol_kind_receiver() || scope_lookup(semantic_model_function_scope(program, increment_declaration), "this") != receiver) then
+        failure = 4
+    end
+
+    if failure == 0 && (semantic_model_accessed_method(program, syntax_child(reset_call, 0)) != reset_method || semantic_model_called_function(program, reset_call) != reset_method) then
+        failure = 5
+    end
+
+    if failure == 0 && (semantic_model_accessed_method(program, syntax_child(pointer_call, 0))->name != "increment" || semantic_model_called_function(program, pointer_call)->name != "increment" || semantic_model_type_of_expression(program, pointer_call)->name != "int") then
+        failure = 6
+    end
+
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+
+    if failure != 0 then
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "class Bad\n    value: int\n    @mut\n    fn invalid() -> void\n        return\n    end\n    @private\n    @public\n    fn visibility() -> void\n        return\n    end\n    fn base() -> void\n        return\n    end\n    fn parameter(this: int) -> void\n        return\n    end\n    fn local() -> void\n        let base: int = 0\n        return\n    end\n    @private\n    fn hidden() -> void\n        return\n    end\n    fn repeat(value: int) -> void\n        return\n    end\n    fn repeat(value: string) -> void\n        return\n    end\nend\nfn outside(value: pointer<Bad>) -> void\n    value->hidden()\n    value->missing()\n    value->repeat(1)\n    return\nend\nfn receiver() -> int\n    return this.value\nend"
+    )
+
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 7
+    end
+
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze(
+        "invalid.methods",
+        invalid,
+        false
+    )
+
+    if invalid_program == null || !semantic_test_has_code(invalid_program, "SOL-S059") || !semantic_test_has_code(invalid_program, "SOL-S060") || !semantic_test_has_code(invalid_program, "SOL-S061") || !semantic_test_has_code(invalid_program, "SOL-S062") || !semantic_test_has_code(invalid_program, "SOL-S063") || !semantic_test_has_code(invalid_program, "SOL-S064") || !semantic_test_has_code(invalid_program, "SOL-S065") || !semantic_test_has_code(invalid_program, "SOL-S066") then
+        failure = 8
+    end
+
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
 end
 
 fn test_class_fields_and_member_access() -> int
@@ -353,7 +461,7 @@ fn test_binding_index() -> int
 
     // Every supported binding kind remains independent on the same node.
     index = 1
-    while index < 20 do
+    while index < 22 do
         let binding: pointer<SemanticBinding> = semantic_program_add_binding(program, index, first)
         if binding == null then
             failure = 5
@@ -366,10 +474,10 @@ fn test_binding_index() -> int
     end
 
     let count: int = vector_length<pointer<SemanticBinding>>(program->bindings)
-    if semantic_program_add_binding(program, 0, first) != null || semantic_program_add_binding(program, 20, first) != null || semantic_program_add_binding(program, -1, first) != null || semantic_program_add_binding(program, 1, null) != null || semantic_program_add_binding(null, 1, first) != null then
+    if semantic_program_add_binding(program, 0, first) != null || semantic_program_add_binding(program, 22, first) != null || semantic_program_add_binding(program, -1, first) != null || semantic_program_add_binding(program, 1, null) != null || semantic_program_add_binding(null, 1, first) != null then
         failure = 7
     end
-    if semantic_program_binding(program, 0, first) != null || semantic_program_binding(program, 20, first) != null || semantic_program_binding(program, -1, first) != null || semantic_program_binding(program, 1, null) != null || semantic_program_binding(null, 1, first) != null || vector_length<pointer<SemanticBinding>>(program->bindings) != count then
+    if semantic_program_binding(program, 0, first) != null || semantic_program_binding(program, 22, first) != null || semantic_program_binding(program, -1, first) != null || semantic_program_binding(program, 1, null) != null || semantic_program_binding(null, 1, first) != null || vector_length<pointer<SemanticBinding>>(program->bindings) != count then
         failure = 8
     end
 
