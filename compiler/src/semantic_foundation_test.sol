@@ -28,6 +28,13 @@ fn launch() -> int
         return 30 + identities
     end
 
+    let objects: int = test_class_interface_types_and_scopes()
+
+    if objects != 0 then
+        console::print_line("semantic foundation test failed: object types and scopes")
+        return 40 + objects
+    end
+
     let symbols: int = test_symbol_catalog()
 
     if symbols != 0 then
@@ -50,6 +57,69 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_class_interface_types_and_scopes() -> int
+    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\nend\n@public\n@interface\nclass Printable\nend")
+    @mut let parsed: ParseResult = parse_tokens(null)
+
+    if lexical.successful then
+        parsed = parse_tokens(lexical.tokens)
+    end
+
+    if !lexical.successful || !parsed.successful || parsed.root == null then
+        destroy_parse_result(parsed)
+        destroy_lex_result(lexical)
+        return 1
+    end
+
+    let base_declaration: pointer<SyntaxNode> = syntax_child(parsed.root, 0)
+    let interface_declaration: pointer<SyntaxNode> = syntax_child(parsed.root, 1)
+    let base: pointer<SemanticSymbol> = create_class_symbol(base_declaration)
+    let interface_symbol: pointer<SemanticSymbol> = create_class_symbol(
+        interface_declaration
+    )
+    let same_base: pointer<SemanticType> = create_object_type(
+        base_declaration,
+        false
+    )
+    let pointer_type: pointer<SemanticType> = create_pointer_type(base->type)
+    let module_scope: pointer<Scope> = create_root_scope(scope_kind_module())
+    let class_scope: pointer<Scope> = create_child_scope(
+        scope_kind_class(),
+        module_scope
+    )
+    @mut let failure: int = 0
+
+    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null then
+        failure = 2
+    end
+
+    if failure == 0 && (base->kind != semantic_symbol_kind_class() || base->type->kind != semantic_type_kind_class() || base->type->value_type || !semantic_symbol_is_abstract(base) || semantic_symbol_visibility(base) != semantic_visibility_protected()) then
+        failure = 3
+    end
+
+    if failure == 0 && (interface_symbol->kind != semantic_symbol_kind_interface() || interface_symbol->type->kind != semantic_type_kind_interface() || semantic_symbol_is_abstract(interface_symbol) || semantic_symbol_visibility(interface_symbol) != semantic_visibility_public()) then
+        failure = 4
+    end
+
+    if failure == 0 && (!semantic_type_equals(base->type, same_base) || semantic_type_equals(base->type, interface_symbol->type) || pointer_type->element_type != base->type || pointer_type->name != "pointer<Base>") then
+        failure = 5
+    end
+
+    if failure == 0 && (class_scope->kind != scope_kind_class() || class_scope->parent != module_scope) then
+        failure = 6
+    end
+
+    destroy_scope(class_scope)
+    destroy_scope(module_scope)
+    destroy_semantic_type(pointer_type)
+    destroy_semantic_type(same_base)
+    destroy_semantic_symbol(interface_symbol)
+    destroy_semantic_symbol(base)
+    destroy_parse_result(parsed)
+    destroy_lex_result(lexical)
+    return failure
 end
 
 fn semantic_test_source() -> string
