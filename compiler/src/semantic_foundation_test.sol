@@ -60,7 +60,7 @@ fn launch() -> int
 end
 
 fn test_class_interface_types_and_scopes() -> int
-    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\nend\n@public\n@interface\nclass Printable\nend")
+    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\n    @private\n    name: string\nend\n@public\n@interface\nclass Printable\nend")
     @mut let parsed: ParseResult = parse_tokens(null)
 
     if lexical.successful then
@@ -89,9 +89,15 @@ fn test_class_interface_types_and_scopes() -> int
         scope_kind_class(),
         module_scope
     )
+    let field_declaration: pointer<SyntaxNode> = syntax_child(base_declaration, 3)
+    let field: pointer<SemanticSymbol> = create_class_field_symbol(
+        base,
+        field_declaration,
+        0
+    )
     @mut let failure: int = 0
 
-    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null then
+    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null || field == null then
         failure = 2
     end
 
@@ -109,6 +115,14 @@ fn test_class_interface_types_and_scopes() -> int
 
     if failure == 0 && (class_scope->kind != scope_kind_class() || class_scope->parent != module_scope) then
         failure = 6
+    end
+
+    if failure == 0 && (field->kind != semantic_symbol_kind_class_field() || field->owner != base || !field->mutable || semantic_symbol_visibility(field) != semantic_visibility_private() || semantic_symbol_declared_type_reference(field)->text != "string") then
+        failure = 7
+    end
+
+    if failure == 0 && (scope_declare_member(class_scope, field) != scope_declare_success() || scope_lookup_class_field(class_scope, "name") != field || scope_lookup_class_field(class_scope, "missing") != null) then
+        failure = 8
     end
 
     destroy_scope(class_scope)
