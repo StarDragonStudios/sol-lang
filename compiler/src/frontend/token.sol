@@ -221,3 +221,19 @@ end
 fn token_kind_greater_equal() -> int
     return 51
 end
+
+fn token_kind_class() -> int
+    return 52
+end
+
+fn token_kind_double_less() -> int
+    return 53
+end
+
+fn token_kind_new() -> int
+    return 54
+end
+
+fn token_kind_delete() -> int
+    return 55
+end
