@@ -243,8 +243,9 @@ model that the semantic-analysis pass will populate:
 * structural pointer types, declaration-identified struct and type-parameter
   types, and nominal class/interface types, including ordered struct generic
   arguments;
-* function, parameter, local-variable, imported-name, module-namespace, struct,
-  struct-field, type-parameter, class, interface and class-field symbols;
+* function, method, explicit-receiver, parameter, local-variable, imported-name,
+  module-namespace, struct, struct-field, type-parameter, class, interface and
+  class-field symbols;
 * ordered module, class-member, function and block scopes with local and lexical lookup,
   duplicate rejection, shadowing and explicit freezing.
 
@@ -270,7 +271,8 @@ association tables and diagnostics while borrowing the parsed syntax trees.
 
 1. register modules and predeclare classes, interfaces, structs and functions;
 2. resolve direct, selective and namespace injections;
-3. establish class-member scopes, bind class/struct fields and function signatures;
+3. establish class-member scopes and bind class/struct fields plus function and
+   method signatures;
 4. validate recursive value layouts and executable entry points;
 5. bind function bodies and validate reachable generic specializations.
 
@@ -285,11 +287,17 @@ names, unary and binary operators, calls, string and raw-pointer indexing,
 struct construction, struct/class field access and pointer-field access.
 Class fields carry explicit visibility and always-mutable object-state semantics;
 their enclosing variable binding still follows its independent rebinding rule.
+Instance-method scopes contain an explicit `this` symbol and inherit lexical
+module names, never class members. Field and method selection therefore requires
+`this.`, `.`, or `->`; unqualified names cannot implicitly capture members.
+Unambiguous method calls bind their selected method and preserve private static
+versus public/protected virtual classification. Exact overload selection is
+staged for #136.
 Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
 the released `SOL-S001` through `SOL-S047` catalog and extend it with staged
-class and field validation through `SOL-S058`. They are ordered by module and
+class, field, method and receiver validation through `SOL-S066`. They are ordered by module and
 half-open source span.
 
 `compiler/src/semantic_foundation_test.sol` validates the lower-level catalog,
