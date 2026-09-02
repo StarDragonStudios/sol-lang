@@ -366,6 +366,32 @@ fn create_receiver_symbol(
     )
 end
 
+fn create_constructor_symbol(
+    owner: pointer<SemanticSymbol>,
+    declaration: pointer<SyntaxNode>,
+    index: int
+) -> pointer<SemanticSymbol>
+    if owner == null || declaration == null || index < 0 then
+        return null
+    end
+
+    if (owner->kind != semantic_symbol_kind_class() && owner->kind != semantic_symbol_kind_interface()) || declaration->kind != syntax_kind_function_declaration() then
+        return null
+    end
+
+    if !semantic_declaration_has_annotation(declaration, "constructor") then
+        return null
+    end
+
+    return create_semantic_symbol(
+        semantic_symbol_kind_constructor(),
+        declaration->text,
+        declaration,
+        owner,
+        index
+    )
+end
+
 fn create_type_parameter_symbol(
     owner: pointer<SemanticSymbol>,
     declaration: pointer<SyntaxNode>,
@@ -818,6 +844,10 @@ end
 
 fn semantic_symbol_kind_receiver() -> int
     return 13
+end
+
+fn semantic_symbol_kind_constructor() -> int
+    return 14
 end
 
 fn semantic_method_is_virtual(symbol: pointer<SemanticSymbol>) -> boolean

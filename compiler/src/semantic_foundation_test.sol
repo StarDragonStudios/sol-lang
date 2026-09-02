@@ -60,7 +60,7 @@ fn launch() -> int
 end
 
 fn test_class_interface_types_and_scopes() -> int
-    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\n    @private\n    name: string\n    @public\n    fn name_length() -> int\n        return 0\n    end\nend\n@public\n@interface\nclass Printable\nend")
+    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\n    @private\n    name: string\n    @public\n    fn name_length() -> int\n        return 0\n    end\n    @protected\n    @constructor\n    fn create(name: string) -> void\n        this.name = name\n        return\n    end\nend\n@public\n@interface\nclass Printable\nend")
     @mut let parsed: ParseResult = parse_tokens(null)
 
     if lexical.successful then
@@ -105,9 +105,18 @@ fn test_class_interface_types_and_scopes() -> int
         base,
         method_declaration
     )
+    let constructor_declaration: pointer<SyntaxNode> = syntax_child(
+        base_declaration,
+        5
+    )
+    let constructor: pointer<SemanticSymbol> = create_constructor_symbol(
+        base,
+        constructor_declaration,
+        0
+    )
     @mut let failure: int = 0
 
-    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null || field == null || method == null || receiver == null then
+    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null || field == null || method == null || receiver == null || constructor == null then
         failure = 2
     end
 
@@ -141,6 +150,10 @@ fn test_class_interface_types_and_scopes() -> int
 
     if failure == 0 && (scope_declare_member(class_scope, method) != scope_declare_success() || scope_class_method_count(class_scope, "name_length") != 1 || scope_class_method(class_scope, "name_length", 0) != method) then
         failure = 10
+    end
+
+    if failure == 0 && (constructor->kind != semantic_symbol_kind_constructor() || constructor->owner != base || semantic_symbol_visibility(constructor) != semantic_visibility_protected() || scope_declare_member(class_scope, constructor) != scope_declare_success() || scope_constructor_count(class_scope) != 1 || scope_constructor(class_scope, 0) != constructor) then
+        failure = 11
     end
 
     destroy_scope(class_scope)
