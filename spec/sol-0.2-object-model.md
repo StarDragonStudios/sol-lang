@@ -1,333 +1,325 @@
-# Sol 0.2 object model — design draft
+# Sol 0.2 object model
 
-Status: **design review, not implemented**. Tracks
-[#129](https://github.com/StarDragonStudios/sol-lang/issues/129), within
-the [Sol 0.2 roadmap](https://github.com/StarDragonStudios/sol-lang/issues/113).
+Status: **approved source-language design, not implemented**. Tracks
+[#129](https://github.com/StarDragonStudios/sol-lang/issues/129) within the
+[Sol 0.2 roadmap](https://github.com/StarDragonStudios/sol-lang/issues/113).
 
-This document records the source-language decisions agreed for the first
-object model. It separates those decisions from proposals that still require
-approval. Neither merging this draft nor accepting its examples means the
-current compiler accepts Sol 0.2 syntax. Issue #129 stays open until its required
-design decisions are resolved; downstream implementation must not silently
-turn a proposal or an open question into a language rule.
+This document defines the first Sol object model. Its examples are contracts
+for downstream compiler work; the current compiler does not yet accept Sol 0.2
+syntax. The implemented Sol 0.1 specification remains normative until the
+parser, semantic, IR, backend, runtime and conformance work is complete.
 
-## 1. Confirmed decisions
+## Scope
 
-| Area | Agreement |
-| --- | --- |
-| Classes and structs | Classes introduce the object model. Existing structs retain their value semantics and procedural APIs. |
-| Constructors | Constructors are ordinary `fn` declarations annotated with `@constructor`. |
-| Current instance | The instance receiver is spelled `this`. |
-| Class inheritance | `<<` introduces the base class. A class has at most one direct base class, which may be concrete or abstract. |
-| Interfaces | `<` introduces implemented interfaces. A class may implement multiple interfaces. Interfaces are marked `@interface`. |
-| Abstract classes | Abstract classes are marked `@abstract`. Bodyless methods use the roadmap's `@fn` form. |
-| Visibility | The annotations are `@public`, `@protected`, and `@private`. Defaults and precise access rules remain proposals below. |
-| Direct construction | `Person(...)` constructs an instance directly in its destination; the spelling does not imply a heap allocation. |
-| Dynamic construction | `new Person(...)` allocates dynamically, constructs an instance, and returns `pointer<Person>`. |
-| Member access | Direct instances use `.`, and pointers to instances use `->`. No unary `*` or `&` memory operators are introduced. |
-| Initial memory model | `new` / `delete` provide provisional manual object allocation and release. Strict ownership and borrowing are not prerequisites for the first object model. |
-| Future memory management | GC is a future direction, not a feature of this first manual model. Removing manual release is not assumed to be a source-compatible change. |
+Classes add nominal identity, mutable state, methods, construction, inheritance,
+interfaces and dynamic dispatch. Existing structs retain their copyable value
+semantics and procedural APIs.
 
-The constructor function's exact name and signature, the declaration following
-`@interface`, and the separator between multiple interfaces are not implied by
-these agreements. Section 3 proposes concrete spellings for review.
+The first model includes top-level concrete/abstract classes, top-level
+interfaces, fields, instance methods, multiple constructors, exact overloads,
+one direct class base, multiple interfaces, access control, abstract contracts,
+direct construction and raw-pointer `new` / `delete`.
 
-## 2. Construction, storage, and the manual boundary
+It excludes generic or nested classes/interfaces, static members, properties,
+automatic accessors, operator overloading, interface default methods, downcasts,
+runtime type tests, destructors, reflection, multiple class inheritance,
+direct-instance copy/move, safe references, advanced ownership and GC. There is
+no universal `Object`; a class without `<<` is an independent root.
 
-These are the agreed call-site forms:
+## Declarations and headers
 
 ```sol
-let person: Person = Person("Ana", 25)
-let person_ptr: pointer<Person> = new Person("Ana", 25)
-```
-
-Both expressions create an instance. In the first case the constructor
-initializes its destination, such as a local variable or a field. This is not
-a promise that every direct instance is physically placed on the stack.
-Returning a class value or passing it by value still depends on the transfer
-rules listed in section 4; those operations are not approved by this example.
-
-In the second case, dynamic storage is reserved before the constructor runs.
-`new` produces a raw pointer, not an owning or garbage-collected handle. Copying
-that pointer copies the address; it does not copy the object, extend its
-lifetime, or arrange automatic release.
-
-```sol
-let alias: pointer<Person> = person_ptr
-delete person_ptr
-// Neither person_ptr nor alias may subsequently access that instance.
-```
-
-`delete` is the explicit release operation paired with `new`. The example does
-not define deletion through an adjusted base/interface pointer, null deletion,
-constructor failure, or destructor behavior. Those require the minimum memory
-contract before implementation; they must not be inherited silently from C++.
-
-The current raw allocator and load/store APIs remain independent. In particular:
-
-- `memory::free` releases raw storage; it is not an object destructor call.
-- Allowing `pointer<Class>` for `new` is an extension to the current model; it
-  does not automatically authorize raw byte-copy, `load<Class>`,
-  `store<Class>`, or `reallocate<Class>` operations on constructed objects.
-- Extending raw allocation to class types, taking addresses of direct
-  instances, and permitting pointer escape each require an explicit rule.
-- Direct class assignment, arguments, and returns must not silently acquire
-  struct-style copying, implicit movement, or shared-reference semantics.
-
-For example, the following remains a design question, not valid-by-default
-Sol 0.2 code:
-
-```sol
-let other: Person = person
-```
-
-The compiler still needs a small, implementable object-lifetime contract. It
-does **not** need a borrow checker, a complete ownership system, GC, or safe
-reference types before basic object features can be developed.
-
-### Future GC
-
-`new` can remain the dynamic-construction syntax if a future version introduces
-GC. That version must define which references keep an object alive and how they
-differ from raw pointers. `delete` must not become a silent no-op for old manual
-code without an explicit migration decision.
-
-Reclaiming memory is distinct from closing files, connections, and other
-external resources. A future GC is not a promise of deterministic resource
-cleanup. This draft chooses no GC algorithm, root representation, ownership
-annotations, or destructor syntax.
-
-## 3. Concrete syntax and member proposals — approval required
-
-All rules and examples in this section are **proposals**, not additional
-confirmed decisions. They are provided so design review can approve or change
-specific behavior rather than leaving implementation to guess.
-
-### P1. Constructor declaration and invocation
-
-Propose a constructor function named exactly like its class, with an explicit
-`-> void` return type. It initializes `this`; it does not return a separate
-object or allocate its own destination. The class call expression yields the
-initialized instance, while `new` yields the pointer.
-
-```sol
-class Person
-    @private
-    name: string
-
-    @private
-    age: int
-
-    @public
-    @constructor
-    fn Person(name: string, age: int) -> void
-        this.name = name
-        this.age = age
-        return
-    end
-
-    @public
-    fn get_age() -> int
-        return this.age
-    end
+@public
+class Document << Entity < Printable, Serializable
+    // fields, methods and constructors
 end
 ```
 
-Proposed constraints:
+`<<` introduces at most one concrete or abstract class base. `<` introduces a
+comma-separated interface list. The base must precede the interfaces. Duplicate
+interfaces, wrong declaration categories and inheritance cycles are invalid.
 
-- Constructors are instance members, not module functions or inherited methods.
-- No implicit default constructor; creation requires an accessible declared one.
-- Constructors may be overloaded by parameter types, not by return type.
-- No ordinary member-call spelling for re-running a constructor on an already
-  initialized object.
-- Initialization may write the receiver's fields even when the destination is
-  an immutable `let`. Subsequent mutation follows the separate receiver rules.
-- All required instance fields must be initialized before normal completion;
-  field defaults, definite-initialization analysis, base initialization, and
-  constructor failure need the decisions in section 4.
-
-### P2. Class headers, interfaces, and bodyless methods
-
-Propose `@interface class Name` for an interface declaration, with the annotation
-on the preceding line, and a comma-separated interface list:
+Abstract classes use `@abstract`; interfaces reuse `class` with `@interface`:
 
 ```sol
-@interface
-class Named
+@public
+@abstract
+class Entity
     @public
-    @fn get_name() -> string
+    @fn describe() -> string
 end
 
+@public
 @interface
 class Printable
     @public
     @fn print() -> void
 end
+```
 
-@abstract
-class Entity
+An interface may extend multiple interfaces using `<`:
+
+```sol
+@public
+@interface
+class Persistable < Serializable, Identifiable
     @public
-    @fn get_name() -> string
-end
-
-@abstract
-class NamedEntity << Entity < Named, Printable
+    @fn save() -> void
 end
 ```
 
-`NamedEntity` deliberately remains abstract: this sketch is not a concrete
-class that has implemented all inherited requirements. Interfaces describe
-behavior; under this proposal they have no instance fields, constructors,
-default method bodies, or base class. Interface-to-interface inheritance and
-generic class/interface declarations are not introduced by this proposal.
+Interfaces cannot use `<<`, extend classes, declare fields/constructors, or
+provide method bodies. Requirements accumulate; exact duplicates unify and
+incompatible equal-name/parameter requirements are invalid. Interface cycles
+are invalid.
 
-Proposed header grammar, omitting the existing annotation/newline machinery:
+Abstract classes may contain fields, constructors, implemented methods and
+bodyless `@fn` methods. Concrete classes must implement every inherited abstract
+and interface requirement. Abstract classes and interfaces are not constructible.
 
 ```text
-class-header     ::= "class" Identifier [ "<<" type-name ]
-                    [ "<" type-name { "," type-name } ] NEWLINE
-type-name        ::= Identifier { "::" Identifier }
+class-header ::= "class" Identifier [ "<<" type-name ]
+                 [ "<" type-name { "," type-name } ] NEWLINE
+type-name    ::= Identifier { "::" Identifier }
 ```
 
-The first `Identifier` names the declared class. `type-name` allows the current
-namespace-qualified name form, not a generic class syntax. The body terminates
-with `end`. Interface-only implementation omits the `<<` clause. A header is
-one logical line; no implicit continuation after an interface comma is proposed.
+`type-name` uses existing namespace qualification, not class generics. `<<` is
+a class-header delimiter, not a shift operator. Existing `<` generic/comparison
+and `->` contexts retain their meanings.
 
-The base clause must precede the interface clause. A second `<<`, an interface
-as the class base, a class in the interface list, duplicate interfaces, and
-inheritance cycles are invalid under this proposal. Combining `@abstract` and
-`@interface` is also rejected rather than given an accidental meaning.
+## Visibility
 
-`<<` is a class-header delimiter, not a newly introduced shift operator. The
-existing expression comparison `<`, generic argument delimiters, and return /
-pointer-member `->` retain their contexts. Lexer/parser work must explicitly
-test these boundaries; this document chooses no token representation.
+Sol uses `@public`, `@protected` and `@private`. Omission means `@public`,
+matching current module declarations. Canonical style nevertheless writes
+exactly one visibility annotation on every type, field, method and constructor.
 
-### P3. Visibility and name lookup
+Top-level type visibility is:
 
-Propose private-by-default members. Exactly one visibility annotation may
-apply to a member:
+- `@public`: external code may name, construct, inherit from or implement it.
+- `@private`: only its declaring module may name it.
+- `@protected`: its module may use it normally. Other modules may name a class
+  only as a base and while implementing its subclasses, or name an interface
+  only in an inheritance/implementation list and while implementing it.
 
-- `@public`: accessible from any code that can name the declaring type.
-- `@private`: accessible only from members of the declaring class.
-- `@protected`: accessible in the declaring class and derived classes through
-  their own `this` receiver; arbitrary base-typed receivers are not an access
-  bypass.
+Public APIs cannot expose protected/private types in public fields, parameters
+or returns. Sol 0.2 has no `@internal` visibility.
 
-Constructor access is checked at both direct and `new` construction sites.
-Interface method requirements must be explicitly `@public`; private or
-protected requirements are rejected. No class-level visibility rules are
-proposed here; their annotation placement remains a review question.
+Member visibility is public everywhere the type is visible; private only in the
+declaring class; protected in that class and subclasses through `this` or
+`base`, never through an arbitrary object. A protected constructor is callable
+through `base(...)`, not arbitrary external construction.
 
-Within methods, retain the existing lexical lookup for unqualified locals and
-parameters. Propose requiring `this.member` for implicit-instance fields and
-methods rather than making fields compete with local names. `this` is not a
-normal parameter and cannot be rebound; it has no meaning at module scope or
-inside an ordinary module-level function.
+Overrides cannot reduce visibility. Public remains public; protected may remain
+protected or become public. Interface requirements/implementations are public.
 
-Propose instance calls as `person.get_age()` and
-`person_ptr->get_age()`. A method on a raw pointer gets the same logical `this`
-receiver as a method on a direct instance; this is not a safe borrow guarantee.
-Module qualification continues to use `::`.
+## Fields, receivers and lookup
 
-Propose member lookup in the current class followed by its single base chain,
-with lexical access checks preserved. Do not inherit constructors or private
-members into a derived class's lookup scope. Reject field hiding in the first
-model. Method overloading, overriding, and interface requirement matching need
-the exact signature and dispatch decisions below before semantic code is added.
+Fields are mutable object state. `@mut` controls rebinding a variable, not
+method or field mutation:
 
-## 4. Remaining decisions and implementation gates
+```sol
+let person: Person = Person("Ana")
+person.rename("Laura")       // Valid.
+person.name = "Laura"        // Valid when accessible.
+person = Person("Marta")     // Invalid rebinding.
 
-The following are deliberately **unresolved**. None may be decided by lowering
-an ambiguous construct into whichever native representation is easiest.
+@mut let current: Person = Person("Ana")
+current = Person("Marta")    // Valid reconstruction.
+```
 
-| Decision | Required before | Review question |
-| --- | --- | --- |
-| P1–P3 approval | #131–#135 as applicable | Constructor names/signatures, interface spelling/list syntax, visibility and lookup rules. |
-| Class-level visibility | #131, #132 | Which annotations are legal on classes/interfaces, what is the default, and how does access interact with module injection? |
-| Receiver mutation | #134 | How is a mutating method declared? How do immutable `let`, mutable `@mut let`, raw receivers, and override compatibility interact? |
-| Overrides and dispatch | #136–#138, #141 | Is an override explicit? Which methods dispatch dynamically? Define exact parameter/return matching, visibility compatibility, and conflicting inherited requirements. |
-| Base construction and calls | #135, #137 | Spelling for base-constructor/base-method calls, required initialization order, defaults, and definite initialization. |
-| Direct-instance lifetime and transfer | Minimal #130 contract, #139–#142 | Scope/container lifetime, field nesting, arguments, returns, assignment, equality, and whether initially unsupported transfers are rejected. No implicit copy/move/share default. |
-| Raw class storage | Minimal #130 contract, #140, #142 | Permitted operations on `pointer<Class>`, aliasing obligations, address escape, alignment, and which raw allocator operations remain restricted. |
-| Allocation failure and deletion | Minimal #130 contract, #142 | Null versus runtime failure for `new`, partial construction cleanup, `delete null`, provenance checks/obligations, destructors, and deletion through base/interface aliases. |
-| Polymorphic views | #137–#141 | Class/interface conversions, whether views use pointers or another representation, preservation of object identity, and prevention of accidental slicing. |
+This deliberately differs from a struct's deep immutability under `let`.
+Methods have no `@mut` annotation.
 
-Proposal for handling #130: separate a **minimum manual object contract** from
-future advanced ownership and GC work. The existing issue text still describes
-the broader ownership work; this draft does not claim that issue has already
-been rewritten or its entire design resolved.
+Instance access always uses an explicit receiver:
 
-Parser scaffolding for approved syntax need not wait for a GC or borrow checker.
-Semantic, IR, and runtime behavior must wait for the specific contracts they
-consume. No source program should be accepted with undefined *language design*
-merely because manual memory already places some runtime obligations on users.
+```sol
+@private
+name: string
 
-## 5. Scope and implementation handoff
+@public
+fn rename(name: string) -> void
+    this.name = name
+    this.validate()
+end
+```
 
-The first model adds classes, fields, instance methods, constructor and method
-overloading, single class inheritance, multiple interface implementation,
-abstract classes, access control, receiver context, and object-aware typed IR
-and native dispatch. Interfaces are an explicit addition to the original
-roadmap's capability list, not just another spelling for abstract base classes.
+`this.member` accesses the current instance; `base.method()` selects the base
+implementation. `this` cannot be rebound and is invalid outside instance
+members. Unqualified names resolve parameters, locals and module symbols, not
+instance members. Externally, direct instances use `.` and pointers use `->`.
+No unary `*`, `&` or hidden dereference syntax is added.
 
-Existing struct copying, generic struct/function monomorphization, procedural
-calls, module injection, raw-memory APIs, and the published seed remain in
-place. No special copying or runtime class metadata is implied for existing
-structs. The old bootstrap must continue to build the compiler.
+A derived class cannot redeclare any base field name, including a private one.
+Fields and methods may share a name because access and calls differ. Lookup
+starts at the static class and follows its one base chain. Constructors/private
+members are not inherited accessibly; new overloads do not hide inherited ones.
 
-No implementation of GC, borrow checking, lifetimes, strict ownership, safe
-`ref<T>` / `borrow<T>`, multiple class inheritance, reflection, properties,
-static members, interface default methods, generic classes/interfaces, or
-destructor syntax is authorized by this draft. Additional features require
-their own scope decisions rather than being assumed from another language.
+## Methods, overloads and dispatch
 
-Implementation responsibilities to refine after review:
+Public/protected instance methods are overridable and dynamically dispatched by
+default. Private methods are not inherited or overridable and dispatch
+statically. Every replacement or implementation requires `@override`:
 
-- #131: lexical/parser support and complete spans for approved object syntax.
-- #132–#134: nominal class/interface symbols, member scopes, access, receiver
-  and method lookup; no implicit change to struct semantics.
-- #135–#138: constructors, overloads, inheritance, abstract/interface contracts,
-  and their diagnostics. Interface support must be included explicitly when
-  refining these issues; their current placeholder descriptions are incomplete.
-- #139–#142: typed object operations, target-independent semantic contracts,
-  native storage, dispatch, and the minimum manual lifetime operations.
-- #143–#145: object-model conformance, final normative specification, packaging
-  and release. Draft examples are not substitutes for executable conformance.
+```sol
+@public
+@override
+fn print() -> void
+end
+```
 
-## 6. Acceptance-test design
+Missing `@override` and spurious `@override` are errors. Overrides require exact
+parameter and return types; covariant returns are deferred. Visibility follows
+the preceding section.
 
-These are test requirements for the later implementation, **not tests reported
-as passing today**. Proposal-dependent cases remain conditional on approval.
+Methods overload by name. All constructors in a class form one overload set,
+regardless of their declaration names. Selection uses exact argument count and
+types: no promotions, implicit conversions, optional parameters or variadic
+ranking. Returns do not select overloads. Equal parameter signatures are
+duplicates. Method selection uses the receiver's static type, then dynamic
+dispatch chooses the implementation of that signature.
 
-| Area | Positive coverage | Negative / regression coverage |
-| --- | --- | --- |
-| Declarations | Concrete/abstract classes, interfaces, one base plus multiple interfaces, qualified names | Multiple bases, cycles, duplicate interfaces, wrong declaration categories, misplaced/conflicting annotations |
-| Constructors | Annotated functions, overload selection, direct and dynamic creation, full initialization | Missing/inaccessible/ambiguous constructor, invalid return, repeated initialization, abstract/interface instantiation |
-| Receiver and fields | Direct `.` and pointer `->`, `this`, lexical shadowing, inherited accessible members | `this` outside a member, illegal receiver mutation, access violations, field hiding |
-| Methods and contracts | Overloads, base overrides, interface dispatch, concrete implementation of abstract requirements | Missing implementations, incompatible signatures/access/mutability, ambiguous lookup |
-| Memory | Direct destination initialization, explicit `new`/`delete`, raw pointer alias identity | Unapproved class copies/transfers, illegal raw class operations, specified failure/deletion cases; no promise to diagnose every raw use-after-free |
-| Grammar compatibility | Existing functions, structs, generics, comparisons, `->` returns and pointer access | No accidental shift operator or expression/generic parsing changes from class headers |
-| End to end | Public CLI programs, deterministic IR, supported native targets, seed bootstrap and fixed point | Existing procedural conformance and struct value semantics must remain unchanged |
+Exact interface requirements unify. Incompatible ones are errors. A compatible
+inherited concrete public method may satisfy an interface requirement.
 
-Diagnostics must identify the failing annotation, member/name, constructor
-call, clause, or expression with its actual source span. When two declarations
-conflict, retain both locations for useful diagnostics. Do not allocate public
-diagnostic codes in this design PR before integration with the diagnostic
-catalogue.
+## Constructors and definite initialization
 
-## 7. Review completion
+A constructor is any `fn` annotated `@constructor`. Its name is only a source
+label: it is not used by construction and is not an ordinary callable method.
+Constructors return `void`, are not inherited/overridden, and may have any
+visibility.
 
-Before #129 is closed:
+```sol
+@public
+@constructor
+fn from_name(name: string) -> void
+    this.name = name
+    this.age = 0
+end
 
-1. Approve or revise P1–P3 and the remaining source-level member, construction,
-   inheritance, and interface rules in section 4.
-2. Agree the minimum manual-memory contract needed by those rules, with advanced
-   ownership and GC explicitly deferred rather than silently specified.
-3. Refine the affected implementation issues, including interface support and
-   the smaller role of #130 for this phase.
-4. Convert approved proposals into normative design text and map the acceptance
-   cases to the corresponding implementation work.
-5. Merge the reviewed design through a PR. Keep the implemented 0.1 specification
-   and the unimplemented 0.2 design visibly distinct until the compiler catches up.
+@public
+@constructor
+fn with_age(name: string, age: int) -> void
+    this.name = name
+    this.age = age
+end
+```
+
+`Person("Ana")` and `new Person("Ana")` resolve the same overload by arguments;
+`from_name` is absent from the call. There is no implicit default constructor.
+A concrete class without an accessible `@constructor` cannot be instantiated.
+
+A root constructor has no `base(...)`. Every derived constructor must reach one
+base constructor directly or through `this(...)` delegation.
+
+Statements may precede `base(...)` or `this(...)`. This early-construction
+prologue may declare locals, compute/validate parameters and call module
+functions. It cannot access `this`, `base`, fields or instance methods. The
+constructor invocation cannot be nested inside `if`/`while`; `return` before it
+is invalid; every normally completing path must reach it.
+
+```sol
+@protected
+@constructor
+fn create(id: int, name: string) -> void
+    @mut let normalized: string = normalize(name)
+    if normalized == "" then
+        normalized = "unknown"
+    end
+    base(id)
+    this.name = normalized
+end
+```
+
+`this(arguments)` delegates to another same-class constructor by exact types. A
+constructor directly invokes `this(...)` or `base(...)`, not both. The chain
+must terminate in `base(...)` for a derived class and cannot cycle. Code after
+`this(...)` runs after delegated initialization completes.
+
+The base initializes base fields. Every constructor definitely initializes all
+fields declared by its class on every normal path. There are no implicit field
+defaults or declaration-site initializers. Fields cannot be read before definite
+initialization. `this` methods cannot be called until all class fields are
+initialized; `base.method(...)` is permitted after `base(...)`. A `return` is
+valid only after complete initialization. A loop alone cannot establish definite
+initialization because it may execute zero times.
+
+## Direct construction and manual memory
+
+Direct construction initializes its destination without guaranteeing physical
+stack placement:
+
+```sol
+let person: Person = Person("Ana")
+```
+
+Direct class instances are noncopyable/nonmovable. Existing instances cannot be
+assigned, passed or returned by value; there is no direct-instance equality.
+`@mut let` may be reconstructed from a fresh constructor expression, not another
+instance. Structs keep their current copy/argument/return behavior.
+
+Dynamic construction returns a raw pointer:
+
+```sol
+let person: pointer<Person> = new Person("Ana")
+if person == null then
+    return 1
+end
+person->rename("Laura")
+delete person
+```
+
+Allocation failure returns `null` without running the constructor. `delete null`
+is a no-op. `delete` is valid exactly once for a pointer returned by `new` whose
+view matches the concrete allocated class. Deleting other storage, double delete
+and use after delete are undefined behavior in this provisional model.
+
+`delete` is distinct from `memory::free`. Raw load/store/reallocation or byte
+copy of class instances is unauthorized. Direct instances do not use `delete`;
+their storage follows their destination. There are no destructors yet, so
+`delete` does not provide automatic external-resource cleanup.
+
+## Pointer polymorphism
+
+Class/interface pointers add controlled covariance to otherwise invariant raw
+pointers:
+
+```sol
+let document: pointer<Document> = new Document()
+let printable: pointer<Printable> = document
+let entity: pointer<Entity> = document
+printable->print()
+```
+
+`pointer<Derived>` implicitly converts to `pointer<Base>` and implemented
+interfaces. There are no downcasts or unrelated conversions. Direct instances
+do not convert by value, preventing slicing. Members/overloads use the static
+pointer type; eligible methods dispatch through the dynamic class. Interface
+views preserve object identity regardless of backend representation.
+
+Converted pointers are non-owning views. Deletion through a base/interface view
+is invalid; the original concrete pointer is required. Copies transfer no
+responsibility. Equality is defined only between the same static pointer type;
+callers may first convert both to one valid common view.
+
+## Implementation and conformance handoff
+
+- #131: tokens, syntax nodes, annotations, headers, members and exact spans.
+- #132–#134: class/interface symbols, visibility, lookup, receivers, overloads
+  and dispatch contracts.
+- #135–#138: constructor flow, initialization, inheritance, overrides, abstract
+  requirements and interface conformance.
+- #139–#142: typed operations, object/view representation, layouts, dispatch and
+  provisional `new` / `delete`.
+- #143–#145: positive/negative conformance, integrated specification, packaging
+  and release.
+
+Implementation preserves the seed, functions, modules, current generic
+structs/functions and struct value semantics. Tests must cover declarations and
+cycles; constructor overload/delegation/prologues/initialization; visibility and
+explicit receivers; override/interface conflicts; direct noncopyability;
+allocation failure/deletion/upcasts; source spans and diagnostics; grammar
+compatibility; deterministic IR; CLI conformance and bootstrap fixed point.
+
+The compiler must reject out-of-scope syntax and semantic ambiguity rather than
+selecting whichever backend representation is easiest. Public diagnostic codes
+are allocated during implementation, not by this design document.
