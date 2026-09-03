@@ -61,9 +61,11 @@ fn analyze_source_modules(
         index = index + 1
     end
 
+    semantic_predeclare_all(program, syntax_kind_class_declaration())
     semantic_predeclare_all(program, syntax_kind_struct_declaration())
     semantic_predeclare_all(program, syntax_kind_function_declaration())
     semantic_resolve_all_injections(program)
+    semantic_bind_all_class_scopes(program)
     semantic_bind_all_structs(program)
     semantic_validate_all_struct_layouts(program)
     semantic_bind_all_function_signatures(program)
@@ -116,6 +118,10 @@ fn semantic_predeclare(
         symbol = create_struct_symbol(declaration)
     end
 
+    if declaration->kind == syntax_kind_class_declaration() then
+        symbol = create_class_symbol(declaration)
+    end
+
     if declaration->kind == syntax_kind_function_declaration() then
         symbol = create_function_symbol(declaration)
     end
@@ -132,14 +138,20 @@ fn semantic_predeclare(
     )
     semantic_record_child_symbols(program, symbol)
 
-    if declaration->kind == syntax_kind_struct_declaration() then
+    if declaration->kind == syntax_kind_struct_declaration() || declaration->kind == syntax_kind_class_declaration() then
         if semantic_type_is_reserved_name(program->catalog, symbol->name) then
             semantic_program_own_symbol(program, symbol)
+            @mut let category: string = "Struct"
+
+            if declaration->kind == syntax_kind_class_declaration() then
+                category = "Class"
+            end
+
             semantic_report(
                 program,
                 module,
                 "SOL-S038",
-                "Struct name '" + symbol->name + "' is reserved by a built-in type.",
+                category + " name '" + symbol->name + "' is reserved by a built-in type.",
                 declaration
             )
             return
@@ -261,7 +273,7 @@ fn semantic_resolve_direct_injection(
         while index < count do
             let declaration: pointer<SyntaxNode> = syntax_child(target->unit, index)
 
-            if declaration->kind == syntax_kind_function_declaration() || declaration->kind == syntax_kind_struct_declaration() then
+            if declaration->kind == syntax_kind_function_declaration() || declaration->kind == syntax_kind_struct_declaration() || declaration->kind == syntax_kind_class_declaration() then
                 let exported: pointer<SemanticSymbol> = semantic_program_symbol_of(
                     program,
                     semantic_binding_kind_declared_symbol(),
@@ -404,7 +416,7 @@ fn semantic_module_export(
     while index < count do
         let declaration: pointer<SyntaxNode> = syntax_child(module->unit, index)
 
-        if declaration->kind == syntax_kind_function_declaration() || declaration->kind == syntax_kind_struct_declaration() then
+        if declaration->kind == syntax_kind_function_declaration() || declaration->kind == syntax_kind_struct_declaration() || declaration->kind == syntax_kind_class_declaration() then
             let symbol: pointer<SemanticSymbol> = semantic_program_symbol_of(
                 program,
                 semantic_binding_kind_declared_symbol(),
@@ -487,6 +499,149 @@ fn semantic_namespace_target(
     end
 
     return binding->module
+end
+
+fn semantic_bind_all_class_scopes(program: pointer<SemanticProgram>) -> void
+    @mut let module_index: int = 0
+    let module_count: int = semantic_program_module_count(program)
+
+    while module_index < module_count do
+        let module: pointer<SemanticModule> = semantic_program_module_at(
+            program,
+            module_index
+        )
+        @mut let index: int = 0
+        let count: int = syntax_child_count(module->unit)
+
+        while index < count do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, index)
+
+            if declaration->kind == syntax_kind_class_declaration() then
+                semantic_bind_class_scope(program, module, declaration)
+            end
+
+            index = index + 1
+        end
+
+        module_index = module_index + 1
+    end
+
+    return
+end
+
+fn semantic_bind_class_scope(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    declaration: pointer<SyntaxNode>
+) -> void
+    let symbol: pointer<SemanticSymbol> = semantic_program_symbol_of(
+        program,
+        semantic_binding_kind_declared_symbol(),
+        declaration
+    )
+
+    if symbol == null then
+        return
+    end
+
+    let member_scope: pointer<Scope> = semantic_program_create_scope(
+        program,
+        scope_kind_class(),
+        module->scope
+    )
+    semantic_program_record_scope(
+        program,
+        semantic_binding_kind_class_scope(),
+        declaration,
+        member_scope
+    )
+    semantic_validate_class_annotations(program, module, declaration)
+    return
+end
+
+fn semantic_validate_class_annotations(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    declaration: pointer<SyntaxNode>
+) -> void
+    @mut let index: int = 0
+    @mut let visibility_count: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let annotation: pointer<SyntaxNode> = syntax_child(declaration, index)
+
+        if annotation->kind == syntax_kind_annotation() then
+            let name: string = annotation->text
+            let allowed: boolean = name == "public" || name == "protected" || name == "private" || name == "abstract" || name == "interface"
+
+            if !allowed then
+                semantic_report(
+                    program,
+                    module,
+                    "SOL-S048",
+                    "Annotation '@" + name + "' is not valid on a class declaration.",
+                    annotation
+                )
+            end
+
+            if semantic_declaration_annotation_count(declaration, name) > 1 then
+                @mut let previous: int = 0
+                @mut let already_seen: boolean = false
+
+                while previous < index do
+                    let previous_child: pointer<SyntaxNode> = syntax_child(
+                        declaration,
+                        previous
+                    )
+
+                    if previous_child->kind == syntax_kind_annotation() && previous_child->text == name then
+                        already_seen = true
+                    end
+
+                    previous = previous + 1
+                end
+
+                if already_seen then
+                    semantic_report(
+                        program,
+                        module,
+                        "SOL-S049",
+                        "Class annotation '@" + name + "' is declared more than once.",
+                        annotation
+                    )
+                end
+            end
+
+            if name == "public" || name == "protected" || name == "private" then
+                visibility_count = visibility_count + 1
+            end
+        end
+
+        index = index + 1
+    end
+
+    if visibility_count > 1 then
+        semantic_report(
+            program,
+            module,
+            "SOL-S050",
+            "Class declaration must not specify more than one visibility.",
+            declaration
+        )
+    end
+
+    if semantic_declaration_has_annotation(declaration, "abstract") && semantic_declaration_has_annotation(declaration, "interface") then
+        semantic_report(
+            program,
+            module,
+            "SOL-S051",
+            "An interface cannot also be declared '@abstract'.",
+            declaration
+        )
+    end
+
+    return
 end
 
 fn semantic_bind_all_structs(program: pointer<SemanticProgram>) -> void
@@ -809,12 +964,12 @@ fn semantic_resolve_type_reference(
             return semantic_record_error_type(program, reference)
         end
 
-        if !element->value_type then
+        if !element->value_type && element->kind != semantic_type_kind_class() && element->kind != semantic_type_kind_interface() then
             semantic_report(
                 program,
                 module,
                 "SOL-S041",
-                "Type argument of 'pointer' must be a value type, but found '" + element->name + "'.",
+                "Type argument of 'pointer' must be a storable type, but found '" + element->name + "'.",
                 semantic_direct_child(reference, syntax_kind_type_reference(), 0)
             )
             destroy_vector<pointer<SemanticType>>(arguments)
@@ -868,12 +1023,28 @@ fn semantic_resolve_type_reference(
     end
 
     if declared != null then
-        if declared->kind != semantic_symbol_kind_struct() then
+        if declared->kind != semantic_symbol_kind_struct() && declared->kind != semantic_symbol_kind_class() && declared->kind != semantic_symbol_kind_interface() then
             declared = null
         end
     end
 
     if declared != null then
+        if declared->kind == semantic_symbol_kind_class() || declared->kind == semantic_symbol_kind_interface() then
+            if count != 0 then
+                destroy_vector<pointer<SemanticType>>(arguments)
+                return semantic_report_type_arity(program, module, reference, declared->name)
+            end
+
+            destroy_vector<pointer<SemanticType>>(arguments)
+            semantic_program_record_type(
+                program,
+                semantic_binding_kind_resolved_type(),
+                reference,
+                declared->type
+            )
+            return declared->type
+        end
+
         if count != semantic_symbol_type_parameter_count(declared) then
             destroy_vector<pointer<SemanticType>>(arguments)
             return semantic_report_type_arity(program, module, reference, declared->name)

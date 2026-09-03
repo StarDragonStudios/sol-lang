@@ -216,6 +216,48 @@ fn create_struct_symbol(
     return symbol
 end
 
+fn create_class_symbol(
+    declaration: pointer<SyntaxNode>
+) -> pointer<SemanticSymbol>
+    if !semantic_symbol_declaration_has_kind(
+        declaration,
+        syntax_kind_class_declaration()
+    ) then
+        return null
+    end
+
+    let interface_type: boolean = semantic_declaration_has_annotation(
+        declaration,
+        "interface"
+    )
+    @mut let kind: int = semantic_symbol_kind_class()
+
+    if interface_type then
+        kind = semantic_symbol_kind_interface()
+    end
+
+    let symbol: pointer<SemanticSymbol> = create_semantic_symbol(
+        kind,
+        declaration->text,
+        declaration,
+        null,
+        -1
+    )
+
+    if symbol == null then
+        return null
+    end
+
+    symbol->type = create_object_type(declaration, interface_type)
+
+    if symbol->type == null then
+        destroy_semantic_symbol(symbol)
+        return null
+    end
+
+    return symbol
+end
+
 fn create_struct_field_symbol(
     owner: pointer<SemanticSymbol>,
     declaration: pointer<SyntaxNode>,
@@ -545,6 +587,83 @@ fn semantic_symbol_declaration_has_kind(
     return declaration->kind == expected_kind
 end
 
+fn semantic_declaration_has_annotation(
+    declaration: pointer<SyntaxNode>,
+    name: string
+) -> boolean
+    if declaration == null || name == "" then
+        return false
+    end
+
+    @mut let index: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let child: pointer<SyntaxNode> = syntax_child(declaration, index)
+
+        if child->kind == syntax_kind_annotation() && child->text == name then
+            return true
+        end
+
+        index = index + 1
+    end
+
+    return false
+end
+
+fn semantic_declaration_annotation_count(
+    declaration: pointer<SyntaxNode>,
+    name: string
+) -> int
+    if declaration == null || name == "" then
+        return 0
+    end
+
+    @mut let found: int = 0
+    @mut let index: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let child: pointer<SyntaxNode> = syntax_child(declaration, index)
+
+        if child->kind == syntax_kind_annotation() && child->text == name then
+            found = found + 1
+        end
+
+        index = index + 1
+    end
+
+    return found
+end
+
+fn semantic_symbol_is_abstract(symbol: pointer<SemanticSymbol>) -> boolean
+    if symbol == null then
+        return false
+    end
+
+    if symbol->kind != semantic_symbol_kind_class() then
+        return false
+    end
+
+    return semantic_declaration_has_annotation(symbol->declaration, "abstract")
+end
+
+fn semantic_symbol_visibility(symbol: pointer<SemanticSymbol>) -> int
+    if symbol == null then
+        return semantic_visibility_public()
+    end
+
+    if semantic_declaration_has_annotation(symbol->declaration, "private") then
+        return semantic_visibility_private()
+    end
+
+    if semantic_declaration_has_annotation(symbol->declaration, "protected") then
+        return semantic_visibility_protected()
+    end
+
+    return semantic_visibility_public()
+end
+
 fn semantic_symbol_kind_function() -> int
     return 1
 end
@@ -575,4 +694,24 @@ end
 
 fn semantic_symbol_kind_module_namespace() -> int
     return 8
+end
+
+fn semantic_symbol_kind_class() -> int
+    return 9
+end
+
+fn semantic_symbol_kind_interface() -> int
+    return 10
+end
+
+fn semantic_visibility_public() -> int
+    return 1
+end
+
+fn semantic_visibility_protected() -> int
+    return 2
+end
+
+fn semantic_visibility_private() -> int
+    return 3
 end

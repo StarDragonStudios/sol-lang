@@ -1,6 +1,6 @@
 inject namespace std.memory as memory
 inject std.collections.vector
-inject frontend.syntax only SyntaxNode, syntax_child, syntax_child_count, syntax_kind_struct_declaration, syntax_kind_type_parameter, syntax_literal_boolean, syntax_literal_char, syntax_literal_float, syntax_literal_integer, syntax_literal_string
+inject frontend.syntax only SyntaxNode, syntax_child, syntax_child_count, syntax_kind_class_declaration, syntax_kind_struct_declaration, syntax_kind_type_parameter, syntax_literal_boolean, syntax_literal_char, syntax_literal_float, syntax_literal_integer, syntax_literal_string
 
 struct SemanticType
     kind: int
@@ -122,7 +122,7 @@ fn create_pointer_type(element_type: pointer<SemanticType>) -> pointer<SemanticT
         return null
     end
 
-    if !element_type->value_type then
+    if !element_type->value_type && element_type->kind != semantic_type_kind_class() && element_type->kind != semantic_type_kind_interface() then
         return null
     end
 
@@ -134,6 +134,31 @@ fn create_pointer_type(element_type: pointer<SemanticType>) -> pointer<SemanticT
         false,
         null,
         element_type
+    )
+end
+
+fn create_object_type(
+    declaration: pointer<SyntaxNode>,
+    interface_type: boolean
+) -> pointer<SemanticType>
+    if declaration == null || declaration->kind != syntax_kind_class_declaration() then
+        return null
+    end
+
+    @mut let kind: int = semantic_type_kind_class()
+
+    if interface_type then
+        kind = semantic_type_kind_interface()
+    end
+
+    return create_semantic_type(
+        kind,
+        declaration->text,
+        false,
+        false,
+        false,
+        declaration,
+        null
     )
 end
 
@@ -413,6 +438,10 @@ fn semantic_type_equals(
         return true
     end
 
+    if left->kind == semantic_type_kind_class() || left->kind == semantic_type_kind_interface() then
+        return left->identity == right->identity
+    end
+
     return false
 end
 
@@ -481,4 +510,12 @@ end
 
 fn semantic_type_kind_error() -> int
     return 5
+end
+
+fn semantic_type_kind_class() -> int
+    return 6
+end
+
+fn semantic_type_kind_interface() -> int
+    return 7
 end
