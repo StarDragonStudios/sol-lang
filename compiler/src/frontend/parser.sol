@@ -157,7 +157,7 @@ fn parse_top_level_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
     end
 
     if parser_check(parser, token_kind_at()) then
-        return parse_annotated_or_bodyless_function_declaration(parser)
+        return parse_annotated_top_level_declaration(parser)
     end
 
     if parser_check(parser, token_kind_inject()) then
@@ -168,6 +168,15 @@ fn parse_top_level_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
         return parse_struct_declaration(parser)
     end
 
+    if parser_check(parser, token_kind_class()) then
+        let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+        return parse_class_declaration_after_marker(
+            parser,
+            annotations,
+            parser_peek(parser)
+        )
+    end
+
     let unexpected: Token = parser_peek(parser)
     parser_fail(
         parser,
@@ -176,6 +185,412 @@ fn parse_top_level_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
         unexpected.span
     )
     return null
+end
+
+fn parse_annotated_top_level_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let declaration_start: Token = parser_peek(parser)
+    let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+
+    while parser_check(parser, token_kind_at()) && parser->successful do
+        let at_token: Token = parser_advance(parser)
+
+        if parser_match(parser, token_kind_fn()) then
+            return parse_function_declaration_after_marker(
+                parser,
+                annotations,
+                declaration_start,
+                true
+            )
+        end
+
+        let name_token: Token = parser_consume(
+            parser,
+            token_kind_identifier(),
+            "an annotation name after '@'"
+        )
+
+        if parser->successful then
+            let annotation: pointer<SyntaxNode> = parser_create_node(
+                parser,
+                syntax_kind_annotation(),
+                syntax_variant_none(),
+                name_token.lexeme,
+                source_span(at_token.span.start, name_token.span.end_position)
+            )
+
+            if annotation != null then
+                parser_add_name_child(parser, annotation, name_token)
+                vector_push<pointer<SyntaxNode>>(annotations, annotation)
+            end
+        end
+
+        parser_consume(
+            parser,
+            token_kind_newline(),
+            "a newline after the declaration annotation"
+        )
+    end
+
+    if parser_match(parser, token_kind_fn()) then
+        return parse_function_declaration_after_marker(
+            parser,
+            annotations,
+            declaration_start,
+            false
+        )
+    end
+
+    if parser_check(parser, token_kind_class()) then
+        return parse_class_declaration_after_marker(
+            parser,
+            annotations,
+            declaration_start
+        )
+    end
+
+    if parser->successful then
+        parser_expected(parser, "'fn', '@fn', or 'class' after the declaration annotations")
+    end
+
+    destroy_node_vector(annotations)
+    return null
+end
+
+fn parse_class_declaration_after_marker(
+    parser: pointer<Parser>,
+    annotations: pointer<Vector<pointer<SyntaxNode>>>,
+    declaration_start: Token
+) -> pointer<SyntaxNode>
+    let class_token: Token = parser_consume(parser, token_kind_class(), "'class'")
+    let name_token: Token = parser_consume(
+        parser,
+        token_kind_identifier(),
+        "a class name after 'class'"
+    )
+
+    if !parser->successful then
+        destroy_node_vector(annotations)
+        return null
+    end
+
+    let declaration: pointer<SyntaxNode> = parser_create_node(
+        parser,
+        syntax_kind_class_declaration(),
+        syntax_variant_none(),
+        name_token.lexeme,
+        source_span(declaration_start.span.start, name_token.span.end_position)
+    )
+
+    if declaration == null then
+        destroy_node_vector(annotations)
+        return null
+    end
+
+    transfer_node_vector(declaration, annotations)
+    parser_add_name_child(parser, declaration, name_token)
+
+    if parser_match(parser, token_kind_double_less()) then
+        let base_type: pointer<SyntaxNode> = parse_class_type_name(
+            parser,
+            "a base class name after '<<'"
+        )
+        let base_clause: pointer<SyntaxNode> = create_class_relation_clause(
+            parser,
+            syntax_kind_class_base_clause(),
+            base_type
+        )
+
+        if parser->successful then
+            syntax_add_child(declaration, base_clause)
+        else
+            destroy_syntax_tree(base_clause)
+        end
+    end
+
+    if parser_match(parser, token_kind_less()) then
+        parse_class_interface_list(parser, declaration)
+    end
+
+    parser_consume(
+        parser,
+        token_kind_newline(),
+        "a newline after the class declaration header"
+    )
+    parser_skip_newlines(parser)
+
+    while !parser_check(parser, token_kind_end()) && !parser_is_at_end(parser) && parser->successful do
+        let member: pointer<SyntaxNode> = parse_class_member(parser)
+
+        if parser->successful then
+            syntax_add_child(declaration, member)
+
+            if parser_match(parser, token_kind_newline()) then
+                parser_skip_newlines(parser)
+            else
+                if !parser_check(parser, token_kind_end()) then
+                    parser_expected(parser, "a newline or 'end' after the class member")
+                end
+            end
+        end
+    end
+
+    let end_token: Token = parser_consume(
+        parser,
+        token_kind_end(),
+        "'end' to close the class declaration"
+    )
+
+    if !parser->successful then
+        destroy_syntax_tree(declaration)
+        return null
+    end
+
+    declaration->span = source_span(
+        declaration_start.span.start,
+        end_token.span.end_position
+    )
+    return declaration
+end
+
+fn parse_class_interface_list(
+    parser: pointer<Parser>,
+    declaration: pointer<SyntaxNode>
+) -> void
+    @mut let reading_interfaces: boolean = true
+
+    while parser->successful && reading_interfaces do
+        let interface_type: pointer<SyntaxNode> = parse_class_type_name(
+            parser,
+            "an interface name after '<'"
+        )
+        let interface_clause: pointer<SyntaxNode> = create_class_relation_clause(
+            parser,
+            syntax_kind_class_interface_clause(),
+            interface_type
+        )
+
+        if parser->successful then
+            syntax_add_child(declaration, interface_clause)
+        else
+            destroy_syntax_tree(interface_clause)
+            return
+        end
+
+        if !parser_match(parser, token_kind_comma()) then
+            reading_interfaces = false
+        end
+    end
+
+    return
+end
+
+fn parse_class_type_name(
+    parser: pointer<Parser>,
+    expectation: string
+) -> pointer<SyntaxNode>
+    let first: Token = parser_consume(
+        parser,
+        token_kind_identifier(),
+        expectation
+    )
+
+    if !parser->successful then
+        return null
+    end
+
+    let type_name: pointer<SyntaxNode> = parser_create_node(
+        parser,
+        syntax_kind_type_reference(),
+        syntax_variant_none(),
+        first.lexeme,
+        first.span
+    )
+
+    if type_name == null then
+        return null
+    end
+
+    parser_add_name_child(parser, type_name, first)
+
+    while parser->successful && parser_match(parser, token_kind_double_colon()) do
+        let segment: Token = parser_consume(
+            parser,
+            token_kind_identifier(),
+            "a type name segment after '::'"
+        )
+
+        if parser->successful then
+            parser_add_name_child(parser, type_name, segment)
+            type_name->text = type_name->text + "::" + segment.lexeme
+            type_name->span = source_span(
+                type_name->span.start,
+                segment.span.end_position
+            )
+        end
+    end
+
+    if !parser->successful then
+        destroy_syntax_tree(type_name)
+        return null
+    end
+
+    return type_name
+end
+
+fn create_class_relation_clause(
+    parser: pointer<Parser>,
+    kind: int,
+    relation_type: pointer<SyntaxNode>
+) -> pointer<SyntaxNode>
+    if !parser->successful || relation_type == null then
+        destroy_syntax_tree(relation_type)
+        return null
+    end
+
+    let clause: pointer<SyntaxNode> = parser_create_node(
+        parser,
+        kind,
+        syntax_variant_none(),
+        relation_type->text,
+        relation_type->span
+    )
+
+    if clause == null then
+        destroy_syntax_tree(relation_type)
+        return null
+    end
+
+    syntax_add_child(clause, relation_type)
+    return clause
+end
+
+fn parse_class_member(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    if parser_check(parser, token_kind_fn()) then
+        return parse_function_declaration(parser)
+    end
+
+    if parser_check(parser, token_kind_identifier()) then
+        let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+        return parse_class_field_declaration(parser, annotations, parser_peek(parser))
+    end
+
+    if parser_check(parser, token_kind_at()) then
+        return parse_annotated_class_member(parser)
+    end
+
+    parser_expected(parser, "a class field or method")
+    return null
+end
+
+fn parse_annotated_class_member(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let member_start: Token = parser_peek(parser)
+    let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+
+    while parser_check(parser, token_kind_at()) && parser->successful do
+        let at_token: Token = parser_advance(parser)
+
+        if parser_match(parser, token_kind_fn()) then
+            return parse_function_declaration_after_marker(
+                parser,
+                annotations,
+                member_start,
+                true
+            )
+        end
+
+        let name_token: Token = parser_consume(
+            parser,
+            token_kind_identifier(),
+            "an annotation name after '@'"
+        )
+
+        if parser->successful then
+            let annotation: pointer<SyntaxNode> = parser_create_node(
+                parser,
+                syntax_kind_annotation(),
+                syntax_variant_none(),
+                name_token.lexeme,
+                source_span(at_token.span.start, name_token.span.end_position)
+            )
+
+            if annotation != null then
+                parser_add_name_child(parser, annotation, name_token)
+                vector_push<pointer<SyntaxNode>>(annotations, annotation)
+            end
+        end
+
+        parser_consume(
+            parser,
+            token_kind_newline(),
+            "a newline after the class member annotation"
+        )
+    end
+
+    if parser_match(parser, token_kind_fn()) then
+        return parse_function_declaration_after_marker(
+            parser,
+            annotations,
+            member_start,
+            false
+        )
+    end
+
+    if parser_check(parser, token_kind_identifier()) then
+        return parse_class_field_declaration(
+            parser,
+            annotations,
+            member_start
+        )
+    end
+
+    if parser->successful then
+        parser_expected(parser, "a field, 'fn', or '@fn' after the member annotations")
+    end
+
+    destroy_node_vector(annotations)
+    return null
+end
+
+fn parse_class_field_declaration(
+    parser: pointer<Parser>,
+    annotations: pointer<Vector<pointer<SyntaxNode>>>,
+    member_start: Token
+) -> pointer<SyntaxNode>
+    let name_token: Token = parser_consume(
+        parser,
+        token_kind_identifier(),
+        "a class field name"
+    )
+    parser_consume(parser, token_kind_colon(), "':' after the class field name")
+    let field_type: pointer<SyntaxNode> = parse_type_reference(
+        parser,
+        "a class field type after ':'"
+    )
+
+    if !parser->successful then
+        destroy_node_vector(annotations)
+        destroy_syntax_tree(field_type)
+        return null
+    end
+
+    let field: pointer<SyntaxNode> = parser_create_node(
+        parser,
+        syntax_kind_class_field_declaration(),
+        syntax_variant_none(),
+        name_token.lexeme,
+        source_span(member_start.span.start, field_type->span.end_position)
+    )
+
+    if field == null then
+        destroy_node_vector(annotations)
+        destroy_syntax_tree(field_type)
+        return null
+    end
+
+    transfer_node_vector(field, annotations)
+    parser_add_name_child(parser, field, name_token)
+    syntax_add_child(field, field_type)
+    return field
 end
 
 fn parse_struct_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
@@ -297,67 +712,6 @@ fn parse_function_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
         function_token,
         false
     )
-end
-
-fn parse_annotated_or_bodyless_function_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
-    let declaration_start: Token = parser_peek(parser)
-    let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
-
-    while parser_check(parser, token_kind_at()) && parser->successful do
-        let at_token: Token = parser_advance(parser)
-
-        if parser_match(parser, token_kind_fn()) then
-            return parse_function_declaration_after_marker(
-                parser,
-                annotations,
-                declaration_start,
-                true
-            )
-        end
-
-        let name_token: Token = parser_consume(
-            parser,
-            token_kind_identifier(),
-            "an annotation name after '@'"
-        )
-
-        if parser->successful then
-            let annotation: pointer<SyntaxNode> = parser_create_node(
-                parser,
-                syntax_kind_annotation(),
-                syntax_variant_none(),
-                name_token.lexeme,
-                source_span(at_token.span.start, name_token.span.end_position)
-            )
-
-            if annotation != null then
-                parser_add_name_child(parser, annotation, name_token)
-                vector_push<pointer<SyntaxNode>>(annotations, annotation)
-            end
-        end
-
-        parser_consume(
-            parser,
-            token_kind_newline(),
-            "a newline after the function annotation"
-        )
-    end
-
-    if parser_match(parser, token_kind_fn()) then
-        return parse_function_declaration_after_marker(
-            parser,
-            annotations,
-            declaration_start,
-            false
-        )
-    end
-
-    if parser->successful then
-        parser_expected(parser, "'fn' or '@fn' after the function annotations")
-    end
-
-    destroy_node_vector(annotations)
-    return null
 end
 
 fn parse_function_declaration_after_marker(
@@ -918,6 +1272,10 @@ fn parse_statement(parser: pointer<Parser>) -> pointer<SyntaxNode>
         return parse_return_statement(parser)
     end
 
+    if parser_check(parser, token_kind_delete()) then
+        return parse_delete_statement(parser)
+    end
+
     if parser_check(parser, token_kind_const()) || parser_check(parser, token_kind_let()) || parser_check(parser, token_kind_at()) then
         return parse_variable_declaration_statement(parser)
     end
@@ -936,6 +1294,32 @@ fn parse_statement(parser: pointer<Parser>) -> pointer<SyntaxNode>
 
     parser_expected(parser, "a statement")
     return null
+end
+
+fn parse_delete_statement(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let delete_token: Token = parser_consume(parser, token_kind_delete(), "'delete'")
+    let operand: pointer<SyntaxNode> = parse_expression(parser)
+
+    if !parser->successful then
+        destroy_syntax_tree(operand)
+        return null
+    end
+
+    let statement: pointer<SyntaxNode> = parser_create_node(
+        parser,
+        syntax_kind_delete_statement(),
+        syntax_variant_none(),
+        "",
+        source_span(delete_token.span.start, operand->span.end_position)
+    )
+
+    if statement == null then
+        destroy_syntax_tree(operand)
+        return null
+    end
+
+    syntax_add_child(statement, operand)
+    return statement
 end
 
 fn parse_while_statement(parser: pointer<Parser>) -> pointer<SyntaxNode>
@@ -1883,6 +2267,10 @@ fn parse_primary_expression(parser: pointer<Parser>) -> pointer<SyntaxNode>
         )
     end
 
+    if parser_check(parser, token_kind_new()) then
+        return parse_new_expression(parser)
+    end
+
     if parser_check(parser, token_kind_identifier()) then
         return parse_name_or_qualified_name_expression(parser)
     end
@@ -1893,6 +2281,56 @@ fn parse_primary_expression(parser: pointer<Parser>) -> pointer<SyntaxNode>
 
     parser_expected(parser, "an expression")
     return null
+end
+
+fn parse_new_expression(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let new_token: Token = parser_consume(parser, token_kind_new(), "'new'")
+    let class_type: pointer<SyntaxNode> = parse_class_type_name(
+        parser,
+        "a class name after 'new'"
+    )
+
+    if !parser->successful then
+        destroy_syntax_tree(class_type)
+        return null
+    end
+
+    let expression: pointer<SyntaxNode> = parser_create_node(
+        parser,
+        syntax_kind_new_expression(),
+        syntax_variant_none(),
+        class_type->text,
+        source_span(new_token.span.start, class_type->span.end_position)
+    )
+
+    if expression == null then
+        destroy_syntax_tree(class_type)
+        return null
+    end
+
+    syntax_add_child(expression, class_type)
+    parser_consume(
+        parser,
+        token_kind_left_paren(),
+        "'(' after the allocated class name"
+    )
+    parse_call_argument_list(parser, expression)
+    let right_parenthesis: Token = parser_consume(
+        parser,
+        token_kind_right_paren(),
+        "')' after the constructor arguments"
+    )
+
+    if !parser->successful then
+        destroy_syntax_tree(expression)
+        return null
+    end
+
+    expression->span = source_span(
+        new_token.span.start,
+        right_parenthesis.span.end_position
+    )
+    return expression
 end
 
 fn parse_literal_expression(parser: pointer<Parser>) -> pointer<SyntaxNode>
