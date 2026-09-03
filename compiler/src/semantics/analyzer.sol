@@ -66,14 +66,17 @@ fn analyze_source_modules(
     semantic_predeclare_all(program, syntax_kind_function_declaration())
     semantic_resolve_all_injections(program)
     semantic_bind_class_bases(program)
+    semantic_bind_interfaces(program)
     semantic_bind_all_class_scopes(program)
     semantic_bind_all_structs(program)
     semantic_validate_all_struct_layouts(program)
     semantic_bind_all_function_signatures(program)
+    semantic_build_all_contracts(program)
     semantic_validate_inherited_members(program)
     semantic_validate_overload_declarations(program)
     semantic_resolve_entry_point(program)
     semantic_bind_all_function_bodies(program)
+    semantic_validate_object_type_visibility(program)
     semantic_validate_constructor_delegations(program)
     semantic_validate_generic_instantiations(program)
     semantic_finish_program(program)
@@ -180,7 +183,7 @@ fn semantic_inherited_field(program: pointer<SemanticProgram>, type: pointer<Sem
     return null
 end
 
-fn semantic_class_methods(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, name: string) -> pointer<Vector<pointer<SemanticSymbol>>>
+fn semantic_class_declared_methods(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, name: string) -> pointer<Vector<pointer<SemanticSymbol>>>
     let result: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
     @mut let current: pointer<SemanticSymbol> = type
     while current != null do
@@ -207,6 +210,427 @@ fn semantic_class_methods(program: pointer<SemanticProgram>, type: pointer<Seman
         current = current->base_class
     end
     return result
+end
+
+fn semantic_symbol_list_contains(symbols: pointer<Vector<pointer<SemanticSymbol>>>, symbol: pointer<SemanticSymbol>) -> boolean
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(symbols) do
+        if vector_get<pointer<SemanticSymbol>>(symbols, index) == symbol then
+            return true
+        end
+        index = index + 1
+    end
+    return false
+end
+
+fn semantic_object_reaches(type: pointer<SemanticSymbol>, target: pointer<SemanticSymbol>, visited: pointer<Vector<pointer<SemanticSymbol>>>) -> boolean
+    if type == null then
+        return false
+    end
+    if type == target then
+        return true
+    end
+    if semantic_symbol_list_contains(visited, type) then
+        return false
+    end
+    vector_push<pointer<SemanticSymbol>>(visited, type)
+    if semantic_object_reaches(type->base_class, target, visited) then
+        return true
+    end
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->interfaces) do
+        if semantic_object_reaches(vector_get<pointer<SemanticSymbol>>(type->interfaces, index), target, visited) then
+            return true
+        end
+        index = index + 1
+    end
+    return false
+end
+
+fn semantic_object_conforms(type: pointer<SemanticSymbol>, target: pointer<SemanticSymbol>) -> boolean
+    let visited: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    let result: boolean = semantic_object_reaches(type, target, visited)
+    destroy_vector<pointer<SemanticSymbol>>(visited)
+    return result
+end
+
+fn semantic_bind_interfaces(program: pointer<SemanticProgram>) -> void
+    let types: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    @mut let module_index: int = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        @mut let index: int = 0
+        while index < syntax_child_count(module->unit) do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, index)
+            let type: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+            if declaration->kind == syntax_kind_class_declaration() && type != null then
+                vector_push<pointer<SemanticSymbol>>(types, type)
+                @mut let interface_index: int = 0
+                while interface_index < semantic_direct_child_count(declaration, syntax_kind_class_interface_clause()) do
+                    let clause: pointer<SyntaxNode> = semantic_direct_child(declaration, syntax_kind_class_interface_clause(), interface_index)
+                    let reference: pointer<SyntaxNode> = syntax_child(clause, 0)
+                    let interface_type: pointer<SemanticType> = semantic_resolve_type_reference(program, module, reference, type)
+                    if interface_type->kind != semantic_type_kind_error() then
+                        if interface_type->kind != semantic_type_kind_interface() then
+                            semantic_report(program, module, "SOL-S088", "An interface list can contain only interfaces.", reference)
+                        else
+                            let contract: pointer<SemanticSymbol> = semantic_object_symbol_for_type(program, interface_type)
+                            if semantic_symbol_list_contains(type->interfaces, contract) then
+                                semantic_report(program, module, "SOL-S088", "An interface is listed more than once.", reference)
+                            else
+                                vector_push<pointer<SemanticSymbol>>(type->interfaces, contract)
+                            end
+                        end
+                    end
+                    interface_index = interface_index + 1
+                end
+            end
+            index = index + 1
+        end
+        module_index = module_index + 1
+    end
+    let cyclic: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(types) do
+        let type: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(types, index)
+        @mut let edge: int = 0
+        @mut let cycle: boolean = false
+        while edge < vector_length<pointer<SemanticSymbol>>(type->interfaces) && !cycle do
+            cycle = semantic_object_conforms(vector_get<pointer<SemanticSymbol>>(type->interfaces, edge), type)
+            edge = edge + 1
+        end
+        if cycle then
+            let target: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->interfaces, edge - 1)
+            semantic_report(program, semantic_module_for_declaration(program, type->declaration), "SOL-S089", "Interface inheritance cycle involving '" + type->name + "'.", semantic_interface_relation_clause(program, type, target))
+            vector_push<pointer<SemanticSymbol>>(cyclic, type)
+        end
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<SemanticSymbol>>(cyclic) do
+        vector_clear<pointer<SemanticSymbol>>(vector_get<pointer<SemanticSymbol>>(cyclic, index)->interfaces)
+        index = index + 1
+    end
+    destroy_vector<pointer<SemanticSymbol>>(cyclic)
+    destroy_vector<pointer<SemanticSymbol>>(types)
+    return
+end
+
+fn semantic_interface_relation_clause(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, target: pointer<SemanticSymbol>) -> pointer<SyntaxNode>
+    @mut let index: int = 0
+    while index < semantic_direct_child_count(type->declaration, syntax_kind_class_interface_clause()) do
+        let clause: pointer<SyntaxNode> = semantic_direct_child(type->declaration, syntax_kind_class_interface_clause(), index)
+        if semantic_model_type_of_reference(program, syntax_child(clause, 0)) == target->type then
+            return clause
+        end
+        index = index + 1
+    end
+    return type->declaration
+end
+
+fn semantic_class_methods(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, name: string) -> pointer<Vector<pointer<SemanticSymbol>>>
+    let result: pointer<Vector<pointer<SemanticSymbol>>> = semantic_class_declared_methods(program, type, name)
+    if type == null then
+        return result
+    end
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->requirements) do
+        let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, index)
+        if requirement->name == name then
+            @mut let found: boolean = false
+            @mut let candidate: int = 0
+            while candidate < vector_length<pointer<SemanticSymbol>>(result) && !found do
+                found = semantic_callable_signatures_equal(program, vector_get<pointer<SemanticSymbol>>(result, candidate), requirement)
+                candidate = candidate + 1
+            end
+            if !found then
+                vector_push<pointer<SemanticSymbol>>(result, requirement)
+            end
+        end
+        index = index + 1
+    end
+    return result
+end
+
+fn semantic_add_requirement(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, requirement: pointer<SemanticSymbol>) -> void
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->requirements) do
+        let previous: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, index)
+        if previous->name == requirement->name && semantic_callable_signatures_equal(program, previous, requirement) then
+            if !semantic_method_returns_equal(program, previous, requirement) then
+                semantic_report(program, semantic_module_for_declaration(program, type->declaration), "SOL-S090", "Incompatible return types for requirement '" + requirement->name + "'.", type->declaration)
+            end
+            // Keep the strongest visibility contract when equivalent requirements unify.
+            if semantic_symbol_visibility(requirement) < semantic_symbol_visibility(previous) then
+                vector_set<pointer<SemanticSymbol>>(type->requirements, index, requirement)
+            end
+            return
+        end
+        index = index + 1
+    end
+    vector_push<pointer<SemanticSymbol>>(type->requirements, requirement)
+    return
+end
+
+fn semantic_method_returns_equal(program: pointer<SemanticProgram>, left: pointer<SemanticSymbol>, right: pointer<SemanticSymbol>) -> boolean
+    return semantic_signature_types_equal(semantic_model_type_of_reference(program, semantic_function_return_type(left->declaration)), semantic_model_type_of_reference(program, semantic_function_return_type(right->declaration)), left, right)
+end
+
+fn semantic_inherit_requirements(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, parent: pointer<SemanticSymbol>) -> void
+    if parent == null then
+        return
+    end
+    semantic_build_contract(program, parent)
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(parent->requirements) do
+        semantic_add_requirement(program, type, vector_get<pointer<SemanticSymbol>>(parent->requirements, index))
+        index = index + 1
+    end
+    return
+end
+
+fn semantic_build_contract(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>) -> void
+    if type->contract_state != 0 then
+        return
+    end
+    type->contract_state = 1
+    let module: pointer<SemanticModule> = semantic_module_for_declaration(program, type->declaration)
+    semantic_inherit_requirements(program, type, type->base_class)
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->interfaces) do
+        semantic_inherit_requirements(program, type, vector_get<pointer<SemanticSymbol>>(type->interfaces, index))
+        index = index + 1
+    end
+    let scope: pointer<Scope> = semantic_model_class_scope(program, type->declaration)
+    index = 0
+    while index < scope_declared_symbol_count(scope) do
+        let member: pointer<SemanticSymbol> = scope_declared_symbol(scope, index)
+        if member->kind == semantic_symbol_kind_method() then
+            let bodyless: boolean = semantic_function_body(member->declaration) == null
+            if type->kind == semantic_symbol_kind_interface() then
+                if !bodyless || semantic_symbol_visibility(member) != semantic_visibility_public() then
+                    semantic_report(program, module, "SOL-S087", "Interface methods must be public bodyless '@fn' requirements.", member->declaration)
+                end
+            else
+                if bodyless && (!semantic_symbol_is_abstract(type) || semantic_symbol_visibility(member) == semantic_visibility_private()) then
+                    semantic_report(program, module, "SOL-S087", "Bodyless instance methods require an abstract class and cannot be private.", member->declaration)
+                end
+            end
+            if bodyless || type->kind == semantic_symbol_kind_interface() then
+                semantic_add_requirement(program, type, member)
+            end
+        end
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->requirements) do
+        let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, index)
+        @mut let implementation: pointer<SemanticSymbol> = null
+        if type->kind == semantic_symbol_kind_class() then
+            let candidates: pointer<Vector<pointer<SemanticSymbol>>> = semantic_class_declared_methods(program, type, requirement->name)
+            @mut let candidate: int = 0
+            while candidate < vector_length<pointer<SemanticSymbol>>(candidates) && implementation == null do
+                let method: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(candidates, candidate)
+                if semantic_callable_signatures_equal(program, method, requirement) then
+                    if !semantic_method_returns_equal(program, method, requirement) || semantic_symbol_visibility(method) > semantic_symbol_visibility(requirement) then
+                        semantic_report(program, module, "SOL-S090", "Implementation of '" + requirement->name + "' has an incompatible return type or visibility.", type->declaration)
+                    else
+                        if semantic_function_body(method->declaration) != null then
+                            implementation = method
+                        end
+                    end
+                end
+                candidate = candidate + 1
+            end
+            destroy_vector<pointer<SemanticSymbol>>(candidates)
+            if implementation == null && !semantic_symbol_is_abstract(type) then
+                semantic_report(program, module, "SOL-S091", "Concrete class '" + type->name + "' does not implement '" + requirement->name + "'.", type->declaration)
+            end
+        end
+        vector_push<pointer<SemanticSymbol>>(type->implementations, implementation)
+        index = index + 1
+    end
+    type->contract_state = 2
+    return
+end
+
+fn semantic_build_all_contracts(program: pointer<SemanticProgram>) -> void
+    @mut let module_index: int = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        @mut let index: int = 0
+        while index < syntax_child_count(module->unit) do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, index)
+            let type: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+            if declaration->kind == syntax_kind_class_declaration() && type != null then
+                semantic_build_contract(program, type)
+            end
+            index = index + 1
+        end
+        module_index = module_index + 1
+    end
+    return
+end
+
+fn semantic_private_object_type(symbol: pointer<SemanticSymbol>) -> boolean
+    if symbol == null then
+        return false
+    end
+    return (symbol->kind == semantic_symbol_kind_class() || symbol->kind == semantic_symbol_kind_interface()) && semantic_symbol_visibility(symbol) == semantic_visibility_private()
+end
+
+fn semantic_object_type_accessible(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, type: pointer<SemanticSymbol>, context: pointer<SemanticSymbol>, header: boolean) -> boolean
+    if semantic_module_for_declaration(program, type->declaration) == module || semantic_symbol_visibility(type) == semantic_visibility_public() then
+        return true
+    end
+    if semantic_symbol_visibility(type) == semantic_visibility_private() then
+        return false
+    end
+    return header || semantic_object_conforms(context, type)
+end
+
+fn semantic_check_object_type_use(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, type: pointer<SemanticType>, context: pointer<SemanticSymbol>, header: boolean, public_api: boolean, node: pointer<SyntaxNode>) -> void
+    if type == null then
+        return
+    end
+    if type->kind == semantic_type_kind_class() || type->kind == semantic_type_kind_interface() then
+        let symbol: pointer<SemanticSymbol> = semantic_object_symbol_for_type(program, type)
+        if !semantic_object_type_accessible(program, module, symbol, context, header) then
+            semantic_report(program, module, "SOL-S092", "Object type '" + symbol->name + "' is not accessible in this context.", node)
+        end
+        if public_api && semantic_symbol_visibility(symbol) != semantic_visibility_public() then
+            semantic_report(program, module, "SOL-S095", "A public API cannot expose non-public object type '" + symbol->name + "'.", node)
+        end
+    end
+    if type->kind == semantic_type_kind_pointer() then
+        semantic_check_object_type_use(program, module, type->element_type, context, header, public_api, node)
+    end
+    @mut let index: int = 0
+    while index < semantic_type_argument_count(type) do
+        semantic_check_object_type_use(program, module, semantic_type_argument(type, index), context, header, public_api, node)
+        index = index + 1
+    end
+    return
+end
+
+fn semantic_check_object_type_node(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, node: pointer<SyntaxNode>, context: pointer<SemanticSymbol>, header: boolean, public_api: boolean) -> void
+    @mut let current: pointer<SemanticSymbol> = context
+    @mut let in_header: boolean = header
+    @mut let exported: boolean = public_api
+    if node->kind == syntax_kind_class_declaration() then
+        current = semantic_model_declared_symbol(program, node)
+    end
+    if node->kind == syntax_kind_class_base_clause() || node->kind == syntax_kind_class_interface_clause() then
+        in_header = true
+    end
+    if node->kind == syntax_kind_function_declaration() || node->kind == syntax_kind_class_field_declaration() then
+        let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, node)
+        exported = semantic_symbol_visibility(symbol) == semantic_visibility_public()
+        if current != null then
+            exported = exported && semantic_symbol_visibility(current) == semantic_visibility_public()
+        end
+    end
+    if node->kind == syntax_kind_struct_field_declaration() then
+        exported = true
+    end
+    if node->kind == syntax_kind_block() then
+        exported = false
+    end
+    if node->kind == syntax_kind_type_reference() then
+        semantic_check_object_type_use(program, module, semantic_model_type_of_reference(program, node), current, in_header, exported, node)
+        return
+    end
+    // Constructor calls name a class without a type-reference syntax node.
+    if node->kind == syntax_kind_call_expression() then
+        let type: pointer<SemanticSymbol> = semantic_model_constructed_class(program, node)
+        if type != null then
+            semantic_check_object_type_use(program, module, type->type, current, false, false, node)
+        end
+    end
+    @mut let index: int = 0
+    while index < syntax_child_count(node) do
+        semantic_check_object_type_node(program, module, syntax_child(node, index), current, in_header, exported)
+        index = index + 1
+    end
+    return
+end
+
+fn semantic_check_inherited_api_member(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, type: pointer<SemanticSymbol>, member: pointer<SemanticSymbol>) -> void
+    if member->owner == type || semantic_symbol_visibility(member) != semantic_visibility_public() then
+        return
+    end
+    if member->kind == semantic_symbol_kind_class_field() then
+        let reference: pointer<SyntaxNode> = semantic_symbol_declared_type_reference(member)
+        semantic_check_object_type_use(program, module, semantic_model_type_of_reference(program, reference), type, false, true, type->declaration)
+    end
+    if member->kind == semantic_symbol_kind_method() then
+        semantic_check_object_type_use(program, module, semantic_model_type_of_reference(program, semantic_function_return_type(member->declaration)), type, false, true, type->declaration)
+        @mut let index: int = 0
+        while index < semantic_direct_child_count(member->declaration, syntax_kind_parameter()) do
+            let parameter: pointer<SyntaxNode> = semantic_direct_child(member->declaration, syntax_kind_parameter(), index)
+            semantic_check_object_type_use(program, module, semantic_model_type_of_reference(program, syntax_child(parameter, 1)), type, false, true, type->declaration)
+            index = index + 1
+        end
+    end
+    return
+end
+
+fn semantic_check_inherited_type_api(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, type: pointer<SemanticSymbol>) -> void
+    if type == null then
+        return
+    end
+    if semantic_symbol_visibility(type) != semantic_visibility_public() then
+        return
+    end
+    let checked: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    @mut let base: pointer<SemanticSymbol> = type->base_class
+    while base != null do
+        let members: pointer<Scope> = semantic_model_class_scope(program, base->declaration)
+        @mut let index: int = 0
+        while index < scope_declared_symbol_count(members) do
+            let member: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+            semantic_check_inherited_api_member(program, module, type, member)
+            vector_push<pointer<SemanticSymbol>>(checked, member)
+            index = index + 1
+        end
+        base = base->base_class
+    end
+    @mut let index: int = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->requirements) do
+        let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, index)
+        if !semantic_symbol_list_contains(checked, requirement) then
+            semantic_check_inherited_api_member(program, module, type, requirement)
+        end
+        index = index + 1
+    end
+    destroy_vector<pointer<SemanticSymbol>>(checked)
+    return
+end
+
+fn semantic_validate_object_type_visibility(program: pointer<SemanticProgram>) -> void
+    @mut let module_index: int = 0
+    @mut let has_objects: boolean = false
+    while module_index < semantic_program_module_count(program) && !has_objects do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        has_objects = semantic_direct_child_count(module->unit, syntax_kind_class_declaration()) != 0
+        module_index = module_index + 1
+    end
+    if !has_objects then
+        return
+    end
+    module_index = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        semantic_check_object_type_node(program, module, module->unit, null, false, false)
+        @mut let index: int = 0
+        while index < semantic_direct_child_count(module->unit, syntax_kind_class_declaration()) do
+            let declaration: pointer<SyntaxNode> = semantic_direct_child(module->unit, syntax_kind_class_declaration(), index)
+            semantic_check_inherited_type_api(program, module, semantic_model_declared_symbol(program, declaration))
+            index = index + 1
+        end
+        module_index = module_index + 1
+    end
+    return
 end
 
 fn semantic_validate_inherited_members(program: pointer<SemanticProgram>) -> void
@@ -236,6 +660,14 @@ fn semantic_validate_inherited_members(program: pointer<SemanticProgram>) -> voi
                             found = found + 1
                         end
                         destroy_vector<pointer<SemanticSymbol>>(inherited)
+                        found = 0
+                        while found < vector_length<pointer<SemanticSymbol>>(type->requirements) && member->overridden_method == null do
+                            let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, found)
+                            if requirement->owner != type && requirement->name == member->name && semantic_callable_signatures_equal(program, member, requirement) then
+                                member->overridden_method = requirement
+                            end
+                            found = found + 1
+                        end
                         let overrides: boolean = semantic_declaration_has_annotation(member->declaration, "override")
                         if member->overridden_method != null then
                             let base_method: pointer<SemanticSymbol> = member->overridden_method
@@ -246,7 +678,7 @@ fn semantic_validate_inherited_members(program: pointer<SemanticProgram>) -> voi
                                 semantic_report(program, module, "SOL-S081", "An override must preserve the exact return type and cannot reduce visibility.", member->declaration)
                             end
                         else
-                            if overrides && semantic_direct_child_count(declaration, syntax_kind_class_interface_clause()) == 0 then
+                            if overrides then
                                 semantic_report(program, module, "SOL-S080", "Method marked '@override' has no inherited signature to override.", member->declaration)
                             end
                         end
@@ -466,7 +898,7 @@ fn semantic_resolve_direct_injection(
                 )
 
                 if exported != null then
-                    if scope_lookup_local(target->scope, exported->name) == exported then
+                    if scope_lookup_local(target->scope, exported->name) == exported && !semantic_private_object_type(exported) then
                         semantic_declare_import(
                             program,
                             module,
@@ -504,6 +936,9 @@ fn semantic_resolve_direct_injection(
                 selected
             )
         else
+            if semantic_private_object_type(exported) && target != module then
+                semantic_report(program, module, "SOL-S092", "A private object type cannot be injected outside its module.", selected)
+            end
             semantic_declare_import(
                 program,
                 module,
@@ -4084,6 +4519,14 @@ fn semantic_bind_constructor_invocation(
         program,
         class_symbol->declaration
     )
+    @mut let delegation: boolean = false
+    if expression->kind == syntax_kind_call_expression() then
+        let callee: pointer<SyntaxNode> = syntax_child(expression, 0)
+        delegation = callee->kind == syntax_kind_name_expression() && (callee->text == "this" || callee->text == "base")
+    end
+    if semantic_symbol_is_abstract(class_symbol) && !delegation then
+        semantic_report(program, module, "SOL-S093", "An abstract class cannot be constructed directly or with 'new'.", expression)
+    end
     let constructor_count: int = scope_constructor_count(member_scope)
 
     if constructor_count == 0 then
@@ -4339,6 +4782,13 @@ fn semantic_bind_method_callee(
 
     if method == null then
         return null
+    end
+
+    let receiver_symbol: pointer<SemanticSymbol> = semantic_current_receiver_symbol(program, receiver_expression)
+    if receiver_symbol != null then
+        if receiver_symbol->name == "base" && semantic_function_body(method->declaration) == null then
+            semantic_report(program, module, "SOL-S094", "A base-method call requires a concrete implementation.", expression)
+        end
     end
 
     if !semantic_object_member_is_accessible(program, method, semantic_enclosing_class(active_function), receiver_expression) then
@@ -5202,10 +5652,10 @@ fn semantic_class_pointer_upcast(program: pointer<SemanticProgram>, expected: po
     if expected->kind != semantic_type_kind_pointer() || actual->kind != semantic_type_kind_pointer() then
         return false
     end
-    if expected->element_type->kind != semantic_type_kind_class() || actual->element_type->kind != semantic_type_kind_class() then
+    if (expected->element_type->kind != semantic_type_kind_class() && expected->element_type->kind != semantic_type_kind_interface()) || (actual->element_type->kind != semantic_type_kind_class() && actual->element_type->kind != semantic_type_kind_interface()) then
         return false
     end
-    return semantic_class_derives_from(semantic_object_symbol_for_type(program, actual->element_type), semantic_object_symbol_for_type(program, expected->element_type))
+    return semantic_object_conforms(semantic_object_symbol_for_type(program, actual->element_type), semantic_object_symbol_for_type(program, expected->element_type))
 end
 
 fn semantic_bind_index_expression(

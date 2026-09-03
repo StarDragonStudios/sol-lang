@@ -94,6 +94,22 @@ fn launch() -> int
         return 210 + object_returns
     end
 
+    let contracts: int = test_abstract_interface_contracts()
+    if contracts != 0 then
+        console::print_line("semantic analysis test failed: abstract/interface contracts")
+        return 220 + contracts
+    end
+    let contract_errors: int = test_object_contract_diagnostics()
+    if contract_errors != 0 then
+        console::print_line("semantic analysis test failed: object contract diagnostics")
+        return 230 + contract_errors
+    end
+    let visibility: int = test_object_type_visibility()
+    if visibility != 0 then
+        console::print_line("semantic analysis test failed: object type visibility")
+        return 240 + visibility
+    end
+
     let core: int = test_core_diagnostics()
 
     if core != 0 then
@@ -116,6 +132,125 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_abstract_interface_contracts() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "@interface\nclass Root\n    @fn read() -> int\nend\n@interface\nclass Left < Root\nend\n@interface\nclass Right < Root\nend\n@interface\nclass Printable < Left, Right\n    @fn label() -> string\nend\n@abstract\nclass Base < Printable\n    @protected\n    value: int\n    @protected\n    @constructor\n    fn build() -> void\n        this.value = 42\n    end\n    @override\n    @fn read() -> int\n    @override\n    fn label() -> string\n        return \"base\"\n    end\nend\nclass Child << Base\n    @constructor\n    fn build() -> void\n        base()\n    end\n    @override\n    fn read() -> int\n        return this.value\n    end\nend\nclass Legacy\n    fn read() -> int\n        return 1\n    end\n    fn label() -> string\n        return \"legacy\"\n    end\nend\nclass Compatible << Legacy < Printable\nend\n@interface\nclass Generic\n    @fn echo<T>(value: T) -> T\nend\nclass GenericImpl < Generic\n    @override\n    fn echo<U>(value: U) -> U\n        return value\n    end\nend\nfn inspect(value: pointer<Child>, generic: pointer<GenericImpl>) -> int\n    let printable: pointer<Printable> = value\n    let root: pointer<Root> = printable\n    @mut let another: pointer<Root> = null\n    another = printable\n    let text: string = printable->label()\n    let echo: pointer<Generic> = generic\n    return root->read() + echo->echo<int>(1)\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("contracts", source, false)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    let printable: pointer<SyntaxNode> = syntax_child(source.parsed.root, 3)
+    let base: pointer<SyntaxNode> = syntax_child(source.parsed.root, 4)
+    let child: pointer<SyntaxNode> = syntax_child(source.parsed.root, 5)
+    let compatible: pointer<SyntaxNode> = syntax_child(source.parsed.root, 7)
+    if semantic_model_interface_count(program, printable) != 2 || semantic_model_interface(program, printable, 0)->name != "Left" || semantic_model_requirement_count(program, printable) != 2 || semantic_model_requirement_count(program, child) != 2 then
+        failure = 3
+    end
+    if semantic_model_requirement_implementation(program, base, 0) != null || semantic_model_requirement_implementation(program, child, 0)->owner->name != "Child" || semantic_model_requirement_implementation(program, child, 1)->owner->name != "Base" || semantic_model_requirement_implementation(program, compatible, 0)->owner->name != "Legacy" then
+        failure = 4
+    end
+    if semantic_model_interface(program, printable, -1) != null || semantic_model_requirement(program, child, 2) != null || semantic_model_requirement_implementation(program, child, 2) != null then
+        failure = 5
+    end
+    let body: pointer<SyntaxNode> = semantic_function_body(syntax_child(source.parsed.root, 10))
+    let label_call: pointer<SyntaxNode> = syntax_child(syntax_child(body, 4), 2)
+    if semantic_model_called_function(program, label_call)->owner->name != "Printable" then
+        failure = 6
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    return failure
+end
+
+fn test_object_contract_diagnostics() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "@interface\nclass Root\n    @fn read() -> int\nend\nclass Bodyless\n    @fn missing() -> void\nend\n@abstract\nclass Private\n    @private\n    @fn hidden() -> void\nend\n@interface\nclass Bodies\n    fn implemented() -> void\n        return\n    end\nend\nclass Missing < Root\nend\nclass Incorrect < Root\n    @override\n    fn read() -> string\n        return \"wrong\"\n    end\nend\nclass Unmarked < Root\n    fn read() -> int\n        return 1\n    end\nend\n@interface\nclass Wrong < Bodyless\nend\n@interface\nclass Duplicate < Root, Root\nend\n@interface\nclass CycleA < CycleB\nend\n@interface\nclass CycleB < CycleA\nend\n@interface\nclass Other\n    @fn read() -> string\nend\n@interface\nclass Conflict < Root, Other\nend\n@abstract\nclass Abstract\n    @constructor\n    fn build() -> void\n        return\n    end\n    @fn read() -> int\nend\nclass Calls << Abstract\n    @override\n    fn read() -> int\n        return base.read()\n    end\nend\nfn invalid(value: pointer<Root>) -> void\n    let direct: Abstract = Abstract()\n    let dynamic: pointer<Abstract> = new Abstract()\n    let down: pointer<Calls> = value\n    return\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("contract.errors", source, false)
+    @mut let failure: int = 0
+    if !semantic_test_has_code(program, "SOL-S087") || !semantic_test_has_code(program, "SOL-S088") || !semantic_test_has_code(program, "SOL-S089") || !semantic_test_has_code(program, "SOL-S090") || !semantic_test_has_code(program, "SOL-S091") || semantic_test_code_count(program, "SOL-S093") != 2 || !semantic_test_has_code(program, "SOL-S094") || !semantic_test_has_code(program, "SOL-S080") || !semantic_test_has_code(program, "SOL-S008") then
+        failure = 2
+    end
+    let missing: pointer<SyntaxNode> = syntax_child(source.parsed.root, 1)
+    let cycle: pointer<SyntaxNode> = semantic_direct_child(syntax_child(source.parsed.root, 9), syntax_kind_class_interface_clause(), 0)
+    if !semantic_test_code_has_span(program, "SOL-S091", missing->span.start.offset, missing->span.end_position.offset) || !semantic_test_code_has_span(program, "SOL-S089", cycle->span.start.offset, cycle->span.end_position.offset) || !semantic_test_diagnostics_ordered(program) then
+        failure = 3
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    return failure
+end
+
+fn test_object_type_visibility() -> int
+    let library: ParsedSemanticSource = parse_semantic_test_source(
+        "@private\nclass Hidden\n    @constructor\n    fn build() -> void\n        return\n    end\nend\n@protected\n@abstract\nclass Base\n    @protected\n    @constructor\n    fn build() -> void\n        return\n    end\nend\n@protected\n@interface\nclass Contract\n    @fn read() -> int\nend\n@private\nfn internal(value: pointer<Hidden>) -> pointer<Hidden>\n    return value\nend"
+    )
+    let application: ParsedSemanticSource = parse_semantic_test_source(
+        "inject namespace library as model\nclass Child << model::Base < model::Contract\n    @constructor\n    fn build() -> void\n        base()\n    end\n    @override\n    fn read() -> int\n        let view: pointer<model::Base> = null\n        return 1\n    end\n    @private\n    fn internal(value: pointer<model::Base>) -> pointer<model::Contract>\n        return null\n    end\nend"
+    )
+    if !semantic_test_parse_valid(library) || !semantic_test_parse_valid(application) then
+        destroy_semantic_test_source(application)
+        destroy_semantic_test_source(library)
+        return 1
+    end
+    let sources: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(sources, source_module("application", application.parsed.root))
+    vector_push<SourceModule>(sources, source_module("library", library.parsed.root))
+    let program: pointer<SemanticProgram> = analyze_library_modules(sources)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    destroy_semantic_program(program)
+    destroy_vector<SourceModule>(sources)
+    destroy_semantic_test_source(application)
+    if failure != 0 then
+        destroy_semantic_test_source(library)
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "inject namespace library as model\ninject library only Hidden\n@private\nfn invalid(value: pointer<model::Base>) -> pointer<model::Contract>\n    let hidden: pointer<model::Hidden> = new model::Hidden()\n    return null\nend"
+    )
+    let leaks: ParsedSemanticSource = parse_semantic_test_source(
+        "@private\nclass Hidden\nend\n@protected\nclass Restricted\nend\nstruct Box<T>\n    value: T\nend\nclass Public\n    value: pointer<Hidden>\n    fn leak(value: Box<pointer<Restricted>>) -> pointer<Hidden>\n        return null\n    end\nend\nfn leak(value: pointer<Hidden>) -> pointer<Restricted>\n    return null\nend\n@protected\nclass InternalBase\n    fn expose() -> pointer<Hidden>\n        return null\n    end\nend\nclass Exposed << InternalBase\nend"
+    )
+    if !semantic_test_parse_valid(invalid) || !semantic_test_parse_valid(leaks) then
+        destroy_semantic_test_source(invalid)
+        destroy_semantic_test_source(leaks)
+        destroy_semantic_test_source(library)
+        return 3
+    end
+    let invalid_sources: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(invalid_sources, source_module("invalid", invalid.parsed.root))
+    vector_push<SourceModule>(invalid_sources, source_module("leaks", leaks.parsed.root))
+    vector_push<SourceModule>(invalid_sources, source_module("library", library.parsed.root))
+    let invalid_program: pointer<SemanticProgram> = analyze_library_modules(invalid_sources)
+    if semantic_test_code_count(invalid_program, "SOL-S092") != 5 || semantic_test_code_count(invalid_program, "SOL-S095") != 6 then
+        failure = 4
+    end
+    let private_name: pointer<SyntaxNode> = syntax_child(syntax_child(invalid.parsed.root, 1), 1)
+    if !semantic_test_code_has_span(invalid_program, "SOL-S092", private_name->span.start.offset, private_name->span.end_position.offset) || !semantic_test_diagnostics_ordered(invalid_program) then
+        failure = 5
+    end
+    destroy_semantic_program(invalid_program)
+    destroy_vector<SourceModule>(invalid_sources)
+    destroy_semantic_test_source(invalid)
+    destroy_semantic_test_source(leaks)
+    destroy_semantic_test_source(library)
+    return failure
 end
 
 fn test_object_return_and_reconstruction_rules() -> int
@@ -157,6 +292,20 @@ fn test_object_return_and_reconstruction_rules() -> int
     end
     destroy_semantic_program(invalid_program)
     destroy_semantic_test_source(invalid)
+    if failure != 0 then
+        return failure
+    end
+    let interfaces: ParsedSemanticSource = parse_semantic_test_source("@interface\nclass Role\n    @fn copy() -> Role\n    @fn view() -> pointer<Role>\nend\nfn invalid() -> void\n    let value: pointer<Role> = new Role()\n    return\nend")
+    if !semantic_test_parse_valid(interfaces) then
+        destroy_semantic_test_source(interfaces)
+        return 7
+    end
+    let interface_program: pointer<SemanticProgram> = semantic_test_analyze("interface.returns", interfaces, false)
+    if semantic_test_code_count(interface_program, "SOL-S086") != 1 || !semantic_test_has_code(interface_program, "SOL-S069") then
+        failure = 8
+    end
+    destroy_semantic_program(interface_program)
+    destroy_semantic_test_source(interfaces)
     return failure
 end
 

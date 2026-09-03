@@ -155,6 +155,9 @@ fn test_class_interface_types_and_scopes() -> int
     if failure == 0 && (constructor->kind != semantic_symbol_kind_constructor() || constructor->owner != base || semantic_symbol_visibility(constructor) != semantic_visibility_protected() || scope_declare_member(class_scope, constructor) != scope_declare_success() || scope_constructor_count(class_scope) != 1 || scope_constructor(class_scope, 0) != constructor) then
         failure = 11
     end
+    if failure == 0 && (base->interfaces == null || interface_symbol->requirements == null || base->implementations == null || base->contract_state != 0 || method->interfaces != null || field->requirements != null) then
+        failure = 12
+    end
 
     destroy_scope(class_scope)
     destroy_scope(module_scope)

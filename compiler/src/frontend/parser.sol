@@ -964,29 +964,11 @@ fn parse_type_reference(
     parser: pointer<Parser>,
     expectation: string
 ) -> pointer<SyntaxNode>
-    let name_token: Token = parser_consume(
-        parser,
-        token_kind_identifier(),
-        expectation
-    )
-
-    if !parser->successful then
-        return null
-    end
-
-    let type_reference: pointer<SyntaxNode> = parser_create_node(
-        parser,
-        syntax_kind_type_reference(),
-        syntax_variant_none(),
-        name_token.lexeme,
-        name_token.span
-    )
+    let type_reference: pointer<SyntaxNode> = parse_class_type_name(parser, expectation)
 
     if type_reference == null then
         return null
     end
-
-    parser_add_name_child(parser, type_reference, name_token)
 
     if parser_check(parser, token_kind_less()) then
         let closing: Token = parse_explicit_type_arguments(parser, type_reference)
