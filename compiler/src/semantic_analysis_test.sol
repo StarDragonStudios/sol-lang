@@ -45,6 +45,13 @@ fn launch() -> int
         return 40 + objects
     end
 
+    let fields: int = test_class_fields_and_member_access()
+
+    if fields != 0 then
+        console::print_line("semantic analysis test failed: class fields and access")
+        return 45 + fields
+    end
+
     let core: int = test_core_diagnostics()
 
     if core != 0 then
@@ -67,6 +74,97 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_class_fields_and_member_access() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "@public\nclass Document\n    @public\n    title: string\n    @public\n    count: int\n    @private\n    secret: int\nend\nfn read(document: pointer<Document>) -> string\n    return document->title\nend\nfn mutate(document: pointer<Document>) -> void\n    document->count = 1\n    return\nend"
+    )
+
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+
+    let program: pointer<SemanticProgram> = semantic_test_analyze(
+        "fields",
+        source,
+        false
+    )
+    @mut let failure: int = 0
+
+    if program == null || !semantic_program_successful(program) then
+        failure = 2
+    end
+
+    let root: pointer<SyntaxNode> = source.parsed.root
+    let class_declaration: pointer<SyntaxNode> = syntax_child(root, 0)
+    let read_declaration: pointer<SyntaxNode> = syntax_child(root, 1)
+    let mutate_declaration: pointer<SyntaxNode> = syntax_child(root, 2)
+    let class_scope: pointer<Scope> = semantic_model_class_scope(
+        program,
+        class_declaration
+    )
+    let title_declaration: pointer<SyntaxNode> = syntax_child(class_declaration, 2)
+    let title: pointer<SemanticSymbol> = semantic_model_declared_symbol(
+        program,
+        title_declaration
+    )
+    let read_access: pointer<SyntaxNode> = syntax_child(
+        syntax_child(semantic_function_body(read_declaration), 0),
+        0
+    )
+    let mutate_assignment: pointer<SyntaxNode> = syntax_child(
+        semantic_function_body(mutate_declaration),
+        0
+    )
+    let mutate_access: pointer<SyntaxNode> = syntax_child(mutate_assignment, 0)
+
+    if failure == 0 && (scope_declared_symbol_count(class_scope) != 3 || scope_lookup_class_field(class_scope, "title") != title || !class_scope->frozen) then
+        failure = 3
+    end
+
+    if failure == 0 && (title->kind != semantic_symbol_kind_class_field() || title->owner != semantic_model_declared_symbol(program, class_declaration) || title->index != 0 || !title->mutable || semantic_symbol_visibility(title) != semantic_visibility_public()) then
+        failure = 4
+    end
+
+    if failure == 0 && (semantic_model_accessed_pointer_field(program, read_access) != title || semantic_model_type_of_expression(program, read_access)->name != "string") then
+        failure = 5
+    end
+
+    if failure == 0 && (semantic_model_accessed_pointer_field(program, mutate_access)->name != "count" || semantic_model_type_of_expression(program, mutate_access)->name != "int") then
+        failure = 6
+    end
+
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+
+    if failure != 0 then
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "@public\nclass Invalid\n    @mut\n    bad: void\n    @public\n    duplicate: int\n    @private\n    duplicate: int\n    @public\n    @private\n    visibility: int\n    @private\n    hidden: int\nend\n@interface\nclass Contract\n    value: int\nend\nfn inspect(value: pointer<Invalid>) -> int\n    let missing: int = value->missing\n    return value->hidden\nend"
+    )
+
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 7
+    end
+
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze(
+        "invalid.fields",
+        invalid,
+        false
+    )
+
+    if invalid_program == null || !semantic_test_has_code(invalid_program, "SOL-S052") || !semantic_test_has_code(invalid_program, "SOL-S053") || !semantic_test_has_code(invalid_program, "SOL-S054") || !semantic_test_has_code(invalid_program, "SOL-S055") || !semantic_test_has_code(invalid_program, "SOL-S056") || !semantic_test_has_code(invalid_program, "SOL-S057") || !semantic_test_has_code(invalid_program, "SOL-S058") then
+        failure = 8
+    end
+
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
 end
 
 fn test_class_types_scopes_and_diagnostics() -> int
