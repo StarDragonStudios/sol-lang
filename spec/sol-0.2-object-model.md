@@ -263,6 +263,12 @@ assigned, passed or returned by value; there is no direct-instance equality.
 `@mut let` may be reconstructed from a fresh constructor expression, not another
 instance. Structs keep their current copy/argument/return behavior.
 
+Functions and methods return objects only as pointers in Sol 0.2. A direct
+class/interface return type is invalid, including a body that returns a fresh
+constructor expression. Return-by-destination construction and copy elision are
+outside this first model; use `pointer<Person>` rather than `Person` as the
+return type.
+
 Dynamic construction returns a raw pointer:
 
 ```sol
