@@ -69,8 +69,10 @@ fn analyze_source_modules(
     semantic_bind_all_structs(program)
     semantic_validate_all_struct_layouts(program)
     semantic_bind_all_function_signatures(program)
+    semantic_validate_overload_declarations(program)
     semantic_resolve_entry_point(program)
     semantic_bind_all_function_bodies(program)
+    semantic_validate_constructor_delegations(program)
     semantic_validate_generic_instantiations(program)
     semantic_finish_program(program)
     return program
@@ -2470,7 +2472,7 @@ fn semantic_bind_variable(
             program,
             initializer
         )
-        valid_class_construction = constructed != null && constructed->type == declared_type
+        valid_class_construction = constructed != null && semantic_type_equals(initializer_type, declared_type)
     end
 
     if declared_type->kind != semantic_type_kind_error() && !declared_type->value_type && !valid_class_construction then
@@ -2555,7 +2557,7 @@ fn semantic_bind_assignment(
         function
     )
 
-    if symbol != null && target_type->kind == semantic_type_kind_class() && semantic_constructed_class_of(program, value) == null then
+    if symbol != null && target_type->kind == semantic_type_kind_class() && (semantic_constructed_class_of(program, value) == null || !semantic_type_equals(target_type, value_type)) then
         semantic_report(
             program,
             module,
@@ -3260,7 +3262,7 @@ fn semantic_bind_call_expression(
 
     if callee->kind == syntax_kind_name_expression() then
         if callee->text == "this" && active_function != null && active_function->kind == semantic_symbol_kind_constructor() then
-            return semantic_bind_constructor_invocation(
+            let delegated: pointer<SemanticType> = semantic_bind_constructor_invocation(
                 program,
                 module,
                 call,
@@ -3268,6 +3270,10 @@ fn semantic_bind_call_expression(
                 scope,
                 active_function
             )
+            if delegated->kind == semantic_type_kind_error() then
+                return delegated
+            end
+            return type_catalog_lookup(program->catalog, "void")
         end
 
 
@@ -3332,6 +3338,7 @@ fn semantic_bind_call_expression(
             program,
             module,
             callee,
+            call,
             scope,
             active_function
         )
@@ -3490,7 +3497,7 @@ fn semantic_bind_call_expression(
             )
         end
 
-        let actual: pointer<SemanticType> = semantic_bind_expression(
+        let actual: pointer<SemanticType> = semantic_bind_argument_once(
             program,
             module,
             value,
@@ -3534,6 +3541,16 @@ fn semantic_constructed_class_of(
 ) -> pointer<SemanticSymbol>
     if expression == null then
         return null
+    end
+
+    if expression->kind == syntax_kind_new_expression() then
+        return null
+    end
+    if expression->kind == syntax_kind_call_expression() then
+        let callee: pointer<SyntaxNode> = syntax_child(expression, 0)
+        if callee->kind == syntax_kind_name_expression() && callee->text == "this" then
+            return null
+        end
     end
 
     let constructed: pointer<SemanticSymbol> = semantic_program_symbol_of(
@@ -3792,18 +3809,12 @@ fn semantic_bind_constructor_invocation(
     )
     let constructor_count: int = scope_constructor_count(member_scope)
 
-    if constructor_count != 1 then
-        @mut let reason: string = "does not declare a constructor"
-
-        if constructor_count > 1 then
-            reason = "has overloaded constructors that require overload resolution"
-        end
-
+    if constructor_count == 0 then
         semantic_report(
             program,
             module,
             "SOL-S069",
-            "Class '" + class_symbol->name + "' " + reason + ".",
+            "Class '" + class_symbol->name + "' does not declare a constructor.",
             expression
         )
         semantic_bind_call_values_without_target(
@@ -3816,7 +3827,15 @@ fn semantic_bind_constructor_invocation(
         return type_catalog_error(program->catalog)
     end
 
-    let constructor: pointer<SemanticSymbol> = scope_constructor(member_scope, 0)
+    @mut let constructor: pointer<SemanticSymbol> = scope_constructor(member_scope, 0)
+
+    if constructor_count > 1 then
+        constructor = semantic_select_overload(program, module, expression, member_scope, class_symbol->name, true, scope, active_function)
+    end
+
+    if constructor == null then
+        return type_catalog_error(program->catalog)
+    end
 
     if !semantic_constructor_is_accessible(
         constructor,
@@ -3885,6 +3904,15 @@ fn semantic_bind_constructor_arguments(
     scope: pointer<Scope>,
     active_function: pointer<SemanticSymbol>
 ) -> void
+    @mut let type_index: int = 1
+    while type_index < syntax_child_count(expression) do
+        let child: pointer<SyntaxNode> = syntax_child(expression, type_index)
+        if child->kind == syntax_kind_type_reference() then
+            semantic_resolve_type_reference(program, module, child, active_function)
+            semantic_report(program, module, "SOL-S040", "Constructors do not accept explicit type arguments.", child)
+        end
+        type_index = type_index + 1
+    end
     let value_count: int = semantic_call_value_count(expression)
     let parameter_count: int = semantic_direct_child_count(
         constructor->declaration,
@@ -3920,7 +3948,7 @@ fn semantic_bind_constructor_arguments(
             )
         end
 
-        let actual: pointer<SemanticType> = semantic_bind_expression(
+        let actual: pointer<SemanticType> = semantic_bind_argument_once(
             program,
             module,
             value,
@@ -3949,6 +3977,7 @@ fn semantic_bind_method_callee(
     program: pointer<SemanticProgram>,
     module: pointer<SemanticModule>,
     expression: pointer<SyntaxNode>,
+    call: pointer<SyntaxNode>,
     scope: pointer<Scope>,
     active_function: pointer<SemanticSymbol>
 ) -> pointer<SemanticSymbol>
@@ -4016,22 +4045,19 @@ fn semantic_bind_method_callee(
         return null
     end
 
-    if method_count > 1 then
-        semantic_report(
-            program,
-            module,
-            "SOL-S065",
-            "Method name '" + expression->text + "' is overloaded and requires overload resolution.",
-            syntax_child(expression, 1)
-        )
-        return null
-    end
-
-    let method: pointer<SemanticSymbol> = scope_class_method(
+    @mut let method: pointer<SemanticSymbol> = scope_class_method(
         member_scope,
         expression->text,
         0
     )
+
+    if method_count > 1 then
+        method = semantic_select_overload(program, module, call, member_scope, expression->text, false, scope, active_function)
+    end
+
+    if method == null then
+        return null
+    end
 
     if !semantic_method_is_accessible(method, semantic_enclosing_class(active_function)) then
         semantic_report(
@@ -4051,6 +4077,308 @@ fn semantic_bind_method_callee(
         method
     )
     return method
+end
+
+// Candidate probing never binds contextual null or re-binds argument expressions.
+// Only the selected signature supplies their pointer context.
+fn semantic_select_overload(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    call: pointer<SyntaxNode>,
+    members: pointer<Scope>,
+    name: string,
+    constructors: boolean,
+    scope: pointer<Scope>,
+    active_function: pointer<SemanticSymbol>
+) -> pointer<SemanticSymbol>
+    let arguments: pointer<Vector<pointer<SemanticType>>> = create_vector<pointer<SemanticType>>()
+    let types: pointer<Vector<pointer<SemanticType>>> = create_vector<pointer<SemanticType>>()
+    @mut let invalid: boolean = false
+    @mut let index: int = 1
+    while index < syntax_child_count(call) do
+        let child: pointer<SyntaxNode> = syntax_child(call, index)
+        if child->kind == syntax_kind_type_reference() then
+            let type: pointer<SemanticType> = semantic_resolve_type_reference(program, module, child, active_function)
+            vector_push<pointer<SemanticType>>(types, type)
+            if type->kind == semantic_type_kind_error() then
+                invalid = true
+            else
+                if !type->value_type then
+                    semantic_report(program, module, "SOL-S041", "Callable type argument must be a value type.", child)
+                    invalid = true
+                end
+            end
+        else
+            @mut let type: pointer<SemanticType> = null
+            if !semantic_is_null_expression(child) then
+                type = semantic_bind_argument_once(program, module, child, scope, null, active_function)
+                if type->kind == semantic_type_kind_error() then
+                    invalid = true
+                end
+            end
+            vector_push<pointer<SemanticType>>(arguments, type)
+        end
+        index = index + 1
+    end
+
+    @mut let selected: pointer<SemanticSymbol> = null
+    @mut let matches: int = 0
+    @mut let count: int = scope_class_method_count(members, name)
+    if constructors then
+        count = scope_constructor_count(members)
+    end
+    index = 0
+    while index < count && !invalid do
+        @mut let candidate: pointer<SemanticSymbol> = scope_class_method(members, name, index)
+        if constructors then
+            candidate = scope_constructor(members, index)
+        end
+        if semantic_overload_matches(program, candidate, types, arguments) then
+            selected = candidate
+            matches = matches + 1
+        end
+        index = index + 1
+    end
+
+    destroy_vector<pointer<SemanticType>>(arguments)
+    destroy_vector<pointer<SemanticType>>(types)
+    if invalid || matches != 1 then
+        index = 0
+        while index < semantic_call_value_count(call) do
+            let value: pointer<SyntaxNode> = semantic_call_value(call, index)
+            if semantic_is_null_expression(value) then
+                semantic_program_record_type(program, semantic_binding_kind_expression_type(), value, type_catalog_error(program->catalog))
+            end
+            index = index + 1
+        end
+    end
+    if invalid then
+        return null
+    end
+    if matches == 0 then
+        semantic_report(program, module, "SOL-S074", "No overload of '" + name + "' matches the exact argument types and explicit type arguments.", call)
+        return null
+    end
+    if matches > 1 then
+        semantic_report(program, module, "SOL-S065", "Call to '" + name + "' is ambiguous between exact overloads.", call)
+        return null
+    end
+    return selected
+end
+
+fn semantic_overload_matches(
+    program: pointer<SemanticProgram>,
+    candidate: pointer<SemanticSymbol>,
+    types: pointer<Vector<pointer<SemanticType>>>,
+    arguments: pointer<Vector<pointer<SemanticType>>>
+) -> boolean
+    let count: int = vector_length<pointer<SemanticType>>(arguments)
+    if semantic_symbol_type_parameter_count(candidate) != vector_length<pointer<SemanticType>>(types) || semantic_direct_child_count(candidate->declaration, syntax_kind_parameter()) != count then
+        return false
+    end
+    @mut let index: int = 0
+    while index < count do
+        let parameter: pointer<SyntaxNode> = semantic_direct_child(candidate->declaration, syntax_kind_parameter(), index)
+        let expected: pointer<SemanticType> = semantic_substitute_type(program, semantic_model_type_of_reference(program, syntax_child(parameter, 1)), candidate, types)
+        let actual: pointer<SemanticType> = vector_get<pointer<SemanticType>>(arguments, index)
+        if actual == null then
+            if expected->kind != semantic_type_kind_pointer() then
+                return false
+            end
+        else
+            if !semantic_type_equals(expected, actual) then
+                return false
+            end
+        end
+        index = index + 1
+    end
+    return true
+end
+
+fn semantic_bind_argument_once(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    expression: pointer<SyntaxNode>,
+    scope: pointer<Scope>,
+    expected: pointer<SemanticType>,
+    function: pointer<SemanticSymbol>
+) -> pointer<SemanticType>
+    let existing: pointer<SemanticType> = semantic_model_type_of_expression(program, expression)
+    if existing != null then
+        return existing
+    end
+    return semantic_bind_expression(program, module, expression, scope, expected, function)
+end
+
+fn semantic_validate_overload_declarations(program: pointer<SemanticProgram>) -> void
+    @mut let module_index: int = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        @mut let class_index: int = 0
+        while class_index < syntax_child_count(module->unit) do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, class_index)
+            if declaration->kind == syntax_kind_class_declaration() then
+                let members: pointer<Scope> = semantic_model_class_scope(program, declaration)
+                @mut let index: int = 0
+                while index < scope_declared_symbol_count(members) do
+                    let current: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+                    if current->kind == semantic_symbol_kind_method() || current->kind == semantic_symbol_kind_constructor() then
+                        @mut let previous: int = 0
+                        @mut let duplicate: boolean = false
+                        while previous < index && !duplicate do
+                            let other: pointer<SemanticSymbol> = scope_declared_symbol(members, previous)
+                            if current->kind == other->kind && (current->kind == semantic_symbol_kind_constructor() || current->name == other->name) then
+                                duplicate = semantic_callable_signatures_equal(program, current, other)
+                            end
+                            previous = previous + 1
+                        end
+                        if duplicate then
+                            semantic_report(program, module, "SOL-S073", "Duplicate callable parameter signature for '" + current->name + "'. Return types and constructor labels do not distinguish overloads.", current->declaration)
+                        end
+                    end
+                    index = index + 1
+                end
+            end
+            class_index = class_index + 1
+        end
+        module_index = module_index + 1
+    end
+    return
+end
+
+fn semantic_callable_signatures_equal(
+    program: pointer<SemanticProgram>,
+    left: pointer<SemanticSymbol>,
+    right: pointer<SemanticSymbol>
+) -> boolean
+    if semantic_symbol_type_parameter_count(left) != semantic_symbol_type_parameter_count(right) then
+        return false
+    end
+    let count: int = semantic_direct_child_count(left->declaration, syntax_kind_parameter())
+    if count != semantic_direct_child_count(right->declaration, syntax_kind_parameter()) then
+        return false
+    end
+    @mut let index: int = 0
+    while index < count do
+        let left_parameter: pointer<SyntaxNode> = semantic_direct_child(left->declaration, syntax_kind_parameter(), index)
+        let right_parameter: pointer<SyntaxNode> = semantic_direct_child(right->declaration, syntax_kind_parameter(), index)
+        if !semantic_signature_types_equal(semantic_model_type_of_reference(program, syntax_child(left_parameter, 1)), semantic_model_type_of_reference(program, syntax_child(right_parameter, 1)), left, right) then
+            return false
+        end
+        index = index + 1
+    end
+    return true
+end
+
+fn semantic_signature_types_equal(
+    left: pointer<SemanticType>,
+    right: pointer<SemanticType>,
+    left_owner: pointer<SemanticSymbol>,
+    right_owner: pointer<SemanticSymbol>
+) -> boolean
+    if left == null || right == null then
+        return false
+    end
+    if left->kind != right->kind || left->kind == semantic_type_kind_error() then
+        return false
+    end
+    if left->kind == semantic_type_kind_type_parameter() then
+        @mut let index: int = 0
+        while index < semantic_symbol_type_parameter_count(left_owner) do
+            if semantic_symbol_type_parameter(left_owner, index)->declaration == left->identity then
+                return semantic_symbol_type_parameter(right_owner, index)->declaration == right->identity
+            end
+            index = index + 1
+        end
+        return false
+    end
+    if left->kind == semantic_type_kind_pointer() then
+        return semantic_signature_types_equal(left->element_type, right->element_type, left_owner, right_owner)
+    end
+    if left->kind == semantic_type_kind_struct() then
+        if left->identity != right->identity || semantic_type_argument_count(left) != semantic_type_argument_count(right) then
+            return false
+        end
+        @mut let index: int = 0
+        while index < semantic_type_argument_count(left) do
+            if !semantic_signature_types_equal(semantic_type_argument(left, index), semantic_type_argument(right, index), left_owner, right_owner) then
+                return false
+            end
+            index = index + 1
+        end
+        return true
+    end
+    return semantic_type_equals(left, right)
+end
+
+fn semantic_validate_constructor_delegations(program: pointer<SemanticProgram>) -> void
+    @mut let module_index: int = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        @mut let class_index: int = 0
+        while class_index < syntax_child_count(module->unit) do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, class_index)
+            if declaration->kind == syntax_kind_class_declaration() then
+                let members: pointer<Scope> = semantic_model_class_scope(program, declaration)
+                let count: int = scope_constructor_count(members)
+                @mut let index: int = 0
+                while index < count do
+                    let constructor: pointer<SemanticSymbol> = scope_constructor(members, index)
+                    let calls: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+                    semantic_collect_delegations(semantic_function_body(constructor->declaration), calls)
+                    if vector_length<pointer<SyntaxNode>>(calls) > 1 then
+                        semantic_report(program, module, "SOL-S075", "A constructor may delegate only once.", vector_get<pointer<SyntaxNode>>(calls, 1))
+                    end
+                    if vector_length<pointer<SyntaxNode>>(calls) > 0 then
+                        let first: pointer<SyntaxNode> = vector_get<pointer<SyntaxNode>>(calls, 0)
+                        @mut let target: pointer<SemanticSymbol> = semantic_model_called_constructor(program, first)
+                        @mut let steps: int = 0
+                        while target != null && target != constructor && steps < count do
+                            target = semantic_constructor_delegation_target(program, target)
+                            steps = steps + 1
+                        end
+                        if target == constructor then
+                            semantic_report(program, module, "SOL-S076", "Constructor delegation cycle in class '" + constructor->owner->name + "'.", first)
+                        end
+                    end
+                    destroy_vector<pointer<SyntaxNode>>(calls)
+                    index = index + 1
+                end
+            end
+            class_index = class_index + 1
+        end
+        module_index = module_index + 1
+    end
+    return
+end
+
+fn semantic_collect_delegations(node: pointer<SyntaxNode>, calls: pointer<Vector<pointer<SyntaxNode>>>) -> void
+    if node == null then
+        return
+    end
+    if node->kind == syntax_kind_call_expression() then
+        let callee: pointer<SyntaxNode> = syntax_child(node, 0)
+        if callee->kind == syntax_kind_name_expression() && callee->text == "this" then
+            vector_push<pointer<SyntaxNode>>(calls, node)
+        end
+    end
+    @mut let index: int = 0
+    while index < syntax_child_count(node) do
+        semantic_collect_delegations(syntax_child(node, index), calls)
+        index = index + 1
+    end
+    return
+end
+
+fn semantic_constructor_delegation_target(program: pointer<SemanticProgram>, constructor: pointer<SemanticSymbol>) -> pointer<SemanticSymbol>
+    let calls: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+    semantic_collect_delegations(semantic_function_body(constructor->declaration), calls)
+    @mut let target: pointer<SemanticSymbol> = null
+    if vector_length<pointer<SyntaxNode>>(calls) > 0 then
+        target = semantic_model_called_constructor(program, vector_get<pointer<SyntaxNode>>(calls, 0))
+    end
+    destroy_vector<pointer<SyntaxNode>>(calls)
+    return target
 end
 
 fn semantic_method_is_accessible(
@@ -4079,7 +4407,7 @@ fn semantic_bind_call_values_without_target(
     let count: int = semantic_call_value_count(call)
 
     while index < count do
-        semantic_bind_expression(
+        semantic_bind_argument_once(
             program,
             module,
             semantic_call_value(call, index),
