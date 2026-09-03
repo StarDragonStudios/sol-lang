@@ -65,10 +65,12 @@ fn analyze_source_modules(
     semantic_predeclare_all(program, syntax_kind_struct_declaration())
     semantic_predeclare_all(program, syntax_kind_function_declaration())
     semantic_resolve_all_injections(program)
+    semantic_bind_class_bases(program)
     semantic_bind_all_class_scopes(program)
     semantic_bind_all_structs(program)
     semantic_validate_all_struct_layouts(program)
     semantic_bind_all_function_signatures(program)
+    semantic_validate_inherited_members(program)
     semantic_validate_overload_declarations(program)
     semantic_resolve_entry_point(program)
     semantic_bind_all_function_bodies(program)
@@ -76,6 +78,187 @@ fn analyze_source_modules(
     semantic_validate_generic_instantiations(program)
     semantic_finish_program(program)
     return program
+end
+
+fn semantic_lookup_type_symbol(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, reference: pointer<SyntaxNode>) -> pointer<SemanticSymbol>
+    let names: int = semantic_direct_child_count(reference, syntax_kind_name())
+    if names > 1 then
+        if names != 2 then
+            return null
+        end
+        let qualifier: pointer<SemanticSymbol> = scope_lookup_local(module->scope, semantic_direct_child(reference, syntax_kind_name(), 0)->text)
+        if qualifier == null then
+            return null
+        end
+        if qualifier->kind != semantic_symbol_kind_module_namespace() then
+            return null
+        end
+        return semantic_module_export(program, semantic_namespace_target(program, qualifier), semantic_direct_child(reference, syntax_kind_name(), 1)->text)
+    end
+    return scope_lookup_local(module->scope, reference->text)
+end
+
+fn semantic_bind_class_bases(program: pointer<SemanticProgram>) -> void
+    let classes: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    @mut let module_index: int = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        @mut let index: int = 0
+        while index < syntax_child_count(module->unit) do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, index)
+            if declaration->kind == syntax_kind_class_declaration() && semantic_model_declared_symbol(program, declaration) != null then
+                let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+                vector_push<pointer<SemanticSymbol>>(classes, symbol)
+                let clause: pointer<SyntaxNode> = semantic_direct_child(declaration, syntax_kind_class_base_clause(), 0)
+                if clause != null then
+                    let type: pointer<SemanticType> = semantic_resolve_type_reference(program, module, syntax_child(clause, 0), symbol)
+                    if type->kind != semantic_type_kind_error() then
+                        if symbol->kind != semantic_symbol_kind_class() || type->kind != semantic_type_kind_class() then
+                            semantic_report(program, module, "SOL-S077", "A class base must be a class; interfaces cannot use '<<'.", clause)
+                        else
+                            let base: pointer<SemanticSymbol> = semantic_object_symbol_for_type(program, type)
+                            if semantic_symbol_visibility(base) == semantic_visibility_private() && semantic_module_for_declaration(program, base->declaration) != module then
+                                semantic_report(program, module, "SOL-S077", "A private class cannot be inherited outside its module.", clause)
+                            else
+                                symbol->base_class = base
+                            end
+                        end
+                    end
+                end
+            end
+            index = index + 1
+        end
+        module_index = module_index + 1
+    end
+    let cyclic: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    @mut let index: int = 0
+    let count: int = vector_length<pointer<SemanticSymbol>>(classes)
+    while index < count do
+        let symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(classes, index)
+        @mut let base: pointer<SemanticSymbol> = symbol->base_class
+        @mut let steps: int = 0
+        while base != null && base != symbol && steps < count do
+            base = base->base_class
+            steps = steps + 1
+        end
+        if base == symbol then
+            semantic_report(program, semantic_module_for_declaration(program, symbol->declaration), "SOL-S078", "Class inheritance cycle involving '" + symbol->name + "'.", semantic_direct_child(symbol->declaration, syntax_kind_class_base_clause(), 0))
+            vector_push<pointer<SemanticSymbol>>(cyclic, symbol)
+        end
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<SemanticSymbol>>(cyclic) do
+        vector_get<pointer<SemanticSymbol>>(cyclic, index)->base_class = null
+        index = index + 1
+    end
+    destroy_vector<pointer<SemanticSymbol>>(cyclic)
+    destroy_vector<pointer<SemanticSymbol>>(classes)
+    return
+end
+
+fn semantic_class_derives_from(type: pointer<SemanticSymbol>, base: pointer<SemanticSymbol>) -> boolean
+    @mut let current: pointer<SemanticSymbol> = type
+    while current != null do
+        if current == base then
+            return true
+        end
+        current = current->base_class
+    end
+    return false
+end
+
+fn semantic_inherited_field(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, name: string) -> pointer<SemanticSymbol>
+    @mut let current: pointer<SemanticSymbol> = type
+    while current != null do
+        let field: pointer<SemanticSymbol> = scope_lookup_class_field(semantic_model_class_scope(program, current->declaration), name)
+        if field != null then
+            return field
+        end
+        current = current->base_class
+    end
+    return null
+end
+
+fn semantic_class_methods(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, name: string) -> pointer<Vector<pointer<SemanticSymbol>>>
+    let result: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+    @mut let current: pointer<SemanticSymbol> = type
+    while current != null do
+        let members: pointer<Scope> = semantic_model_class_scope(program, current->declaration)
+        @mut let index: int = 0
+        while index < scope_class_method_count(members, name) do
+            let method: pointer<SemanticSymbol> = scope_class_method(members, name, index)
+            if current == type || semantic_symbol_visibility(method) != semantic_visibility_private() then
+                @mut let hidden: boolean = false
+                @mut let found: int = 0
+                while found < vector_length<pointer<SemanticSymbol>>(result) && !hidden do
+                    let previous: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(result, found)
+                    if previous->owner != current then
+                        hidden = semantic_callable_signatures_equal(program, previous, method)
+                    end
+                    found = found + 1
+                end
+                if !hidden then
+                    vector_push<pointer<SemanticSymbol>>(result, method)
+                end
+            end
+            index = index + 1
+        end
+        current = current->base_class
+    end
+    return result
+end
+
+fn semantic_validate_inherited_members(program: pointer<SemanticProgram>) -> void
+    @mut let module_index: int = 0
+    while module_index < semantic_program_module_count(program) do
+        let module: pointer<SemanticModule> = semantic_program_module_at(program, module_index)
+        @mut let class_index: int = 0
+        while class_index < syntax_child_count(module->unit) do
+            let declaration: pointer<SyntaxNode> = syntax_child(module->unit, class_index)
+            if declaration->kind == syntax_kind_class_declaration() then
+                let type: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+                let members: pointer<Scope> = semantic_model_class_scope(program, declaration)
+                @mut let index: int = 0
+                while index < scope_declared_symbol_count(members) do
+                    let member: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+                    if member->kind == semantic_symbol_kind_class_field() && semantic_inherited_field(program, type->base_class, member->name) != null then
+                        semantic_report(program, module, "SOL-S079", "Field '" + member->name + "' redeclares an inherited field name.", member->declaration)
+                    end
+                    if member->kind == semantic_symbol_kind_method() then
+                        let inherited: pointer<Vector<pointer<SemanticSymbol>>> = semantic_class_methods(program, type->base_class, member->name)
+                        @mut let found: int = 0
+                        while found < vector_length<pointer<SemanticSymbol>>(inherited) do
+                            let base_method: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(inherited, found)
+                            if semantic_symbol_visibility(base_method) != semantic_visibility_private() && semantic_callable_signatures_equal(program, member, base_method) then
+                                member->overridden_method = base_method
+                            end
+                            found = found + 1
+                        end
+                        destroy_vector<pointer<SemanticSymbol>>(inherited)
+                        let overrides: boolean = semantic_declaration_has_annotation(member->declaration, "override")
+                        if member->overridden_method != null then
+                            let base_method: pointer<SemanticSymbol> = member->overridden_method
+                            if !overrides then
+                                semantic_report(program, module, "SOL-S080", "Overriding an inherited method requires '@override'.", member->declaration)
+                            end
+                            if semantic_symbol_visibility(member) > semantic_symbol_visibility(base_method) || !semantic_signature_types_equal(semantic_model_type_of_reference(program, semantic_function_return_type(member->declaration)), semantic_model_type_of_reference(program, semantic_function_return_type(base_method->declaration)), member, base_method) then
+                                semantic_report(program, module, "SOL-S081", "An override must preserve the exact return type and cannot reduce visibility.", member->declaration)
+                            end
+                        else
+                            if overrides && semantic_direct_child_count(declaration, syntax_kind_class_interface_clause()) == 0 then
+                                semantic_report(program, module, "SOL-S080", "Method marked '@override' has no inherited signature to override.", member->declaration)
+                            end
+                        end
+                    end
+                    index = index + 1
+                end
+            end
+            class_index = class_index + 1
+        end
+        module_index = module_index + 1
+    end
+    return
 end
 
 fn semantic_predeclare_all(program: pointer<SemanticProgram>, kind: int) -> void
@@ -742,6 +925,10 @@ fn semantic_validate_constructor_annotations(
         )
     end
 
+    if semantic_function_body(declaration) == null then
+        semantic_report(program, module, "SOL-S068", "A constructor must have an implementation body.", declaration)
+    end
+
     if semantic_direct_child_count(declaration, syntax_kind_type_parameter()) != 0 then
         semantic_report(
             program,
@@ -1254,6 +1441,11 @@ fn semantic_bind_function_signature(
             receiver
         )
         scope_declare(function_scope, receiver)
+        if function->owner->base_class != null then
+            let base_receiver: pointer<SemanticSymbol> = create_receiver_symbol(function->owner->base_class, declaration)
+            base_receiver->name = "base"
+            scope_declare(function_scope, base_receiver)
+        end
     end
     @mut let parameter_index: int = 0
     let parameter_count: int = semantic_direct_child_count(
@@ -1326,6 +1518,10 @@ fn semantic_bind_function_signature(
         return_reference,
         function
     )
+
+    if return_type->kind == semantic_type_kind_class() || return_type->kind == semantic_type_kind_interface() then
+        semantic_report(program, module, "SOL-S086", "Object return types must use pointer<Class>; direct-instance returns are not supported.", return_reference)
+    end
 
     if function->kind == semantic_symbol_kind_constructor() && return_type->kind != semantic_type_kind_error() && return_type->name != "void" then
         semantic_report(
@@ -1499,10 +1695,7 @@ fn semantic_resolve_type_reference(
         return primitive
     end
 
-    @mut let declared: pointer<SemanticSymbol> = scope_lookup_local(
-        module->scope,
-        reference->text
-    )
+    @mut let declared: pointer<SemanticSymbol> = semantic_lookup_type_symbol(program, module, reference)
 
     if declared != null then
         if declared->kind == semantic_symbol_kind_imported_name() then
@@ -2485,7 +2678,7 @@ fn semantic_bind_variable(
         )
     end
 
-    if semantic_types_are_incompatible(declared_type, initializer_type) then
+    if semantic_types_are_incompatible(declared_type, initializer_type) && !semantic_class_pointer_upcast(program, declared_type, initializer_type) then
         semantic_report(
             program,
             module,
@@ -2601,7 +2794,7 @@ fn semantic_bind_assignment(
         end
     end
 
-    if semantic_types_are_incompatible(target_type, value_type) then
+    if semantic_types_are_incompatible(target_type, value_type) && !semantic_class_pointer_upcast(program, target_type, value_type) then
         semantic_report(
             program,
             module,
@@ -2655,6 +2848,8 @@ fn semantic_bind_field_assignment(
         function
     )
 
+    semantic_validate_class_field_reconstruction(program, module, target_type, value, value_type)
+
     if root == null && !mutates_object_state then
         semantic_report(
             program,
@@ -2665,7 +2860,7 @@ fn semantic_bind_field_assignment(
         )
     else
         if mutates_object_state then
-            if semantic_types_are_incompatible(target_type, value_type) then
+            if semantic_types_are_incompatible(target_type, value_type) && !semantic_class_pointer_upcast(program, target_type, value_type) then
                 semantic_report(
                     program,
                     module,
@@ -2709,7 +2904,7 @@ fn semantic_bind_field_assignment(
         end
     end
 
-    if semantic_types_are_incompatible(target_type, value_type) then
+    if semantic_types_are_incompatible(target_type, value_type) && !semantic_class_pointer_upcast(program, target_type, value_type) then
         semantic_report(
             program,
             module,
@@ -2747,7 +2942,9 @@ fn semantic_bind_pointer_field_assignment(
         function
     )
 
-    if semantic_types_are_incompatible(target_type, value_type) then
+    semantic_validate_class_field_reconstruction(program, module, target_type, value, value_type)
+
+    if semantic_types_are_incompatible(target_type, value_type) && !semantic_class_pointer_upcast(program, target_type, value_type) then
         semantic_report(
             program,
             module,
@@ -3278,6 +3475,13 @@ fn semantic_bind_call_expression(
 
 
         if callee->text == "base" && active_function != null && active_function->kind == semantic_symbol_kind_constructor() then
+            if active_function->owner->base_class != null then
+                let delegated: pointer<SemanticType> = semantic_bind_constructor_invocation(program, module, call, active_function->owner->base_class, scope, active_function)
+                if delegated->kind == semantic_type_kind_error() then
+                    return delegated
+                end
+                return type_catalog_lookup(program->catalog, "void")
+            end
             semantic_report(
                 program,
                 module,
@@ -3548,7 +3752,7 @@ fn semantic_constructed_class_of(
     end
     if expression->kind == syntax_kind_call_expression() then
         let callee: pointer<SyntaxNode> = syntax_child(expression, 0)
-        if callee->kind == syntax_kind_name_expression() && callee->text == "this" then
+        if callee->kind == syntax_kind_name_expression() && (callee->text == "this" || callee->text == "base") then
             return null
         end
     end
@@ -3570,158 +3774,231 @@ fn semantic_constructed_class_of(
     return null
 end
 
-fn semantic_validate_constructor_initialization(
-    program: pointer<SemanticProgram>,
-    module: pointer<SemanticModule>,
-    constructor: pointer<SemanticSymbol>,
-    body: pointer<SyntaxNode>
-) -> void
-    let member_scope: pointer<Scope> = semantic_model_class_scope(
-        program,
-        constructor->owner->declaration
-    )
+struct SemanticConstructorFlow
+    constructor: pointer<SemanticSymbol>
+    fields: pointer<Vector<pointer<SemanticSymbol>>>
+    ready: boolean
+    delegated: boolean
+    reachable: boolean
+end
+
+fn semantic_create_constructor_flow(constructor: pointer<SemanticSymbol>) -> pointer<SemanticConstructorFlow>
+    let flow: pointer<SemanticConstructorFlow> = memory::allocate<SemanticConstructorFlow>(1)
+    flow->constructor = constructor
+    flow->fields = create_vector<pointer<SemanticSymbol>>()
+    flow->ready = constructor->owner->base_class == null
+    flow->delegated = false
+    flow->reachable = true
+    return flow
+end
+
+fn semantic_clone_constructor_flow(flow: pointer<SemanticConstructorFlow>) -> pointer<SemanticConstructorFlow>
+    let copy: pointer<SemanticConstructorFlow> = semantic_create_constructor_flow(flow->constructor)
+    copy->ready = flow->ready
+    copy->delegated = flow->delegated
+    copy->reachable = flow->reachable
     @mut let index: int = 0
-    let count: int = scope_declared_symbol_count(member_scope)
-
-    while index < count do
-        let field: pointer<SemanticSymbol> = scope_declared_symbol(
-            member_scope,
-            index
-        )
-
-        if field->kind == semantic_symbol_kind_class_field() then
-            if !semantic_constructor_block_initializes_field(
-                program,
-                module,
-                body,
-                field,
-                false
-            ) then
-                semantic_report(
-                    program,
-                    module,
-                    "SOL-S071",
-                    "Constructor for class '" + constructor->owner->name + "' does not initialize field '" + field->name + "' on every normal path.",
-                    constructor->declaration
-                )
-            end
-        end
-
+    while index < vector_length<pointer<SemanticSymbol>>(flow->fields) do
+        vector_push<pointer<SemanticSymbol>>(copy->fields, vector_get<pointer<SemanticSymbol>>(flow->fields, index))
         index = index + 1
     end
+    return copy
+end
 
+fn semantic_destroy_constructor_flow(flow: pointer<SemanticConstructorFlow>) -> void
+    destroy_vector<pointer<SemanticSymbol>>(flow->fields)
+    memory::free<SemanticConstructorFlow>(flow)
     return
 end
 
-
-fn semantic_constructor_block_initializes_field(
-    program: pointer<SemanticProgram>,
-    module: pointer<SemanticModule>,
-    block: pointer<SyntaxNode>,
-    field: pointer<SemanticSymbol>,
-    initially_initialized: boolean
-) -> boolean
-    @mut let initialized: boolean = initially_initialized
+fn semantic_flow_has_field(flow: pointer<SemanticConstructorFlow>, field: pointer<SemanticSymbol>) -> boolean
     @mut let index: int = 0
-    let count: int = syntax_child_count(block)
-
-    while index < count do
-        let statement: pointer<SyntaxNode> = syntax_child(block, index)
-
-        if semantic_constructor_statement_assigns_field(statement, field->name) then
-            initialized = true
+    while index < vector_length<pointer<SemanticSymbol>>(flow->fields) do
+        if vector_get<pointer<SemanticSymbol>>(flow->fields, index) == field then
+            return true
         end
-
-        if semantic_constructor_statement_delegates(statement) then
-            initialized = true
-        end
-
-        if statement->kind == syntax_kind_conditional_statement() then
-            let then_initialized: boolean = semantic_constructor_block_initializes_field(
-                program,
-                module,
-                syntax_child(statement, 1),
-                field,
-                initialized
-            )
-            @mut let else_initialized: boolean = initialized
-
-            if syntax_child_count(statement) > 2 then
-                else_initialized = semantic_constructor_block_initializes_field(
-                    program,
-                    module,
-                    syntax_child(statement, 2),
-                    field,
-                    initialized
-                )
-            end
-
-            initialized = then_initialized && else_initialized
-        end
-
-        if statement->kind == syntax_kind_while_statement() then
-            semantic_constructor_block_initializes_field(
-                program,
-                module,
-                syntax_child(statement, 1),
-                field,
-                initialized
-            )
-        end
-
-        if statement->kind == syntax_kind_return_statement() then
-            if !initialized then
-                semantic_report(
-                    program,
-                    module,
-                    "SOL-S071",
-                    "Constructor can return before field '" + field->name + "' is initialized.",
-                    statement
-                )
-            end
-
-            return initialized
-        end
-
         index = index + 1
     end
-
-    return initialized
+    return false
 end
 
-fn semantic_constructor_statement_assigns_field(
-    statement: pointer<SyntaxNode>,
-    field_name: string
-) -> boolean
-    if statement->kind != syntax_kind_field_assignment_statement() then
-        return false
+fn semantic_flow_complete(program: pointer<SemanticProgram>, flow: pointer<SemanticConstructorFlow>) -> boolean
+    let members: pointer<Scope> = semantic_model_class_scope(program, flow->constructor->owner->declaration)
+    @mut let index: int = 0
+    while index < scope_declared_symbol_count(members) do
+        let field: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+        if field->kind == semantic_symbol_kind_class_field() && !semantic_flow_has_field(flow, field) then
+            return false
+        end
+        index = index + 1
     end
-
-    let target: pointer<SyntaxNode> = syntax_child(statement, 0)
-
-    if target->kind != syntax_kind_field_access_expression() || target->text != field_name then
-        return false
-    end
-
-    let root: pointer<SyntaxNode> = syntax_child(target, 0)
-    return root->kind == syntax_kind_name_expression() && root->text == "this"
+    return flow->ready
 end
 
-fn semantic_constructor_statement_delegates(
-    statement: pointer<SyntaxNode>
-) -> boolean
-    if statement->kind != syntax_kind_call_statement() then
-        return false
+fn semantic_flow_validate_exit(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, flow: pointer<SemanticConstructorFlow>, node: pointer<SyntaxNode>) -> void
+    if !flow->ready then
+        semantic_report(program, module, "SOL-S083", "Constructor must reach its base or same-class constructor invocation before completing.", node)
     end
-
-    let call: pointer<SyntaxNode> = syntax_child(statement, 0)
-
-    if call->kind != syntax_kind_call_expression() then
-        return false
+    let members: pointer<Scope> = semantic_model_class_scope(program, flow->constructor->owner->declaration)
+    @mut let index: int = 0
+    while index < scope_declared_symbol_count(members) do
+        let field: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+        if field->kind == semantic_symbol_kind_class_field() && !semantic_flow_has_field(flow, field) then
+            semantic_report(program, module, "SOL-S071", "Constructor can complete before field '" + field->name + "' is initialized.", node)
+        end
+        index = index + 1
     end
+    return
+end
 
-    let callee: pointer<SyntaxNode> = syntax_child(call, 0)
-    return callee->kind == syntax_kind_name_expression() && callee->text == "this"
+fn semantic_validate_constructor_initialization(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, constructor: pointer<SemanticSymbol>, body: pointer<SyntaxNode>) -> void
+    let flow: pointer<SemanticConstructorFlow> = semantic_create_constructor_flow(constructor)
+    let calls: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+    semantic_collect_delegations(body, calls)
+    if vector_length<pointer<SyntaxNode>>(calls) != 0 then
+        flow->ready = false
+    end
+    destroy_vector<pointer<SyntaxNode>>(calls)
+    semantic_flow_block(program, module, body, flow, true)
+    if flow->reachable then
+        semantic_flow_validate_exit(program, module, flow, constructor->declaration)
+    end
+    semantic_destroy_constructor_flow(flow)
+    return
+end
+
+fn semantic_flow_expression(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, expression: pointer<SyntaxNode>, flow: pointer<SemanticConstructorFlow>) -> void
+    if semantic_is_current_receiver(program, expression) && !flow->ready then
+        semantic_report(program, module, "SOL-S084", "The instance is unavailable before constructor delegation or base initialization.", expression)
+        return
+    end
+    if expression->kind == syntax_kind_field_access_expression() then
+        let field: pointer<SemanticSymbol> = semantic_model_accessed_field(program, expression)
+        if field != null then
+            if field->owner == flow->constructor->owner && semantic_is_current_receiver(program, syntax_child(expression, 0)) && flow->ready && !semantic_flow_has_field(flow, field) then
+                semantic_report(program, module, "SOL-S085", "Field '" + field->name + "' is read before definite initialization.", expression)
+            end
+        end
+    end
+    if expression->kind == syntax_kind_call_expression() then
+        let callee: pointer<SyntaxNode> = syntax_child(expression, 0)
+        if callee->kind == syntax_kind_field_access_expression() then
+            let receiver: pointer<SyntaxNode> = syntax_child(callee, 0)
+            let receiver_symbol: pointer<SemanticSymbol> = semantic_current_receiver_symbol(program, receiver)
+            if receiver_symbol != null then
+                if receiver_symbol->name == "this" && flow->ready && !semantic_flow_complete(program, flow) then
+                    semantic_report(program, module, "SOL-S085", "Instance methods cannot be called before all own fields are initialized.", expression)
+                end
+            end
+        end
+        if callee->kind == syntax_kind_name_expression() && (callee->text == "this" || callee->text == "base") then
+            semantic_report(program, module, "SOL-S082", "Constructor invocation must be a top-level standalone statement.", expression)
+        end
+    end
+    @mut let index: int = 0
+    while index < syntax_child_count(expression) do
+        semantic_flow_expression(program, module, syntax_child(expression, index), flow)
+        index = index + 1
+    end
+    return
+end
+
+fn semantic_flow_block(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, block: pointer<SyntaxNode>, flow: pointer<SemanticConstructorFlow>, top_level: boolean) -> void
+    @mut let index: int = 0
+    while index < syntax_child_count(block) && flow->reachable do
+        let statement: pointer<SyntaxNode> = syntax_child(block, index)
+        semantic_flow_statement(program, module, statement, flow, top_level)
+        index = index + 1
+    end
+    return
+end
+
+fn semantic_flow_statement(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, statement: pointer<SyntaxNode>, flow: pointer<SemanticConstructorFlow>, top_level: boolean) -> void
+    if statement->kind == syntax_kind_call_statement() then
+        let call: pointer<SyntaxNode> = syntax_child(statement, 0)
+        let callee: pointer<SyntaxNode> = syntax_child(call, 0)
+        if callee->kind == syntax_kind_name_expression() && (callee->text == "this" || callee->text == "base") then
+            if !top_level || flow->delegated then
+                semantic_report(program, module, "SOL-S082", "A constructor invocation must occur once, outside conditionals and loops.", call)
+            end
+            @mut let index: int = 0
+            while index < semantic_call_value_count(call) do
+                semantic_flow_expression(program, module, semantic_call_value(call, index), flow)
+                index = index + 1
+            end
+            flow->delegated = true
+            flow->ready = true
+            if callee->text == "this" then
+                let members: pointer<Scope> = semantic_model_class_scope(program, flow->constructor->owner->declaration)
+                index = 0
+                while index < scope_declared_symbol_count(members) do
+                    let field: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+                    if field->kind == semantic_symbol_kind_class_field() && !semantic_flow_has_field(flow, field) then
+                        vector_push<pointer<SemanticSymbol>>(flow->fields, field)
+                    end
+                    index = index + 1
+                end
+            end
+            return
+        end
+    end
+    if statement->kind == syntax_kind_field_assignment_statement() then
+        let target: pointer<SyntaxNode> = syntax_child(statement, 0)
+        let field: pointer<SemanticSymbol> = semantic_model_accessed_field(program, target)
+        let receiver: pointer<SyntaxNode> = syntax_child(target, 0)
+        semantic_flow_expression(program, module, syntax_child(statement, 1), flow)
+        @mut let own_field: boolean = false
+        if field != null then
+            own_field = field->owner == flow->constructor->owner && semantic_is_current_receiver(program, receiver)
+        end
+        if own_field then
+            semantic_flow_expression(program, module, receiver, flow)
+            if flow->ready && !semantic_flow_has_field(flow, field) then
+                vector_push<pointer<SemanticSymbol>>(flow->fields, field)
+            end
+        else
+            semantic_flow_expression(program, module, target, flow)
+        end
+        return
+    end
+    if statement->kind == syntax_kind_conditional_statement() then
+        semantic_flow_expression(program, module, syntax_child(statement, 0), flow)
+        let left: pointer<SemanticConstructorFlow> = semantic_clone_constructor_flow(flow)
+        let right: pointer<SemanticConstructorFlow> = semantic_clone_constructor_flow(flow)
+        semantic_flow_block(program, module, syntax_child(statement, 1), left, false)
+        if syntax_child_count(statement) > 2 then
+            semantic_flow_block(program, module, syntax_child(statement, 2), right, false)
+        end
+        vector_clear<pointer<SemanticSymbol>>(flow->fields)
+        let members: pointer<Scope> = semantic_model_class_scope(program, flow->constructor->owner->declaration)
+        @mut let index: int = 0
+        while index < scope_declared_symbol_count(members) do
+            let field: pointer<SemanticSymbol> = scope_declared_symbol(members, index)
+            if field->kind == semantic_symbol_kind_class_field() && (!left->reachable || semantic_flow_has_field(left, field)) && (!right->reachable || semantic_flow_has_field(right, field)) then
+                vector_push<pointer<SemanticSymbol>>(flow->fields, field)
+            end
+            index = index + 1
+        end
+        flow->ready = (!left->reachable || left->ready) && (!right->reachable || right->ready)
+        flow->delegated = left->delegated || right->delegated
+        flow->reachable = left->reachable || right->reachable
+        semantic_destroy_constructor_flow(left)
+        semantic_destroy_constructor_flow(right)
+        return
+    end
+    if statement->kind == syntax_kind_while_statement() then
+        semantic_flow_expression(program, module, syntax_child(statement, 0), flow)
+        let loop: pointer<SemanticConstructorFlow> = semantic_clone_constructor_flow(flow)
+        semantic_flow_block(program, module, syntax_child(statement, 1), loop, false)
+        semantic_destroy_constructor_flow(loop)
+        return
+    end
+    semantic_flow_expression(program, module, statement, flow)
+    if statement->kind == syntax_kind_return_statement() then
+        semantic_flow_validate_exit(program, module, flow, statement)
+        flow->reachable = false
+    end
+    return
 end
 
 fn semantic_bind_new_expression(
@@ -3830,7 +4107,14 @@ fn semantic_bind_constructor_invocation(
     @mut let constructor: pointer<SemanticSymbol> = scope_constructor(member_scope, 0)
 
     if constructor_count > 1 then
-        constructor = semantic_select_overload(program, module, expression, member_scope, class_symbol->name, true, scope, active_function)
+        let candidates: pointer<Vector<pointer<SemanticSymbol>>> = create_vector<pointer<SemanticSymbol>>()
+        @mut let index: int = 0
+        while index < constructor_count do
+            vector_push<pointer<SemanticSymbol>>(candidates, scope_constructor(member_scope, index))
+            index = index + 1
+        end
+        constructor = semantic_select_overload(program, module, expression, candidates, class_symbol->name, scope, active_function)
+        destroy_vector<pointer<SemanticSymbol>>(candidates)
     end
 
     if constructor == null then
@@ -3839,7 +4123,8 @@ fn semantic_bind_constructor_invocation(
 
     if !semantic_constructor_is_accessible(
         constructor,
-        semantic_enclosing_class(active_function)
+        semantic_enclosing_class(active_function),
+        expression->kind == syntax_kind_call_expression() && syntax_child(expression, 0)->text == "base"
     ) then
         semantic_report(
             program,
@@ -3883,7 +4168,8 @@ end
 
 fn semantic_constructor_is_accessible(
     constructor: pointer<SemanticSymbol>,
-    current_class: pointer<SemanticSymbol>
+    current_class: pointer<SemanticSymbol>,
+    base_call: boolean
 ) -> boolean
     if constructor == null then
         return false
@@ -3891,6 +4177,10 @@ fn semantic_constructor_is_accessible(
 
     if semantic_symbol_visibility(constructor) == semantic_visibility_public() then
         return true
+    end
+
+    if base_call && semantic_symbol_visibility(constructor) == semantic_visibility_protected() then
+        return semantic_class_derives_from(current_class, constructor->owner)
     end
 
     return current_class == constructor->owner
@@ -4025,16 +4315,11 @@ fn semantic_bind_method_callee(
         program,
         receiver_type
     )
-    let member_scope: pointer<Scope> = semantic_model_class_scope(
-        program,
-        class_symbol->declaration
-    )
-    let method_count: int = scope_class_method_count(
-        member_scope,
-        expression->text
-    )
+    let candidates: pointer<Vector<pointer<SemanticSymbol>>> = semantic_class_methods(program, class_symbol, expression->text)
+    let method_count: int = vector_length<pointer<SemanticSymbol>>(candidates)
 
     if method_count == 0 then
+        destroy_vector<pointer<SemanticSymbol>>(candidates)
         semantic_report(
             program,
             module,
@@ -4045,21 +4330,18 @@ fn semantic_bind_method_callee(
         return null
     end
 
-    @mut let method: pointer<SemanticSymbol> = scope_class_method(
-        member_scope,
-        expression->text,
-        0
-    )
+    @mut let method: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(candidates, 0)
 
     if method_count > 1 then
-        method = semantic_select_overload(program, module, call, member_scope, expression->text, false, scope, active_function)
+        method = semantic_select_overload(program, module, call, candidates, expression->text, scope, active_function)
     end
+    destroy_vector<pointer<SemanticSymbol>>(candidates)
 
     if method == null then
         return null
     end
 
-    if !semantic_method_is_accessible(method, semantic_enclosing_class(active_function)) then
+    if !semantic_object_member_is_accessible(program, method, semantic_enclosing_class(active_function), receiver_expression) then
         semantic_report(
             program,
             module,
@@ -4085,9 +4367,8 @@ fn semantic_select_overload(
     program: pointer<SemanticProgram>,
     module: pointer<SemanticModule>,
     call: pointer<SyntaxNode>,
-    members: pointer<Scope>,
+    candidates: pointer<Vector<pointer<SemanticSymbol>>>,
     name: string,
-    constructors: boolean,
     scope: pointer<Scope>,
     active_function: pointer<SemanticSymbol>
 ) -> pointer<SemanticSymbol>
@@ -4123,16 +4404,10 @@ fn semantic_select_overload(
 
     @mut let selected: pointer<SemanticSymbol> = null
     @mut let matches: int = 0
-    @mut let count: int = scope_class_method_count(members, name)
-    if constructors then
-        count = scope_constructor_count(members)
-    end
+    let count: int = vector_length<pointer<SemanticSymbol>>(candidates)
     index = 0
     while index < count && !invalid do
-        @mut let candidate: pointer<SemanticSymbol> = scope_class_method(members, name, index)
-        if constructors then
-            candidate = scope_constructor(members, index)
-        end
+        let candidate: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(candidates, index)
         if semantic_overload_matches(program, candidate, types, arguments) then
             selected = candidate
             matches = matches + 1
@@ -4381,9 +4656,11 @@ fn semantic_constructor_delegation_target(program: pointer<SemanticProgram>, con
     return target
 end
 
-fn semantic_method_is_accessible(
+fn semantic_object_member_is_accessible(
+    program: pointer<SemanticProgram>,
     method: pointer<SemanticSymbol>,
-    current_class: pointer<SemanticSymbol>
+    current_class: pointer<SemanticSymbol>,
+    receiver: pointer<SyntaxNode>
 ) -> boolean
     if method == null then
         return false
@@ -4393,7 +4670,29 @@ fn semantic_method_is_accessible(
         return true
     end
 
+    if semantic_symbol_visibility(method) == semantic_visibility_protected() then
+        return semantic_class_derives_from(current_class, method->owner) && semantic_is_current_receiver(program, receiver)
+    end
+
     return current_class == method->owner
+end
+
+fn semantic_is_current_receiver(program: pointer<SemanticProgram>, expression: pointer<SyntaxNode>) -> boolean
+    return semantic_current_receiver_symbol(program, expression) != null
+end
+
+fn semantic_current_receiver_symbol(program: pointer<SemanticProgram>, expression: pointer<SyntaxNode>) -> pointer<SemanticSymbol>
+    if expression->kind == syntax_kind_parenthesized_expression() then
+        return semantic_current_receiver_symbol(program, syntax_child(expression, 0))
+    end
+    let symbol: pointer<SemanticSymbol> = semantic_program_symbol_of(program, semantic_binding_kind_resolved_name(), expression)
+    if symbol == null then
+        return null
+    end
+    if symbol->kind == semantic_symbol_kind_receiver() then
+        return symbol
+    end
+    return null
 end
 
 fn semantic_bind_call_values_without_target(
@@ -4770,14 +5069,7 @@ fn semantic_bind_field_access(
             program,
             target_type
         )
-        let member_scope: pointer<Scope> = semantic_model_class_scope(
-            program,
-            class_symbol->declaration
-        )
-        let field: pointer<SemanticSymbol> = scope_lookup_class_field(
-            member_scope,
-            field_name
-        )
+        let field: pointer<SemanticSymbol> = semantic_inherited_field(program, class_symbol, field_name)
 
         if field == null then
             semantic_report(
@@ -4794,7 +5086,7 @@ fn semantic_bind_field_access(
             function
         )
 
-        if !semantic_class_field_is_accessible(field, current_class) then
+        if !semantic_object_member_is_accessible(program, field, current_class, target_expression) then
             semantic_report(
                 program,
                 module,
@@ -4894,19 +5186,26 @@ fn semantic_enclosing_class(
     return null
 end
 
-fn semantic_class_field_is_accessible(
-    field: pointer<SemanticSymbol>,
-    current_class: pointer<SemanticSymbol>
-) -> boolean
-    if field == null then
+fn semantic_validate_class_field_reconstruction(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, target: pointer<SemanticType>, value: pointer<SyntaxNode>, actual: pointer<SemanticType>) -> void
+    if target->kind == semantic_type_kind_class() then
+        if semantic_constructed_class_of(program, value) == null || !semantic_type_equals(target, actual) then
+            semantic_report(program, module, "SOL-S072", "A direct class field requires fresh construction of its exact class type.", value)
+        end
+    end
+    return
+end
+
+fn semantic_class_pointer_upcast(program: pointer<SemanticProgram>, expected: pointer<SemanticType>, actual: pointer<SemanticType>) -> boolean
+    if expected == null || actual == null then
         return false
     end
-
-    if semantic_symbol_visibility(field) == semantic_visibility_public() then
-        return true
+    if expected->kind != semantic_type_kind_pointer() || actual->kind != semantic_type_kind_pointer() then
+        return false
     end
-
-    return current_class == field->owner
+    if expected->element_type->kind != semantic_type_kind_class() || actual->element_type->kind != semantic_type_kind_class() then
+        return false
+    end
+    return semantic_class_derives_from(semantic_object_symbol_for_type(program, actual->element_type), semantic_object_symbol_for_type(program, expected->element_type))
 end
 
 fn semantic_bind_index_expression(
