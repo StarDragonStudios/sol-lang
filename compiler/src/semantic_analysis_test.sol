@@ -66,6 +66,17 @@ fn launch() -> int
         return 49 + constructors
     end
 
+    let overloads: int = test_overload_resolution()
+    if overloads != 0 then
+        console::print_line("semantic analysis test failed: overload resolution")
+        return 170 + overloads
+    end
+    let overload_edges: int = test_overload_edge_cases()
+    if overload_edges != 0 then
+        console::print_line("semantic analysis test failed: overload edge cases")
+        return 180 + overload_edges
+    end
+
     let core: int = test_core_diagnostics()
 
     if core != 0 then
@@ -88,6 +99,102 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_overload_resolution() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "struct Wrap\n    value: int\nend\nclass Choice\n    value: int\n    @constructor\n    fn from_int(value: int) -> void\n        this.value = value\n    end\n    @constructor\n    fn from_string(value: string) -> void\n        this(1)\n    end\n    fn choose(value: int) -> int\n        return value\n    end\n    fn choose(value: string) -> string\n        return value\n    end\n    fn choose(value: Wrap) -> int\n        return value.value\n    end\n    fn take<T>(value: T) -> T\n        return value\n    end\n    fn take<T>(value: pointer<T>) -> T\n        return value[0]\n    end\nend\nfn use() -> void\n    let direct: Choice = Choice(\"text\")\n    let dynamic: pointer<Choice> = new Choice(1)\n    let integer: int = direct.choose(2)\n    let text: string = dynamic->choose(\"value\")\n    let generic: int = direct.take<int>(3)\n    let contextual: int = dynamic->take<int>(null)\n    let wrapped: int = direct.choose(Wrap { value: 4 })\n    return\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("overloads", source, false)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    let body: pointer<SyntaxNode> = semantic_function_body(syntax_child(source.parsed.root, 2))
+    let direct: pointer<SyntaxNode> = syntax_child(syntax_child(body, 0), 2)
+    let dynamic: pointer<SyntaxNode> = syntax_child(syntax_child(body, 1), 2)
+    if failure == 0 && (semantic_model_called_constructor(program, direct)->name != "from_string" || semantic_model_called_constructor(program, dynamic)->name != "from_int") then
+        failure = 3
+    end
+    @mut let index: int = 2
+    while index < 7 && failure == 0 do
+        let call: pointer<SyntaxNode> = syntax_child(syntax_child(body, index), 2)
+        let selected: pointer<SemanticSymbol> = semantic_model_called_function(program, call)
+        @mut let expected_index: int = index - 2
+        if index == 4 then
+            expected_index = 3
+        end
+        if index == 5 then
+            expected_index = 4
+        end
+        if index == 6 then
+            expected_index = 2
+        end
+        if selected == null || selected->index != expected_index then
+            failure = 4
+        end
+        if index == 4 || index == 5 then
+            if semantic_model_call_type_argument_count(program, call) != 1 || semantic_model_call_type_argument(program, call, 0)->name != "int" then
+                failure = 5
+            end
+        end
+        index = index + 1
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    if failure != 0 then
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "class Bad\n    @constructor\n    fn first(value: int) -> void\n        this(\"cycle\")\n    end\n    @constructor\n    fn second(value: string) -> void\n        this(1)\n        this(2)\n    end\n    fn same<T>(value: pointer<T>) -> void\n        return\n    end\n    fn same<U>(value: pointer<U>) -> int\n        return 0\n    end\n    fn pick(value: pointer<int>) -> void\n        return\n    end\n    fn pick(value: pointer<string>) -> void\n        return\n    end\n    @private\n    fn hidden(value: int) -> void\n        return\n    end\n    fn hidden(value: string) -> void\n        return\n    end\nend\nclass Duplicate\n    @constructor\n    fn one() -> void\n        return\n    end\n    @constructor\n    fn two() -> void\n        return\n    end\nend\nfn invalid(object: pointer<Bad>) -> void\n    object->pick(null)\n    object->pick(true)\n    object->hidden(1)\n    let bad: pointer<Bad> = new Bad(false)\n    return\nend"
+    )
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 6
+    end
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze("invalid.overloads", invalid, false)
+    if !semantic_test_has_code(invalid_program, "SOL-S073") || !semantic_test_has_code(invalid_program, "SOL-S074") || !semantic_test_has_code(invalid_program, "SOL-S065") || !semantic_test_has_code(invalid_program, "SOL-S066") || !semantic_test_has_code(invalid_program, "SOL-S075") || !semantic_test_has_code(invalid_program, "SOL-S076") then
+        failure = 7
+    end
+    if semantic_test_code_count(invalid_program, "SOL-S073") != 2 || semantic_test_code_count(invalid_program, "SOL-S076") != 2 || semantic_test_code_count(invalid_program, "SOL-S075") != 1 || semantic_test_code_count(invalid_program, "SOL-S074") != 2 || semantic_test_code_count(invalid_program, "SOL-S065") != 1 || semantic_test_has_code(invalid_program, "SOL-S043") then
+        failure = 8
+    end
+    let duplicate: pointer<SyntaxNode> = semantic_direct_child(syntax_child(invalid.parsed.root, 0), syntax_kind_function_declaration(), 3)
+    if !semantic_test_code_has_span(invalid_program, "SOL-S073", duplicate->span.start.offset, duplicate->span.end_position.offset) then
+        failure = 9
+    end
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
+end
+
+fn test_overload_edge_cases() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "class Access\n    @private\n    @constructor\n    fn hidden(value: int) -> void\n        return\n    end\n    @constructor\n    fn visible(value: string) -> void\n        return\n    end\n    fn mix<T>(first: T, second: int) -> void\n        return\n    end\n    fn mix<U>(first: int, second: U) -> void\n        return\n    end\n    fn pointer(value: pointer<int>) -> void\n        return\n    end\n    fn pointer(value: pointer<string>) -> void\n        return\n    end\nend\nfn invalid(object: pointer<Access>) -> void\n    object->mix<int>(1, 2)\n    object->mix<int, int>(1, 2)\n    object->pointer(null)\n    let hidden: pointer<Access> = new Access(1)\n    let direct: Access = new Access(\"heap\")\n    @mut let fresh: Access = Access(\"direct\")\n    fresh = new Access(\"heap\")\n    return\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("overload.edges", source, false)
+    @mut let failure: int = 0
+    if !semantic_test_has_code(program, "SOL-S065") || !semantic_test_has_code(program, "SOL-S074") || !semantic_test_has_code(program, "SOL-S070") || !semantic_test_has_code(program, "SOL-S007") || !semantic_test_has_code(program, "SOL-S072") || semantic_test_has_code(program, "SOL-S043") then
+        failure = 2
+    end
+    let class_declaration: pointer<SyntaxNode> = syntax_child(source.parsed.root, 0)
+    let first: pointer<SyntaxNode> = semantic_direct_child(class_declaration, syntax_kind_function_declaration(), 2)
+    let second: pointer<SyntaxNode> = semantic_direct_child(class_declaration, syntax_kind_function_declaration(), 3)
+    if semantic_callable_signatures_equal(program, semantic_model_declared_symbol(program, first), semantic_model_declared_symbol(program, second)) then
+        failure = 3
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    return failure
 end
 
 fn test_constructors_and_initialization() -> int
@@ -154,7 +261,12 @@ fn test_constructors_and_initialization() -> int
         false
     )
 
-    if delegated_program == null || !semantic_program_successful(delegated_program) then
+    if delegated_program == null || !semantic_test_has_code(delegated_program, "SOL-S076") then
+        failure = 6
+    end
+    let delegated_constructor: pointer<SyntaxNode> = semantic_direct_child(syntax_child(delegated.parsed.root, 0), syntax_kind_function_declaration(), 0)
+    let delegation: pointer<SyntaxNode> = syntax_child(syntax_child(semantic_function_body(delegated_constructor), 0), 0)
+    if !semantic_test_code_has_span(delegated_program, "SOL-S076", delegation->span.start.offset, delegation->span.end_position.offset) then
         failure = 6
     end
 
@@ -275,7 +387,7 @@ fn test_instance_methods_and_receivers() -> int
         false
     )
 
-    if invalid_program == null || !semantic_test_has_code(invalid_program, "SOL-S059") || !semantic_test_has_code(invalid_program, "SOL-S060") || !semantic_test_has_code(invalid_program, "SOL-S061") || !semantic_test_has_code(invalid_program, "SOL-S062") || !semantic_test_has_code(invalid_program, "SOL-S063") || !semantic_test_has_code(invalid_program, "SOL-S064") || !semantic_test_has_code(invalid_program, "SOL-S065") || !semantic_test_has_code(invalid_program, "SOL-S066") then
+    if invalid_program == null || !semantic_test_has_code(invalid_program, "SOL-S059") || !semantic_test_has_code(invalid_program, "SOL-S060") || !semantic_test_has_code(invalid_program, "SOL-S061") || !semantic_test_has_code(invalid_program, "SOL-S062") || !semantic_test_has_code(invalid_program, "SOL-S063") || !semantic_test_has_code(invalid_program, "SOL-S064") || !semantic_test_has_code(invalid_program, "SOL-S066") then
         failure = 8
     end
 

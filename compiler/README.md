@@ -290,23 +290,33 @@ their enclosing variable binding still follows its independent rebinding rule.
 Instance-method scopes contain an explicit `this` symbol and inherit lexical
 module names, never class members. Field and method selection therefore requires
 `this.`, `.`, or `->`; unqualified names cannot implicitly capture members.
-Unambiguous method calls bind their selected method and preserve private static
-versus public/protected virtual classification. Exact overload selection is
-staged for #136.
+Method calls bind their selected overload and preserve private static versus
+public/protected virtual classification. Overloads use exact parameter types,
+argument count and explicit generic arguments, with no conversion ranking or
+return-type selection. Generic duplicate signatures compare type parameters by
+position, not spelling. Contextual `null` matches pointer parameters; multiple
+matching pointer overloads are ambiguous. Candidate probing binds each ordinary
+argument once and supplies null's context only after selecting a unique target.
 Constructors are distinct, non-virtual class members selected through
 `Class(args)`, `new Class(args)`, or same-class `this(args)` delegation; their
 source function names are labels rather than callable methods. Direct
 construction produces a noncopyable class value, while `new` produces an owned
 raw `pointer<Class>`. There is no implicit constructor. The analyzer currently
-requires one unambiguous constructor, validates arguments and visibility, and
-requires every own field to be initialized on every normal path. Constructor
-overload selection and delegation-cycle checks remain staged for #136, while
-base-chain validation remains staged for #137.
+selects one exact constructor overload, validates arguments and visibility, and
+requires every own field to be initialized on every normal path. Constructors
+cannot accept generic arguments. Same-class delegation cannot repeat or form
+direct/indirect cycles; `this(...)` produces `void`, not a fresh class value.
+Neither delegation nor `new` can initialize/reconstruct a direct class binding.
+Inherited overload lookup, base-chain and early-instance validation remain staged
+for #137.
 Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
 the released `SOL-S001` through `SOL-S047` catalog and extend it with staged
-class, field, method, receiver and constructor validation through `SOL-S072`. They are ordered by module and
+class, field, method, receiver and constructor validation through `SOL-S076`.
+`SOL-S065` now identifies ambiguous exact overloads; `SOL-S073`–`SOL-S076`
+identify duplicate signatures, no matching overload, repeated delegation and
+delegation cycles respectively. They are ordered by module and
 half-open source span.
 
 `compiler/src/semantic_foundation_test.sol` validates the lower-level catalog,
