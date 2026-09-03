@@ -793,6 +793,49 @@ fn semantic_model_base_receiver(program: pointer<SemanticProgram>, declaration: 
     return scope_lookup_local(semantic_model_function_scope(program, declaration), "base")
 end
 
+fn semantic_model_interface_count(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>) -> int
+    let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+    if symbol == null then
+        return 0
+    end
+    if symbol->interfaces == null then
+        return 0
+    end
+    return vector_length<pointer<SemanticSymbol>>(symbol->interfaces)
+end
+
+fn semantic_model_interface(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>, index: int) -> pointer<SemanticSymbol>
+    if index < 0 || index >= semantic_model_interface_count(program, declaration) then
+        return null
+    end
+    return vector_get<pointer<SemanticSymbol>>(semantic_model_declared_symbol(program, declaration)->interfaces, index)
+end
+
+fn semantic_model_requirement_count(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>) -> int
+    let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+    if symbol == null then
+        return 0
+    end
+    if symbol->requirements == null then
+        return 0
+    end
+    return vector_length<pointer<SemanticSymbol>>(symbol->requirements)
+end
+
+fn semantic_model_requirement(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>, index: int) -> pointer<SemanticSymbol>
+    if index < 0 || index >= semantic_model_requirement_count(program, declaration) then
+        return null
+    end
+    return vector_get<pointer<SemanticSymbol>>(semantic_model_declared_symbol(program, declaration)->requirements, index)
+end
+
+fn semantic_model_requirement_implementation(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>, index: int) -> pointer<SemanticSymbol>
+    if index < 0 || index >= semantic_model_requirement_count(program, declaration) then
+        return null
+    end
+    return vector_get<pointer<SemanticSymbol>>(semantic_model_declared_symbol(program, declaration)->implementations, index)
+end
+
 fn semantic_model_accessed_method(
     program: pointer<SemanticProgram>,
     expression: pointer<SyntaxNode>

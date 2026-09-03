@@ -255,7 +255,10 @@ frontend; the representation can be replaced without changing the lookup API.
 
 Ownership is explicit. A scope owns every successfully declared symbol, and a
 symbol owns its child symbols and constructed semantic type. Base-class and
-overridden-method links are borrowed, never additional owners. The type catalog
+overridden-method links are borrowed, never additional owners. Class/interface
+symbols own their interface, requirement and implementation vectors, but borrow
+the symbols stored in them. Non-object symbols allocate none of these vectors.
+The type catalog
 owns its canonical primitive and error types. Parent scopes, syntax
 declarations, symbol owners, pointer element types and generic type arguments
 are borrowed. Consequently, child scopes must be destroyed before parents, the
@@ -332,20 +335,47 @@ matching stays exact, requiring callers to create the typed view first.
 Object returns must use pointer types, even when the returned expression would
 construct a fresh instance. Direct class fields also require fresh exact-class
 construction rather than copying an existing instance or storing a pointer.
-Interface requirements, abstract completeness and the remaining top-level type
-API visibility rules continue in #138; executable layout/dispatch remain in
-#139–#142.
+Abstract classes and interfaces accumulate exact bodyless requirements. Interface
+diamonds unify equivalent signatures and reject conflicting returns; concrete
+classes must provide all inherited implementations. Compatible inherited public
+methods can satisfy interface contracts without redeclaration. Implementations
+declared locally require `@override`. Abstract methods cannot be private;
+interfaces permit only public bodyless methods, not default implementations.
+Abstract classes cannot be constructed directly or with `new`, but their
+constructors remain available to valid `base(...)`/`this(...)` delegation.
+`base.method()` cannot select a bodyless requirement.
+
+Interface inheritance is validated for category, duplicate edges and cycles.
+The semantic model exposes direct interfaces, unified requirements and aligned
+implementation mappings; abstract/interface entries may have null implementations.
+Static lookup includes inherited requirements, and pointer views may upcast from
+classes to implemented interfaces or from interfaces to their ancestors. Call
+arguments still require an explicitly typed view first.
+
+Qualified object type names are supported in signatures, nested pointer/generic
+references and `new`, as well as class headers. Private types are module-local;
+protected types may be named externally only in inheritance/implementation
+headers and the corresponding subclass/implementation context. Public signatures
+and fields cannot expose non-public object types, including nested generic
+arguments or inherited public members. Wildcard injection omits private object
+types; explicit private imports are rejected. Procedural native `@fn` declarations
+retain their existing meaning. Executable layout, interface representation and
+dispatch remain in #139–#142.
 Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
 the released `SOL-S001` through `SOL-S047` catalog and extend it with staged
-class, field, method, receiver and constructor validation through `SOL-S086`.
+class, field, method, receiver and constructor validation through `SOL-S095`.
 `SOL-S065` now identifies ambiguous exact overloads; `SOL-S073`–`SOL-S076`
 identify duplicate signatures, no matching overload, repeated delegation and
 delegation cycles respectively. `SOL-S077`–`SOL-S085` cover invalid/cyclic bases,
 inherited field hiding, invalid overrides, constructor invocation placement,
 missing base initialization, early instance access and uninitialized reads.
 `SOL-S086` rejects direct object return types.
+`SOL-S087`–`SOL-S095` cover invalid abstract/interface methods, invalid interface
+lists, interface cycles, incompatible requirements/implementations, incomplete
+concrete classes, inaccessible object types, abstract construction, bodyless
+base calls and non-public types exposed by public APIs.
 They are ordered by module and
 half-open source span.
 
