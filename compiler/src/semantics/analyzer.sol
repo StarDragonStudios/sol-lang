@@ -563,6 +563,147 @@ fn semantic_bind_class_scope(
         symbol,
         member_scope
     )
+    semantic_predeclare_class_methods(
+        program,
+        module,
+        declaration,
+        symbol,
+        member_scope
+    )
+    return
+end
+
+fn semantic_predeclare_class_methods(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    declaration: pointer<SyntaxNode>,
+    class_symbol: pointer<SemanticSymbol>,
+    member_scope: pointer<Scope>
+) -> void
+    @mut let index: int = 0
+    @mut let method_index: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let method_declaration: pointer<SyntaxNode> = syntax_child(
+            declaration,
+            index
+        )
+
+        if method_declaration->kind == syntax_kind_function_declaration() && !semantic_declaration_has_annotation(method_declaration, "constructor") then
+            let method: pointer<SemanticSymbol> = create_method_symbol(
+                class_symbol,
+                method_declaration,
+                method_index
+            )
+
+            if method != null then
+                semantic_program_record_symbol(
+                    program,
+                    semantic_binding_kind_declared_symbol(),
+                    method_declaration,
+                    method
+                )
+                semantic_record_child_symbols(program, method)
+                scope_declare_member(member_scope, method)
+                semantic_validate_method_annotations(
+                    program,
+                    module,
+                    method_declaration
+                )
+
+                if method->name == "this" || method->name == "base" then
+                    semantic_report(
+                        program,
+                        module,
+                        "SOL-S061",
+                        "Method name '" + method->name + "' is reserved by the object model.",
+                        method_declaration
+                    )
+                end
+
+                method_index = method_index + 1
+            end
+        end
+
+        index = index + 1
+    end
+
+    return
+end
+
+fn semantic_validate_method_annotations(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    declaration: pointer<SyntaxNode>
+) -> void
+    @mut let index: int = 0
+    @mut let visibility_count: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let annotation: pointer<SyntaxNode> = syntax_child(declaration, index)
+
+        if annotation->kind == syntax_kind_annotation() then
+            let name: string = annotation->text
+            let allowed: boolean = name == "public" || name == "protected" || name == "private" || name == "override"
+
+            if !allowed then
+                semantic_report(
+                    program,
+                    module,
+                    "SOL-S059",
+                    "Annotation '@" + name + "' is not valid on an instance method.",
+                    annotation
+                )
+            end
+
+            if name == "public" || name == "protected" || name == "private" then
+                visibility_count = visibility_count + 1
+            end
+
+            if semantic_declaration_annotation_count(declaration, name) > 1 then
+                @mut let previous: int = 0
+                @mut let already_seen: boolean = false
+
+                while previous < index do
+                    let previous_child: pointer<SyntaxNode> = syntax_child(
+                        declaration,
+                        previous
+                    )
+
+                    if previous_child->kind == syntax_kind_annotation() && previous_child->text == name then
+                        already_seen = true
+                    end
+
+                    previous = previous + 1
+                end
+
+                if already_seen then
+                    semantic_report(
+                        program,
+                        module,
+                        "SOL-S060",
+                        "Method annotation '@" + name + "' is declared more than once.",
+                        annotation
+                    )
+                end
+            end
+        end
+
+        index = index + 1
+    end
+
+    if visibility_count > 1 then
+        semantic_report(
+            program,
+            module,
+            "SOL-S060",
+            "Instance method must not specify more than one visibility.",
+            declaration
+        )
+    end
+
     return
 end
 
@@ -923,6 +1064,24 @@ fn semantic_bind_all_function_signatures(program: pointer<SemanticProgram>) -> v
                 semantic_bind_function_signature(program, module, declaration)
             end
 
+            if declaration->kind == syntax_kind_class_declaration() then
+                @mut let member_index: int = 0
+                let member_count: int = syntax_child_count(declaration)
+
+                while member_index < member_count do
+                    let member: pointer<SyntaxNode> = syntax_child(
+                        declaration,
+                        member_index
+                    )
+
+                    if member->kind == syntax_kind_function_declaration() && !semantic_declaration_has_annotation(member, "constructor") then
+                        semantic_bind_function_signature(program, module, member)
+                    end
+
+                    member_index = member_index + 1
+                end
+            end
+
             index = index + 1
         end
 
@@ -959,6 +1118,20 @@ fn semantic_bind_function_signature(
         declaration,
         function_scope
     )
+
+    if function->kind == semantic_symbol_kind_method() then
+        let receiver: pointer<SemanticSymbol> = create_receiver_symbol(
+            function->owner,
+            declaration
+        )
+        semantic_program_record_symbol(
+            program,
+            semantic_binding_kind_method_receiver(),
+            declaration,
+            receiver
+        )
+        scope_declare(function_scope, receiver)
+    end
     @mut let parameter_index: int = 0
     let parameter_count: int = semantic_direct_child_count(
         declaration,
@@ -997,6 +1170,16 @@ fn semantic_bind_function_signature(
             parameter_declaration,
             parameter
         )
+
+        if function->kind == semantic_symbol_kind_method() && (parameter->name == "this" || parameter->name == "base") then
+            semantic_report(
+                program,
+                module,
+                "SOL-S062",
+                "Parameter name '" + parameter->name + "' is reserved by the object model.",
+                parameter_declaration
+            )
+        end
 
         if scope_declare(function_scope, parameter) != scope_declare_success() then
             semantic_program_own_symbol(program, parameter)
@@ -1868,8 +2051,23 @@ fn semantic_module_for_declaration(
         let count: int = syntax_child_count(module->unit)
 
         while index < count do
-            if syntax_child(module->unit, index) == declaration then
+            let top_level: pointer<SyntaxNode> = syntax_child(module->unit, index)
+
+            if top_level == declaration then
                 return module
+            end
+
+            if top_level->kind == syntax_kind_class_declaration() then
+                @mut let member_index: int = 0
+                let member_count: int = syntax_child_count(top_level)
+
+                while member_index < member_count do
+                    if syntax_child(top_level, member_index) == declaration then
+                        return module
+                    end
+
+                    member_index = member_index + 1
+                end
             end
 
             index = index + 1
@@ -1915,6 +2113,44 @@ fn semantic_bind_all_function_bodies(program: pointer<SemanticProgram>) -> void
                             declaration
                         )
                     )
+                end
+            end
+
+            if declaration->kind == syntax_kind_class_declaration() then
+                @mut let member_index: int = 0
+                let member_count: int = syntax_child_count(declaration)
+
+                while member_index < member_count do
+                    let member: pointer<SyntaxNode> = syntax_child(
+                        declaration,
+                        member_index
+                    )
+
+                    if member->kind == syntax_kind_function_declaration() && !semantic_declaration_has_annotation(member, "constructor") then
+                        let member_body: pointer<SyntaxNode> = semantic_function_body(
+                            member
+                        )
+
+                        if member_body != null then
+                            semantic_bind_block(
+                                program,
+                                module,
+                                member_body,
+                                semantic_program_scope_of(
+                                    program,
+                                    semantic_binding_kind_function_scope(),
+                                    member
+                                ),
+                                semantic_program_symbol_of(
+                                    program,
+                                    semantic_binding_kind_declared_symbol(),
+                                    member
+                                )
+                            )
+                        end
+                    end
+
+                    member_index = member_index + 1
                 end
             end
 
@@ -2103,6 +2339,16 @@ fn semantic_bind_variable(
         declaration,
         local
     )
+
+    if function->kind == semantic_symbol_kind_method() && (local->name == "this" || local->name == "base") then
+        semantic_report(
+            program,
+            module,
+            "SOL-S062",
+            "Local name '" + local->name + "' is reserved by the object model.",
+            declaration
+        )
+    end
 
     if scope_declare(scope, local) != scope_declare_success() then
         semantic_program_own_symbol(program, local)
@@ -2629,6 +2875,17 @@ fn semantic_bind_name_expression(
     @mut let symbol: pointer<SemanticSymbol> = scope_lookup(scope, expression->text)
 
     if symbol == null then
+        if expression->text == "this" || expression->text == "base" then
+            semantic_report(
+                program,
+                module,
+                "SOL-S063",
+                "Receiver '" + expression->text + "' is not available in this context.",
+                expression
+            )
+            return type_catalog_error(program->catalog)
+        end
+
         semantic_report(
             program,
             module,
@@ -2819,18 +3076,36 @@ fn semantic_bind_call_expression(
     active_function: pointer<SemanticSymbol>
 ) -> pointer<SemanticType>
     let callee: pointer<SyntaxNode> = syntax_child(call, 0)
-    let callee_type: pointer<SemanticType> = semantic_bind_expression(
-        program,
-        module,
-        callee,
-        scope,
-        null,
-        active_function
+    @mut let callee_type: pointer<SemanticType> = type_catalog_error(
+        program->catalog
     )
-    let function: pointer<SemanticSymbol> = semantic_resolved_function_of(
-        program,
-        callee
-    )
+    @mut let function: pointer<SemanticSymbol> = null
+
+    if callee->kind == syntax_kind_field_access_expression() || callee->kind == syntax_kind_pointer_field_access_expression() then
+        function = semantic_bind_method_callee(
+            program,
+            module,
+            callee,
+            scope,
+            active_function
+        )
+        semantic_program_record_type(
+            program,
+            semantic_binding_kind_expression_type(),
+            callee,
+            callee_type
+        )
+    else
+        callee_type = semantic_bind_expression(
+            program,
+            module,
+            callee,
+            scope,
+            null,
+            active_function
+        )
+        function = semantic_resolved_function_of(program, callee)
+    end
 
     if function == null then
         @mut let type_index: int = 0
@@ -3007,6 +3282,129 @@ fn semantic_bind_call_expression(
     )
 end
 
+fn semantic_bind_method_callee(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    expression: pointer<SyntaxNode>,
+    scope: pointer<Scope>,
+    active_function: pointer<SemanticSymbol>
+) -> pointer<SemanticSymbol>
+    let receiver_expression: pointer<SyntaxNode> = syntax_child(expression, 0)
+    @mut let receiver_type: pointer<SemanticType> = semantic_bind_expression(
+        program,
+        module,
+        receiver_expression,
+        scope,
+        null,
+        active_function
+    )
+
+    if receiver_type->kind == semantic_type_kind_error() then
+        return null
+    end
+
+    if expression->kind == syntax_kind_pointer_field_access_expression() then
+        if receiver_type->kind != semantic_type_kind_pointer() then
+            semantic_report(
+                program,
+                module,
+                "SOL-S044",
+                "Cannot use '->' on value of non-pointer type '" + receiver_type->name + "'.",
+                receiver_expression
+            )
+            return null
+        end
+
+        receiver_type = receiver_type->element_type
+    end
+
+    if receiver_type->kind != semantic_type_kind_class() && receiver_type->kind != semantic_type_kind_interface() then
+        semantic_report(
+            program,
+            module,
+            "SOL-S064",
+            "Cannot select instance method '" + expression->text + "' on type '" + receiver_type->name + "'.",
+            syntax_child(expression, 1)
+        )
+        return null
+    end
+
+    let class_symbol: pointer<SemanticSymbol> = semantic_object_symbol_for_type(
+        program,
+        receiver_type
+    )
+    let member_scope: pointer<Scope> = semantic_model_class_scope(
+        program,
+        class_symbol->declaration
+    )
+    let method_count: int = scope_class_method_count(
+        member_scope,
+        expression->text
+    )
+
+    if method_count == 0 then
+        semantic_report(
+            program,
+            module,
+            "SOL-S064",
+            "Type '" + class_symbol->name + "' has no method named '" + expression->text + "'.",
+            syntax_child(expression, 1)
+        )
+        return null
+    end
+
+    if method_count > 1 then
+        semantic_report(
+            program,
+            module,
+            "SOL-S065",
+            "Method name '" + expression->text + "' is overloaded and requires overload resolution.",
+            syntax_child(expression, 1)
+        )
+        return null
+    end
+
+    let method: pointer<SemanticSymbol> = scope_class_method(
+        member_scope,
+        expression->text,
+        0
+    )
+
+    if !semantic_method_is_accessible(method, semantic_enclosing_class(active_function)) then
+        semantic_report(
+            program,
+            module,
+            "SOL-S066",
+            "Method '" + method->name + "' is not accessible in this context.",
+            syntax_child(expression, 1)
+        )
+        return null
+    end
+
+    semantic_program_record_symbol(
+        program,
+        semantic_binding_kind_accessed_method(),
+        expression,
+        method
+    )
+    return method
+end
+
+fn semantic_method_is_accessible(
+    method: pointer<SemanticSymbol>,
+    current_class: pointer<SemanticSymbol>
+) -> boolean
+    if method == null then
+        return false
+    end
+
+    if semantic_symbol_visibility(method) == semantic_visibility_public() then
+        return true
+    end
+
+    return current_class == method->owner
+end
+
 fn semantic_bind_call_values_without_target(
     program: pointer<SemanticProgram>,
     module: pointer<SemanticModule>,
@@ -3060,6 +3458,14 @@ fn semantic_resolved_function_of(
         return semantic_program_symbol_of(
             program,
             semantic_binding_kind_qualified_function(),
+            expression
+        )
+    end
+
+    if expression->kind == syntax_kind_field_access_expression() || expression->kind == syntax_kind_pointer_field_access_expression() then
+        return semantic_program_symbol_of(
+            program,
+            semantic_binding_kind_accessed_method(),
             expression
         )
     end
@@ -3584,6 +3990,10 @@ fn semantic_type_of_value_symbol(
 ) -> pointer<SemanticType>
     if symbol == null then
         return type_catalog_error(program->catalog)
+    end
+
+    if symbol->kind == semantic_symbol_kind_receiver() then
+        return symbol->owner->type
     end
 
     let reference: pointer<SyntaxNode> = semantic_symbol_declared_type_reference(symbol)
