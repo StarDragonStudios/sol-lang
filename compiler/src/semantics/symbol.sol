@@ -10,6 +10,8 @@ struct SemanticSymbol
     span: SourceSpan
     declaration: pointer<SyntaxNode>
     owner: pointer<SemanticSymbol>
+    base_class: pointer<SemanticSymbol>
+    overridden_method: pointer<SemanticSymbol>
     type: pointer<SemanticType>
     index: int
     mutable: boolean
@@ -481,6 +483,8 @@ fn create_semantic_symbol(
     symbol->span = declaration->span
     symbol->declaration = declaration
     symbol->owner = owner
+    symbol->base_class = null
+    symbol->overridden_method = null
     symbol->type = null
     symbol->index = index
     symbol->mutable = false
@@ -510,6 +514,8 @@ fn destroy_semantic_symbol(symbol: pointer<SemanticSymbol>) -> void
     destroy_vector<pointer<SemanticSymbol>>(symbol->children)
     symbol->declaration = null
     symbol->owner = null
+    symbol->base_class = null
+    symbol->overridden_method = null
     symbol->children = null
     memory::free<SemanticSymbol>(symbol)
     return

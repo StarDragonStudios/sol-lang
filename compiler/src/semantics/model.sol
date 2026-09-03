@@ -773,6 +773,26 @@ fn semantic_model_method_receiver(
     )
 end
 
+fn semantic_model_base_class(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>) -> pointer<SemanticSymbol>
+    let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+    if symbol == null then
+        return null
+    end
+    return symbol->base_class
+end
+
+fn semantic_model_overridden_method(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>) -> pointer<SemanticSymbol>
+    let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, declaration)
+    if symbol == null then
+        return null
+    end
+    return symbol->overridden_method
+end
+
+fn semantic_model_base_receiver(program: pointer<SemanticProgram>, declaration: pointer<SyntaxNode>) -> pointer<SemanticSymbol>
+    return scope_lookup_local(semantic_model_function_scope(program, declaration), "base")
+end
+
 fn semantic_model_accessed_method(
     program: pointer<SemanticProgram>,
     expression: pointer<SyntaxNode>
