@@ -108,3 +108,26 @@ The post-change CPU sample no longer puts binding-vector scans at the top.
 Remaining costs include declaration-to-module lookup and repeated traversal in
 generic validation. They are deliberately left for separately measured work;
 this change does not cache or skip generic validation paths.
+
+## Generic-instantiation validation
+
+Generic validation follows the concrete call graph from every non-generic
+function. Without a completed-frame cache, common specializations such as the
+standard vector operations were traversed again for every caller. As the
+self-host compiler grew, that repeated traversal increased both compilation
+time and peak memory until hosted CI runners could lose communication while
+compiling the bootstrap test programs.
+
+The validator now records each completed `(function, type arguments)` frame for
+the duration of one semantic analysis. A later traversal of the same concrete
+specialization reuses that result. The active recursion stack remains separate
+and is always checked before entering a target, so recursive requests for a
+different specialization still produce `SOL-S042`.
+
+Important invariants:
+
+- the cache lives only for one semantic program analysis;
+- function identity and the complete ordered type-argument vector form the key;
+- frames are cached only after their reachable calls have been validated;
+- cached frames own only their copied argument vector, not symbols or types;
+- all cached frames are destroyed before generic validation returns.

@@ -121,7 +121,9 @@ jobs:
     native-distributions:
         name: Native distribution (${{ matrix.platform }})
         runs-on: ${{ matrix.runner }}
-        timeout-minutes: 90
+        # Native seed builds now approach 90 minutes on the slowest hosted
+        # architectures. Keep correctness gates intact without timing them out.
+        timeout-minutes: 180
 
         strategy:
             fail-fast: false
