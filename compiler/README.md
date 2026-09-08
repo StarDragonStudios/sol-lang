@@ -21,7 +21,8 @@ stage 1 native compiler executable
 ```
 
 The compiler contains its source model, token representation, lexical
-scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser,
+scanner, uniform syntax-tree representation, complete Sol 0.1.x grammar parser
+with the staged Sol 0.2 object-syntax extensions,
 complete semantic analysis across ordered source modules, a validated,
 target-independent typed Sol IR model, and deterministic semantic-to-IR
 lowering, deterministic textual LLVM IR generation from the sealed IR, a
@@ -171,7 +172,9 @@ The parser owns only its temporary cursor state and borrows the lexer's token
 vector. `ParseResult` owns the resulting syntax tree. It validates that token
 streams are non-empty and contain exactly one terminal EOF, then implements the
 complete released grammar for declarations, types and generics, injections,
-statements, blocks, expressions, calls, structs and supported multiline lists.
+statements, blocks, expressions, calls, structs, class declarations, object
+lifetime forms and supported multiline lists. Object syntax is represented for
+the downstream Sol 0.2 work; semantic acceptance remains gated on #132–#142.
 Parsing is deliberately fail-fast and reports stable `SOL-P000`, `SOL-P001` and
 `SOL-P002` diagnostics with half-open source spans.
 
@@ -192,6 +195,9 @@ diagnostics. Ordered children use the following contract:
 | `FunctionDeclaration` | function name / bodyful or bodyless | annotations, `Name`, type parameters, parameters, return type, optional body block |
 | `StructDeclaration` | struct name / none | `Name`, type parameters, field declarations |
 | `StructFieldDeclaration` | field name / none | `Name`, field type |
+| `ClassDeclaration` | class name / none | annotations, `Name`, optional base clause, interface clauses, fields and methods |
+| `ClassFieldDeclaration` | field name / none | annotations, `Name`, field type |
+| Class base/interface clause | qualified type name / none | type reference |
 | `InjectionDeclaration` | namespace alias or empty / direct or namespace | module path, selected names or optional alias `Name` |
 | `Block` | empty / none | statements |
 | `VariableDeclarationStatement` | local name / `const`, `let` or mutable `let` | `Name`, declared type, initializer |
@@ -212,6 +218,8 @@ diagnostics. Ordered children use the following contract:
 | `IndexExpression` | empty / none | target, index |
 | `StructConstructionExpression` | type name / none | type reference, field initializers |
 | `StructFieldInitializer` | field name / none | field `Name`, value |
+| `NewExpression` | qualified class name / none | type reference, constructor arguments |
+| `DeleteStatement` | empty / none | pointer expression |
 | `Name` | identifier / none | none |
 
 The child-kind boundaries make variable-length groups unambiguous without

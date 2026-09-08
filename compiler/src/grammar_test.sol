@@ -46,6 +46,13 @@ fn launch() -> int
         return 90 + postfix
     end
 
+    let classes: int = test_class_declarations_and_lifetime_syntax()
+
+    if classes != 0 then
+        console::print_line("self-host grammar test failed: classes and object lifetime")
+        return 100 + classes
+    end
+
     let diagnostics: int = test_grammar_diagnostics()
 
     if diagnostics != 0 then
@@ -54,6 +61,89 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_class_declarations_and_lifetime_syntax() -> int
+    let source: string = "@public\nclass Document << core::Entity < Printable, Serializable\n    @private\n    name: string\n    @public\n    @constructor\n    fn create(name: string) -> void\n        this.name = name\n    end\n    @public\n    @fn describe() -> string\nend\n@public\n@interface\nclass Printable\n    @public\n    @fn print() -> void\nend\nfn allocate() -> void\n    let document: pointer<Document> = new Document(\"Sol\")\n    delete document\n    return\nend"
+    let result: GrammarParse = parse_source(source)
+    @mut let failure: int = 0
+
+    if !result.lexical.successful || !result.parsed.successful || result.parsed.root == null then
+        failure = 1
+    end
+
+    if failure != 0 then
+        destroy_grammar_parse(result)
+        return failure
+    end
+
+    let root: pointer<SyntaxNode> = result.parsed.root
+
+    if syntax_child_count(root) != 3 then
+        failure = 2
+    end
+
+    let document: pointer<SyntaxNode> = syntax_child(root, 0)
+    let printable: pointer<SyntaxNode> = syntax_child(root, 1)
+    let allocate: pointer<SyntaxNode> = syntax_child(root, 2)
+
+    if failure == 0 && (document->kind != syntax_kind_class_declaration() || document->text != "Document" || syntax_child_count(document) != 8) then
+        failure = 3
+    end
+
+    if failure == 0 && (syntax_child(document, 0)->kind != syntax_kind_annotation() || syntax_child(document, 0)->text != "public" || syntax_child(document, 1)->kind != syntax_kind_name()) then
+        failure = 4
+    end
+
+    let base_clause: pointer<SyntaxNode> = syntax_child(document, 2)
+    let first_interface: pointer<SyntaxNode> = syntax_child(document, 3)
+
+    if failure == 0 && (base_clause->kind != syntax_kind_class_base_clause() || base_clause->text != "core::Entity" || syntax_child(base_clause, 0)->text != "core::Entity") then
+        failure = 5
+    end
+
+    if failure == 0 && (first_interface->kind != syntax_kind_class_interface_clause() || first_interface->text != "Printable" || syntax_child(document, 4)->text != "Serializable") then
+        failure = 6
+    end
+
+    let field: pointer<SyntaxNode> = syntax_child(document, 5)
+    let constructor: pointer<SyntaxNode> = syntax_child(document, 6)
+    let abstract_method: pointer<SyntaxNode> = syntax_child(document, 7)
+
+    if failure == 0 && (field->kind != syntax_kind_class_field_declaration() || field->text != "name" || syntax_child_count(field) != 3 || syntax_child(field, 0)->text != "private") then
+        failure = 7
+    end
+
+    if failure == 0 && (constructor->kind != syntax_kind_function_declaration() || constructor->variant != syntax_function_with_body() || syntax_child(constructor, 0)->text != "public" || syntax_child(constructor, 1)->text != "constructor") then
+        failure = 8
+    end
+
+    if failure == 0 && (abstract_method->variant != syntax_function_bodyless() || syntax_child(abstract_method, 0)->text != "public") then
+        failure = 9
+    end
+
+    if failure == 0 && (printable->kind != syntax_kind_class_declaration() || syntax_child(printable, 0)->text != "public" || syntax_child(printable, 1)->text != "interface") then
+        failure = 10
+    end
+
+    let body: pointer<SyntaxNode> = syntax_child(allocate, 2)
+    let variable: pointer<SyntaxNode> = syntax_child(body, 0)
+    let allocated: pointer<SyntaxNode> = syntax_child(variable, 2)
+
+    if failure == 0 && (syntax_child_count(body) != 3 || allocated->kind != syntax_kind_new_expression() || allocated->text != "Document" || syntax_child_count(allocated) != 2) then
+        failure = 11
+    end
+
+    if failure == 0 && (syntax_child(body, 1)->kind != syntax_kind_delete_statement() || syntax_child_count(syntax_child(body, 1)) != 1) then
+        failure = 12
+    end
+
+    if failure == 0 && (document->span.start.offset != 0 || document->span.end_position.offset >= printable->span.start.offset || root->span.end_position.offset != strings::length(source)) then
+        failure = 13
+    end
+
+    destroy_grammar_parse(result)
+    return failure
 end
 
 fn parse_source(source: string) -> GrammarParse

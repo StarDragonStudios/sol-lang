@@ -5,9 +5,10 @@ Status: **approved source-language design, not implemented**. Tracks
 [Sol 0.2 roadmap](https://github.com/StarDragonStudios/sol-lang/issues/113).
 
 This document defines the first Sol object model. Its examples are contracts
-for downstream compiler work; the current compiler does not yet accept Sol 0.2
-syntax. The implemented Sol 0.1 specification remains normative until the
-parser, semantic, IR, backend, runtime and conformance work is complete.
+for downstream compiler work. The staged frontend can represent Sol 0.2 class,
+`new` and `delete` syntax, but semantic acceptance and code generation remain
+under implementation. The Sol 0.1 specification remains normative until the
+semantic, IR, backend, runtime and conformance work is complete.
 
 ## Scope
 

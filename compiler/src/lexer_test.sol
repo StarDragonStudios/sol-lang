@@ -59,11 +59,11 @@ end
 
 fn test_keywords_and_identifiers() -> int
     let result: LexResult = scan_source(
-        "fn let const if else while return then do end inject true false null only namespace as struct value_42 Fn"
+        "fn let const if else while return then do end inject true false null only namespace as struct class new delete value_42 Fn"
     )
     @mut let failure: int = 0
 
-    if !result.successful || vector_length<Token>(result.tokens) != 21 then
+    if !result.successful || vector_length<Token>(result.tokens) != 24 then
         failure = 1
     end
 
@@ -83,16 +83,28 @@ fn test_keywords_and_identifiers() -> int
         failure = 5
     end
 
-    if failure == 0 && !token_matches(result, 18, token_kind_identifier(), "value_42") then
+    if failure == 0 && !token_matches(result, 18, token_kind_class(), "class") then
         failure = 6
     end
 
-    if failure == 0 && !token_matches(result, 19, token_kind_identifier(), "Fn") then
+    if failure == 0 && !token_matches(result, 19, token_kind_new(), "new") then
         failure = 7
     end
 
-    if failure == 0 && !token_matches(result, 20, token_kind_eof(), "") then
+    if failure == 0 && !token_matches(result, 20, token_kind_delete(), "delete") then
         failure = 8
+    end
+
+    if failure == 0 && !token_matches(result, 21, token_kind_identifier(), "value_42") then
+        failure = 9
+    end
+
+    if failure == 0 && !token_matches(result, 22, token_kind_identifier(), "Fn") then
+        failure = 10
+    end
+
+    if failure == 0 && !token_matches(result, 23, token_kind_eof(), "") then
+        failure = 11
     end
 
     destroy_lex_result(result)
@@ -136,10 +148,10 @@ fn test_numbers_and_literals() -> int
 end
 
 fn test_punctuation_and_operators() -> int
-    let result: LexResult = scan_source("@ ( ) { } [ ] , : :: . -> = + - * / % ! && || == != < <= > >=")
+    let result: LexResult = scan_source("@ ( ) { } [ ] , : :: . -> = + - * / % ! && || == != < << <= > >=")
     @mut let failure: int = 0
 
-    if !result.successful || vector_length<Token>(result.tokens) != 28 then
+    if !result.successful || vector_length<Token>(result.tokens) != 29 then
         failure = 1
     end
 
@@ -167,8 +179,12 @@ fn test_punctuation_and_operators() -> int
         failure = 7
     end
 
-    if failure == 0 && !token_matches(result, 26, token_kind_greater_equal(), ">=") then
+    if failure == 0 && !token_matches(result, 24, token_kind_double_less(), "<<") then
         failure = 8
+    end
+
+    if failure == 0 && !token_matches(result, 27, token_kind_greater_equal(), ">=") then
+        failure = 9
     end
 
     destroy_lex_result(result)

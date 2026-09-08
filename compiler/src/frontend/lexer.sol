@@ -215,13 +215,7 @@ fn scan_next_token(lexer: pointer<Lexer>) -> void
     end
 
     if current == '<' then
-        scan_one_or_two_character_token(
-            lexer,
-            start,
-            '=',
-            token_kind_less(),
-            token_kind_less_equal()
-        )
+        scan_less_operator(lexer, start)
         return
     end
 
@@ -352,6 +346,18 @@ fn keyword_kind(lexeme: string) -> int
 
     if lexeme == "struct" then
         return token_kind_struct()
+    end
+
+    if lexeme == "class" then
+        return token_kind_class()
+    end
+
+    if lexeme == "new" then
+        return token_kind_new()
+    end
+
+    if lexeme == "delete" then
+        return token_kind_delete()
     end
 
     return token_kind_identifier()
@@ -618,6 +624,30 @@ fn scan_one_or_two_character_token(lexer: pointer<Lexer>, start: SourcePosition,
     if lexer_peek_is(lexer, expected) then
         lexer_advance(lexer)
         kind = double_kind
+    end
+
+    add_token(
+        lexer,
+        kind,
+        strings::slice(lexer->source, start_offset, lexer->offset),
+        start
+    )
+    return
+end
+
+fn scan_less_operator(lexer: pointer<Lexer>, start: SourcePosition) -> void
+    let start_offset: int = lexer->offset
+    lexer_advance(lexer)
+    @mut let kind: int = token_kind_less()
+
+    if lexer_peek_is(lexer, '=') then
+        lexer_advance(lexer)
+        kind = token_kind_less_equal()
+    else
+        if lexer_peek_is(lexer, '<') then
+            lexer_advance(lexer)
+            kind = token_kind_double_less()
+        end
     end
 
     add_token(

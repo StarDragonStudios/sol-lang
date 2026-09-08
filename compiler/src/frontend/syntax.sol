@@ -223,6 +223,30 @@ fn syntax_kind_name() -> int
     return 34
 end
 
+fn syntax_kind_class_declaration() -> int
+    return 35
+end
+
+fn syntax_kind_class_field_declaration() -> int
+    return 36
+end
+
+fn syntax_kind_class_base_clause() -> int
+    return 37
+end
+
+fn syntax_kind_class_interface_clause() -> int
+    return 38
+end
+
+fn syntax_kind_new_expression() -> int
+    return 39
+end
+
+fn syntax_kind_delete_statement() -> int
+    return 40
+end
+
 fn syntax_literal_integer() -> int
     return 1
 end
