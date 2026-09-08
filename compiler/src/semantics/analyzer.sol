@@ -3274,6 +3274,7 @@ fn semantic_types_are_incompatible(
 end
 
 fn semantic_validate_generic_instantiations(program: pointer<SemanticProgram>) -> void
+    let validated: pointer<Vector<pointer<SemanticGenericFrame>>> = create_vector<pointer<SemanticGenericFrame>>()
     @mut let module_index: int = 0
     let module_count: int = semantic_program_module_count(program)
 
@@ -3303,7 +3304,8 @@ fn semantic_validate_generic_instantiations(program: pointer<SemanticProgram>) -
                         module,
                         function,
                         arguments,
-                        active
+                        active,
+                        validated
                     )
                     destroy_vector<pointer<SemanticType>>(arguments)
                     destroy_vector<pointer<SemanticGenericFrame>>(active)
@@ -3316,6 +3318,14 @@ fn semantic_validate_generic_instantiations(program: pointer<SemanticProgram>) -
         module_index = module_index + 1
     end
 
+    @mut let validated_index: int = vector_length<pointer<SemanticGenericFrame>>(validated)
+    while validated_index > 0 do
+        validated_index = validated_index - 1
+        destroy_semantic_generic_frame(
+            vector_get<pointer<SemanticGenericFrame>>(validated, validated_index)
+        )
+    end
+    destroy_vector<pointer<SemanticGenericFrame>>(validated)
     return
 end
 
@@ -3324,11 +3334,12 @@ fn semantic_validate_generic_frame(
     module: pointer<SemanticModule>,
     function: pointer<SemanticSymbol>,
     arguments: pointer<Vector<pointer<SemanticType>>>,
-    active: pointer<Vector<pointer<SemanticGenericFrame>>>
+    active: pointer<Vector<pointer<SemanticGenericFrame>>>,
+    validated: pointer<Vector<pointer<SemanticGenericFrame>>>
 ) -> void
     let body: pointer<SyntaxNode> = semantic_function_body(function->declaration)
 
-    if body == null then
+    if body == null || semantic_generic_frame_contains(validated, function, arguments) then
         return
     end
 
@@ -3337,9 +3348,9 @@ fn semantic_validate_generic_frame(
         arguments
     )
     vector_push<pointer<SemanticGenericFrame>>(active, frame)
-    semantic_validate_generic_calls_in_node(program, module, body, frame, active)
+    semantic_validate_generic_calls_in_node(program, module, body, frame, active, validated)
     vector_pop<pointer<SemanticGenericFrame>>(active)
-    destroy_semantic_generic_frame(frame)
+    vector_push<pointer<SemanticGenericFrame>>(validated, frame)
     return
 end
 
@@ -3348,10 +3359,11 @@ fn semantic_validate_generic_calls_in_node(
     module: pointer<SemanticModule>,
     node: pointer<SyntaxNode>,
     current: pointer<SemanticGenericFrame>,
-    active: pointer<Vector<pointer<SemanticGenericFrame>>>
+    active: pointer<Vector<pointer<SemanticGenericFrame>>>,
+    validated: pointer<Vector<pointer<SemanticGenericFrame>>>
 ) -> void
     if node->kind == syntax_kind_call_expression() then
-        semantic_validate_generic_call(program, module, node, current, active)
+        semantic_validate_generic_call(program, module, node, current, active, validated)
     end
 
     @mut let index: int = 0
@@ -3363,7 +3375,8 @@ fn semantic_validate_generic_calls_in_node(
             module,
             syntax_child(node, index),
             current,
-            active
+            active,
+            validated
         )
         index = index + 1
     end
@@ -3376,7 +3389,8 @@ fn semantic_validate_generic_call(
     module: pointer<SemanticModule>,
     call: pointer<SyntaxNode>,
     current: pointer<SemanticGenericFrame>,
-    active: pointer<Vector<pointer<SemanticGenericFrame>>>
+    active: pointer<Vector<pointer<SemanticGenericFrame>>>,
+    validated: pointer<Vector<pointer<SemanticGenericFrame>>>
 ) -> void
     let binding: pointer<SemanticBinding> = semantic_program_binding(
         program,
@@ -3462,10 +3476,35 @@ fn semantic_validate_generic_call(
         target_module,
         target,
         concrete,
-        active
+        active,
+        validated
     )
     destroy_vector<pointer<SemanticType>>(concrete)
     return
+end
+
+fn semantic_generic_frame_contains(
+    frames: pointer<Vector<pointer<SemanticGenericFrame>>>,
+    function: pointer<SemanticSymbol>,
+    arguments: pointer<Vector<pointer<SemanticType>>>
+) -> boolean
+    @mut let index: int = 0
+    let count: int = vector_length<pointer<SemanticGenericFrame>>(frames)
+
+    while index < count do
+        let frame: pointer<SemanticGenericFrame> = vector_get<pointer<SemanticGenericFrame>>(
+            frames,
+            index
+        )
+
+        if frame->function == function && semantic_type_vector_equals(frame->arguments, arguments) then
+            return true
+        end
+
+        index = index + 1
+    end
+
+    return false
 end
 
 fn create_semantic_generic_frame(
