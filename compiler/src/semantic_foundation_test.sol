@@ -60,7 +60,7 @@ fn launch() -> int
 end
 
 fn test_class_interface_types_and_scopes() -> int
-    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\n    @private\n    name: string\nend\n@public\n@interface\nclass Printable\nend")
+    let lexical: LexResult = scan_source("@protected\n@abstract\nclass Base\n    @private\n    name: string\n    @public\n    fn name_length() -> int\n        return 0\n    end\nend\n@public\n@interface\nclass Printable\nend")
     @mut let parsed: ParseResult = parse_tokens(null)
 
     if lexical.successful then
@@ -95,9 +95,19 @@ fn test_class_interface_types_and_scopes() -> int
         field_declaration,
         0
     )
+    let method_declaration: pointer<SyntaxNode> = syntax_child(base_declaration, 4)
+    let method: pointer<SemanticSymbol> = create_method_symbol(
+        base,
+        method_declaration,
+        0
+    )
+    let receiver: pointer<SemanticSymbol> = create_receiver_symbol(
+        base,
+        method_declaration
+    )
     @mut let failure: int = 0
 
-    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null || field == null then
+    if base == null || interface_symbol == null || same_base == null || pointer_type == null || class_scope == null || field == null || method == null || receiver == null then
         failure = 2
     end
 
@@ -125,10 +135,19 @@ fn test_class_interface_types_and_scopes() -> int
         failure = 8
     end
 
+    if failure == 0 && (method->kind != semantic_symbol_kind_method() || method->owner != base || !semantic_method_is_virtual(method) || receiver->kind != semantic_symbol_kind_receiver() || receiver->owner != base || receiver->name != "this") then
+        failure = 9
+    end
+
+    if failure == 0 && (scope_declare_member(class_scope, method) != scope_declare_success() || scope_class_method_count(class_scope, "name_length") != 1 || scope_class_method(class_scope, "name_length", 0) != method) then
+        failure = 10
+    end
+
     destroy_scope(class_scope)
     destroy_scope(module_scope)
     destroy_semantic_type(pointer_type)
     destroy_semantic_type(same_base)
+    destroy_semantic_symbol(receiver)
     destroy_semantic_symbol(interface_symbol)
     destroy_semantic_symbol(base)
     destroy_parse_result(parsed)
