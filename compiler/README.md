@@ -240,11 +240,12 @@ The semantic foundation under `compiler/src/semantics/` supplies the stable
 model that the semantic-analysis pass will populate:
 
 * canonical `int`, `float`, `boolean`, `char`, `string`, `void` and error types;
-* structural pointer types and declaration-identified struct and type-parameter
-  types, including ordered generic arguments;
+* structural pointer types, declaration-identified struct and type-parameter
+  types, and nominal class/interface types, including ordered struct generic
+  arguments;
 * function, parameter, local-variable, imported-name, module-namespace, struct,
-  struct-field and type-parameter symbols;
-* ordered module, function and block scopes with local and lexical lookup,
+  struct-field, type-parameter, class and interface symbols;
+* ordered module, class-member, function and block scopes with local and lexical lookup,
   duplicate rejection, shadowing and explicit freezing.
 
 Scope storage deliberately uses `Vector` and linear lookup. This preserves
@@ -267,9 +268,9 @@ association tables and diagnostics while borrowing the parsed syntax trees.
 
 `analyzer.sol` binds a set of already parsed modules in deterministic passes:
 
-1. register modules and predeclare structs and functions;
+1. register modules and predeclare classes, interfaces, structs and functions;
 2. resolve direct, selective and namespace injections;
-3. bind struct fields and function signatures;
+3. establish class-member scopes and bind struct fields and function signatures;
 4. validate recursive value layouts and executable entry points;
 5. bind function bodies and validate reachable generic specializations.
 
@@ -284,7 +285,8 @@ names, unary and binary operators, calls, string and raw-pointer indexing,
 struct construction, field access and pointer-field access. Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
-the released `SOL-S001` through `SOL-S047` catalog and are ordered by module and
+the released `SOL-S001` through `SOL-S047` catalog and extend it with staged
+class-declaration validation through `SOL-S051`. They are ordered by module and
 half-open source span.
 
 `compiler/src/semantic_foundation_test.sol` validates the lower-level catalog,

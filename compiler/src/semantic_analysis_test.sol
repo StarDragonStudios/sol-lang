@@ -38,6 +38,13 @@ fn launch() -> int
         return 30 + modules
     end
 
+    let objects: int = test_class_types_scopes_and_diagnostics()
+
+    if objects != 0 then
+        console::print_line("semantic analysis test failed: class types and scopes")
+        return 40 + objects
+    end
+
     let core: int = test_core_diagnostics()
 
     if core != 0 then
@@ -60,6 +67,137 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_class_types_scopes_and_diagnostics() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "@protected\n@abstract\nclass Base\nend\n@public\n@interface\nclass Printable\nend\n@public\nclass Document\nend\nfn inspect(value: pointer<Document>) -> pointer<Printable>\n    return null\nend"
+    )
+
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+
+    let program: pointer<SemanticProgram> = semantic_test_analyze(
+        "objects",
+        source,
+        false
+    )
+    @mut let failure: int = 0
+
+    if program == null || !semantic_program_successful(program) then
+        failure = 2
+    end
+
+    let root: pointer<SyntaxNode> = source.parsed.root
+    let base_declaration: pointer<SyntaxNode> = syntax_child(root, 0)
+    let interface_declaration: pointer<SyntaxNode> = syntax_child(root, 1)
+    let document_declaration: pointer<SyntaxNode> = syntax_child(root, 2)
+    let function_declaration: pointer<SyntaxNode> = syntax_child(root, 3)
+    let base: pointer<SemanticSymbol> = semantic_model_declared_symbol(
+        program,
+        base_declaration
+    )
+    let interface_symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(
+        program,
+        interface_declaration
+    )
+    let document: pointer<SemanticSymbol> = semantic_model_declared_symbol(
+        program,
+        document_declaration
+    )
+    let class_scope: pointer<Scope> = semantic_model_class_scope(
+        program,
+        document_declaration
+    )
+    let parameter: pointer<SyntaxNode> = semantic_direct_child(
+        function_declaration,
+        syntax_kind_parameter(),
+        0
+    )
+    let parameter_pointer: pointer<SemanticType> = semantic_model_type_of_reference(
+        program,
+        syntax_child(parameter, 1)
+    )
+
+    if failure == 0 && (base->kind != semantic_symbol_kind_class() || !semantic_symbol_is_abstract(base) || base->type->kind != semantic_type_kind_class() || semantic_symbol_visibility(base) != semantic_visibility_protected()) then
+        failure = 3
+    end
+
+    if failure == 0 && (interface_symbol->kind != semantic_symbol_kind_interface() || interface_symbol->type->kind != semantic_type_kind_interface() || document->kind != semantic_symbol_kind_class()) then
+        failure = 4
+    end
+
+    if failure == 0 && (class_scope == null || class_scope->kind != scope_kind_class() || class_scope->parent != semantic_program_module(program, "objects")->scope || !class_scope->frozen) then
+        failure = 5
+    end
+
+    if failure == 0 && (parameter_pointer->kind != semantic_type_kind_pointer() || parameter_pointer->element_type != document->type) then
+        failure = 6
+    end
+
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+
+    if failure != 0 then
+        return failure
+    end
+
+    let exported: ParsedSemanticSource = parse_semantic_test_source(
+        "@public\nclass Exported\nend"
+    )
+    let importing: ParsedSemanticSource = parse_semantic_test_source(
+        "inject objects.base only Exported\nfn consume(value: pointer<Exported>) -> void\n    return\nend"
+    )
+
+    if !semantic_test_parse_valid(exported) || !semantic_test_parse_valid(importing) then
+        destroy_semantic_test_source(importing)
+        destroy_semantic_test_source(exported)
+        return 7
+    end
+
+    let modules: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(modules, source_module("objects.app", importing.parsed.root))
+    vector_push<SourceModule>(modules, source_module("objects.base", exported.parsed.root))
+    let imported_program: pointer<SemanticProgram> = analyze_library_modules(modules)
+    destroy_vector<SourceModule>(modules)
+    let injection: pointer<SyntaxNode> = syntax_child(importing.parsed.root, 0)
+
+    if imported_program == null || !semantic_program_successful(imported_program) || semantic_model_direct_injected_symbol(imported_program, injection, 0)->kind != semantic_symbol_kind_class() then
+        failure = 8
+    end
+
+    destroy_semantic_program(imported_program)
+    destroy_semantic_test_source(importing)
+    destroy_semantic_test_source(exported)
+
+    if failure != 0 then
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "@mystery\nclass UnknownAnnotation\nend\n@public\n@public\nclass Repeated\nend\n@public\n@private\nclass Visibility\nend\n@abstract\n@interface\nclass Conflict\nend\nclass int\nend"
+    )
+
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 9
+    end
+
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze(
+        "invalid.objects",
+        invalid,
+        false
+    )
+
+    if invalid_program == null || !semantic_test_has_code(invalid_program, "SOL-S038") || !semantic_test_has_code(invalid_program, "SOL-S048") || !semantic_test_has_code(invalid_program, "SOL-S049") || !semantic_test_has_code(invalid_program, "SOL-S050") || !semantic_test_has_code(invalid_program, "SOL-S051") then
+        failure = 10
+    end
+
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
 end
 
 fn test_binding_index() -> int
@@ -117,7 +255,7 @@ fn test_binding_index() -> int
 
     // Every supported binding kind remains independent on the same node.
     index = 1
-    while index < 19 do
+    while index < 20 do
         let binding: pointer<SemanticBinding> = semantic_program_add_binding(program, index, first)
         if binding == null then
             failure = 5
@@ -130,10 +268,10 @@ fn test_binding_index() -> int
     end
 
     let count: int = vector_length<pointer<SemanticBinding>>(program->bindings)
-    if semantic_program_add_binding(program, 0, first) != null || semantic_program_add_binding(program, 19, first) != null || semantic_program_add_binding(program, -1, first) != null || semantic_program_add_binding(program, 1, null) != null || semantic_program_add_binding(null, 1, first) != null then
+    if semantic_program_add_binding(program, 0, first) != null || semantic_program_add_binding(program, 20, first) != null || semantic_program_add_binding(program, -1, first) != null || semantic_program_add_binding(program, 1, null) != null || semantic_program_add_binding(null, 1, first) != null then
         failure = 7
     end
-    if semantic_program_binding(program, 0, first) != null || semantic_program_binding(program, 19, first) != null || semantic_program_binding(program, -1, first) != null || semantic_program_binding(program, 1, null) != null || semantic_program_binding(null, 1, first) != null || vector_length<pointer<SemanticBinding>>(program->bindings) != count then
+    if semantic_program_binding(program, 0, first) != null || semantic_program_binding(program, 20, first) != null || semantic_program_binding(program, -1, first) != null || semantic_program_binding(program, 1, null) != null || semantic_program_binding(null, 1, first) != null || vector_length<pointer<SemanticBinding>>(program->bindings) != count then
         failure = 8
     end
 

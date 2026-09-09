@@ -369,7 +369,7 @@ fn semantic_program_add_binding(
     kind: int,
     node: pointer<SyntaxNode>
 ) -> pointer<SemanticBinding>
-    if program == null || node == null || kind < 1 || kind >= 19 then
+    if program == null || node == null || kind < 1 || kind >= 20 then
         return null
     end
 
@@ -423,7 +423,7 @@ fn semantic_binding_bucket_index(kind: int, node: pointer<SyntaxNode>) -> int
         offset = offset + count
     end
 
-    return (offset * 19 + kind) % count
+    return (offset * 20 + kind) % count
 end
 
 fn semantic_program_binding(
@@ -435,7 +435,7 @@ fn semantic_program_binding(
         return null
     end
 
-    if kind < 1 || kind >= 19 then
+    if kind < 1 || kind >= 20 then
         return null
     end
 
@@ -751,6 +751,17 @@ fn semantic_model_block_scope(
     )
 end
 
+fn semantic_model_class_scope(
+    program: pointer<SemanticProgram>,
+    declaration: pointer<SyntaxNode>
+) -> pointer<Scope>
+    return semantic_program_scope_of(
+        program,
+        semantic_binding_kind_class_scope(),
+        declaration
+    )
+end
+
 fn semantic_model_declared_symbol(
     program: pointer<SemanticProgram>,
     declaration: pointer<SyntaxNode>
@@ -1028,4 +1039,8 @@ end
 
 fn semantic_binding_kind_import_target() -> int
     return 18
+end
+
+fn semantic_binding_kind_class_scope() -> int
+    return 19
 end

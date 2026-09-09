@@ -157,7 +157,7 @@ fn scope_lookup(
 end
 
 fn scope_kind_is_valid(kind: int) -> boolean
-    return kind == scope_kind_module() || kind == scope_kind_function() || kind == scope_kind_block()
+    return kind == scope_kind_module() || kind == scope_kind_function() || kind == scope_kind_block() || kind == scope_kind_class()
 end
 
 fn scope_kind_module() -> int
@@ -170,6 +170,10 @@ end
 
 fn scope_kind_block() -> int
     return 3
+end
+
+fn scope_kind_class() -> int
+    return 4
 end
 
 fn scope_declare_success() -> int
