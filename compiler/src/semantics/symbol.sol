@@ -280,6 +280,34 @@ fn create_struct_field_symbol(
     )
 end
 
+fn create_class_field_symbol(
+    owner: pointer<SemanticSymbol>,
+    declaration: pointer<SyntaxNode>,
+    index: int
+) -> pointer<SemanticSymbol>
+    if owner == null || declaration == null || index < 0 then
+        return null
+    end
+
+    if (owner->kind != semantic_symbol_kind_class() && owner->kind != semantic_symbol_kind_interface()) || declaration->kind != syntax_kind_class_field_declaration() then
+        return null
+    end
+
+    let symbol: pointer<SemanticSymbol> = create_semantic_symbol(
+        semantic_symbol_kind_class_field(),
+        declaration->text,
+        declaration,
+        owner,
+        index
+    )
+
+    if symbol != null then
+        symbol->mutable = true
+    end
+
+    return symbol
+end
+
 fn create_type_parameter_symbol(
     owner: pointer<SemanticSymbol>,
     declaration: pointer<SyntaxNode>,
@@ -559,6 +587,24 @@ fn semantic_symbol_declared_type_reference(
         return syntax_child(symbol->declaration, 1)
     end
 
+    if symbol->kind == semantic_symbol_kind_class_field() then
+        @mut let index: int = 0
+        let count: int = syntax_child_count(symbol->declaration)
+
+        while index < count do
+            let child: pointer<SyntaxNode> = syntax_child(
+                symbol->declaration,
+                index
+            )
+
+            if child->kind == syntax_kind_type_reference() then
+                return child
+            end
+
+            index = index + 1
+        end
+    end
+
     return null
 end
 
@@ -702,6 +748,10 @@ end
 
 fn semantic_symbol_kind_interface() -> int
     return 10
+end
+
+fn semantic_symbol_kind_class_field() -> int
+    return 11
 end
 
 fn semantic_visibility_public() -> int

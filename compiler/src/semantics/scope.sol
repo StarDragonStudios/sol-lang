@@ -1,6 +1,6 @@
 inject namespace std.memory as memory
 inject std.collections.vector
-inject semantics.symbol only SemanticSymbol, destroy_semantic_symbol
+inject semantics.symbol only SemanticSymbol, destroy_semantic_symbol, semantic_symbol_kind_class_field
 
 struct Scope
     kind: int
@@ -79,6 +79,59 @@ fn scope_declare(
 
     vector_push<pointer<SemanticSymbol>>(scope->symbols, symbol)
     return scope_declare_success()
+end
+
+fn scope_declare_member(
+    scope: pointer<Scope>,
+    symbol: pointer<SemanticSymbol>
+) -> int
+    if scope == null || symbol == null || scope->kind != scope_kind_class() then
+        return scope_declare_invalid()
+    end
+
+    if scope->frozen then
+        return scope_declare_frozen()
+    end
+
+    @mut let index: int = 0
+    let count: int = scope_declared_symbol_count(scope)
+
+    while index < count do
+        let existing: pointer<SemanticSymbol> = scope_declared_symbol(scope, index)
+
+        if existing->name == symbol->name && existing->kind == semantic_symbol_kind_class_field() && symbol->kind == semantic_symbol_kind_class_field() then
+            return scope_declare_duplicate()
+        end
+
+        index = index + 1
+    end
+
+    vector_push<pointer<SemanticSymbol>>(scope->symbols, symbol)
+    return scope_declare_success()
+end
+
+fn scope_lookup_class_field(
+    scope: pointer<Scope>,
+    name: string
+) -> pointer<SemanticSymbol>
+    if scope == null || name == "" || scope->kind != scope_kind_class() then
+        return null
+    end
+
+    @mut let index: int = 0
+    let count: int = scope_declared_symbol_count(scope)
+
+    while index < count do
+        let symbol: pointer<SemanticSymbol> = scope_declared_symbol(scope, index)
+
+        if symbol->kind == semantic_symbol_kind_class_field() && symbol->name == name then
+            return symbol
+        end
+
+        index = index + 1
+    end
+
+    return null
 end
 
 fn scope_freeze(scope: pointer<Scope>) -> boolean

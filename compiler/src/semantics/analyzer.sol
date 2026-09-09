@@ -556,6 +556,173 @@ fn semantic_bind_class_scope(
         member_scope
     )
     semantic_validate_class_annotations(program, module, declaration)
+    semantic_bind_class_fields(
+        program,
+        module,
+        declaration,
+        symbol,
+        member_scope
+    )
+    return
+end
+
+fn semantic_bind_class_fields(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    declaration: pointer<SyntaxNode>,
+    class_symbol: pointer<SemanticSymbol>,
+    member_scope: pointer<Scope>
+) -> void
+    @mut let index: int = 0
+    @mut let field_index: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let field_declaration: pointer<SyntaxNode> = syntax_child(
+            declaration,
+            index
+        )
+
+        if field_declaration->kind == syntax_kind_class_field_declaration() then
+            let field: pointer<SemanticSymbol> = create_class_field_symbol(
+                class_symbol,
+                field_declaration,
+                field_index
+            )
+            semantic_program_record_symbol(
+                program,
+                semantic_binding_kind_declared_symbol(),
+                field_declaration,
+                field
+            )
+
+            if class_symbol->kind == semantic_symbol_kind_interface() then
+                semantic_report(
+                    program,
+                    module,
+                    "SOL-S056",
+                    "Interface '" + class_symbol->name + "' cannot declare instance fields.",
+                    field_declaration
+                )
+            end
+
+            semantic_validate_class_field_annotations(
+                program,
+                module,
+                field_declaration
+            )
+
+            if scope_declare_member(member_scope, field) != scope_declare_success() then
+                semantic_program_own_symbol(program, field)
+                semantic_report(
+                    program,
+                    module,
+                    "SOL-S054",
+                    "Class '" + class_symbol->name + "' declares field '" + field->name + "' more than once.",
+                    field_declaration
+                )
+            end
+
+            let reference: pointer<SyntaxNode> = semantic_symbol_declared_type_reference(
+                field
+            )
+            let field_type: pointer<SemanticType> = semantic_resolve_type_reference(
+                program,
+                module,
+                reference,
+                class_symbol
+            )
+
+            if field_type->kind != semantic_type_kind_error() then
+                if field_type->name == "void" || field_type->kind == semantic_type_kind_interface() then
+                    semantic_report(
+                        program,
+                        module,
+                        "SOL-S055",
+                        "Field '" + field->name + "' of class '" + class_symbol->name + "' cannot have type '" + field_type->name + "'.",
+                        reference
+                    )
+                end
+            end
+
+            field_index = field_index + 1
+        end
+
+        index = index + 1
+    end
+
+    return
+end
+
+fn semantic_validate_class_field_annotations(
+    program: pointer<SemanticProgram>,
+    module: pointer<SemanticModule>,
+    declaration: pointer<SyntaxNode>
+) -> void
+    @mut let index: int = 0
+    @mut let visibility_count: int = 0
+    let count: int = syntax_child_count(declaration)
+
+    while index < count do
+        let annotation: pointer<SyntaxNode> = syntax_child(declaration, index)
+
+        if annotation->kind == syntax_kind_annotation() then
+            let name: string = annotation->text
+
+            if name != "public" && name != "protected" && name != "private" then
+                semantic_report(
+                    program,
+                    module,
+                    "SOL-S052",
+                    "Annotation '@" + name + "' is not valid on an instance field.",
+                    annotation
+                )
+            else
+                visibility_count = visibility_count + 1
+            end
+
+            if semantic_declaration_annotation_count(declaration, name) > 1 then
+                @mut let previous: int = 0
+                @mut let already_seen: boolean = false
+
+                while previous < index do
+                    let previous_child: pointer<SyntaxNode> = syntax_child(
+                        declaration,
+                        previous
+                    )
+
+                    if previous_child->kind == syntax_kind_annotation() && previous_child->text == name then
+                        already_seen = true
+                    end
+
+                    previous = previous + 1
+                end
+
+                if already_seen then
+                    semantic_report(
+                        program,
+                        module,
+                        "SOL-S053",
+                        "Field annotation '@" + name + "' is declared more than once.",
+                        annotation
+                    )
+                end
+            end
+        end
+
+        index = index + 1
+    end
+
+    if visibility_count > 1 then
+        semantic_report(
+            program,
+            module,
+            "SOL-S053",
+            "Instance field must not specify more than one visibility.",
+            declaration
+        )
+    end
+
     return
 end
 
@@ -2045,6 +2212,10 @@ fn semantic_bind_field_assignment(
         function
     )
     let root: pointer<SemanticSymbol> = semantic_field_root_symbol(program, target)
+    let mutates_object_state: boolean = semantic_access_chain_contains_class_field(
+        program,
+        target
+    )
 
     if root != null then
         semantic_program_record_symbol(
@@ -2065,7 +2236,7 @@ fn semantic_bind_field_assignment(
         function
     )
 
-    if root == null then
+    if root == null && !mutates_object_state then
         semantic_report(
             program,
             module,
@@ -2074,6 +2245,20 @@ fn semantic_bind_field_assignment(
             target
         )
     else
+        if mutates_object_state then
+            if semantic_types_are_incompatible(target_type, value_type) then
+                semantic_report(
+                    program,
+                    module,
+                    "SOL-S011",
+                    "Cannot assign value of type '" + value_type->name + "' to field of type '" + target_type->name + "'.",
+                    value
+                )
+            end
+
+            return
+        end
+
         if root->kind == semantic_symbol_kind_local_variable() then
             if !root->mutable then
                 semantic_report(
@@ -3183,6 +3368,61 @@ fn semantic_bind_field_access(
 
     let field_name: string = expression->text
 
+    if target_type->kind == semantic_type_kind_class() || target_type->kind == semantic_type_kind_interface() then
+        let class_symbol: pointer<SemanticSymbol> = semantic_object_symbol_for_type(
+            program,
+            target_type
+        )
+        let member_scope: pointer<Scope> = semantic_model_class_scope(
+            program,
+            class_symbol->declaration
+        )
+        let field: pointer<SemanticSymbol> = scope_lookup_class_field(
+            member_scope,
+            field_name
+        )
+
+        if field == null then
+            semantic_report(
+                program,
+                module,
+                "SOL-S058",
+                "Type '" + class_symbol->name + "' has no field named '" + field_name + "'.",
+                syntax_child(expression, 1)
+            )
+            return type_catalog_error(program->catalog)
+        end
+
+        let current_class: pointer<SemanticSymbol> = semantic_enclosing_class(
+            function
+        )
+
+        if !semantic_class_field_is_accessible(field, current_class) then
+            semantic_report(
+                program,
+                module,
+                "SOL-S057",
+                "Field '" + field_name + "' is not accessible in this context.",
+                syntax_child(expression, 1)
+            )
+            return type_catalog_error(program->catalog)
+        end
+
+        @mut let object_binding_kind: int = semantic_binding_kind_accessed_field()
+
+        if through_pointer then
+            object_binding_kind = semantic_binding_kind_accessed_pointer_field()
+        end
+
+        semantic_program_record_symbol(
+            program,
+            object_binding_kind,
+            expression,
+            field
+        )
+        return semantic_field_type(program, target_type, field)
+    end
+
     if target_type->kind != semantic_type_kind_struct() then
         semantic_report(
             program,
@@ -3222,6 +3462,54 @@ fn semantic_bind_field_access(
 
     semantic_program_record_symbol(program, binding_kind, expression, field)
     return semantic_field_type(program, target_type, field)
+end
+
+fn semantic_object_symbol_for_type(
+    program: pointer<SemanticProgram>,
+    type: pointer<SemanticType>
+) -> pointer<SemanticSymbol>
+    if program == null || type == null then
+        return null
+    end
+
+    if type->kind != semantic_type_kind_class() && type->kind != semantic_type_kind_interface() then
+        return null
+    end
+
+    return semantic_program_symbol_of(
+        program,
+        semantic_binding_kind_declared_symbol(),
+        type->identity
+    )
+end
+
+fn semantic_enclosing_class(
+    function: pointer<SemanticSymbol>
+) -> pointer<SemanticSymbol>
+    if function == null || function->owner == null then
+        return null
+    end
+
+    if function->owner->kind == semantic_symbol_kind_class() || function->owner->kind == semantic_symbol_kind_interface() then
+        return function->owner
+    end
+
+    return null
+end
+
+fn semantic_class_field_is_accessible(
+    field: pointer<SemanticSymbol>,
+    current_class: pointer<SemanticSymbol>
+) -> boolean
+    if field == null then
+        return false
+    end
+
+    if semantic_symbol_visibility(field) == semantic_visibility_public() then
+        return true
+    end
+
+    return current_class == field->owner
 end
 
 fn semantic_bind_index_expression(
@@ -3336,6 +3624,35 @@ fn semantic_field_root_symbol(
         semantic_binding_kind_resolved_name(),
         target
     )
+end
+
+fn semantic_access_chain_contains_class_field(
+    program: pointer<SemanticProgram>,
+    expression: pointer<SyntaxNode>
+) -> boolean
+    @mut let current: pointer<SyntaxNode> = expression
+
+    while current->kind == syntax_kind_field_access_expression() || current->kind == syntax_kind_pointer_field_access_expression() do
+        @mut let binding_kind: int = semantic_binding_kind_accessed_field()
+
+        if current->kind == syntax_kind_pointer_field_access_expression() then
+            binding_kind = semantic_binding_kind_accessed_pointer_field()
+        end
+
+        let field: pointer<SemanticSymbol> = semantic_program_symbol_of(
+            program,
+            binding_kind,
+            current
+        )
+
+        if field != null && field->kind == semantic_symbol_kind_class_field() then
+            return true
+        end
+
+        current = syntax_child(current, 0)
+    end
+
+    return false
 end
 
 fn semantic_field_type(
