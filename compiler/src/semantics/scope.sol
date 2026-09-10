@@ -1,6 +1,6 @@
 inject namespace std.memory as memory
 inject std.collections.vector
-inject semantics.symbol only SemanticSymbol, destroy_semantic_symbol, semantic_symbol_kind_class_field, semantic_symbol_kind_method
+inject semantics.symbol only SemanticSymbol, destroy_semantic_symbol, semantic_symbol_kind_class_field, semantic_symbol_kind_constructor, semantic_symbol_kind_method
 
 struct Scope
     kind: int
@@ -176,6 +176,55 @@ fn scope_class_method(
         let symbol: pointer<SemanticSymbol> = scope_declared_symbol(scope, index)
 
         if symbol->kind == semantic_symbol_kind_method() && symbol->name == name then
+            if found == requested_index then
+                return symbol
+            end
+
+            found = found + 1
+        end
+
+        index = index + 1
+    end
+
+    return null
+end
+
+fn scope_constructor_count(scope: pointer<Scope>) -> int
+    if scope == null || scope->kind != scope_kind_class() then
+        return 0
+    end
+
+    @mut let found: int = 0
+    @mut let index: int = 0
+    let count: int = scope_declared_symbol_count(scope)
+
+    while index < count do
+        if scope_declared_symbol(scope, index)->kind == semantic_symbol_kind_constructor() then
+            found = found + 1
+        end
+
+        index = index + 1
+    end
+
+    return found
+end
+
+fn scope_constructor(
+    scope: pointer<Scope>,
+    requested_index: int
+) -> pointer<SemanticSymbol>
+    if scope == null || requested_index < 0 || scope->kind != scope_kind_class() then
+        return null
+    end
+
+    @mut let found: int = 0
+    @mut let index: int = 0
+    let count: int = scope_declared_symbol_count(scope)
+
+    while index < count do
+        let symbol: pointer<SemanticSymbol> = scope_declared_symbol(scope, index)
+
+        if symbol->kind == semantic_symbol_kind_constructor() then
             if found == requested_index then
                 return symbol
             end

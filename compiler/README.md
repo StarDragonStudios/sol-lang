@@ -243,7 +243,7 @@ model that the semantic-analysis pass will populate:
 * structural pointer types, declaration-identified struct and type-parameter
   types, and nominal class/interface types, including ordered struct generic
   arguments;
-* function, method, explicit-receiver, parameter, local-variable, imported-name,
+* function, method, constructor, explicit-receiver, parameter, local-variable, imported-name,
   module-namespace, struct, struct-field, type-parameter, class, interface and
   class-field symbols;
 * ordered module, class-member, function and block scopes with local and lexical lookup,
@@ -293,11 +293,20 @@ module names, never class members. Field and method selection therefore requires
 Unambiguous method calls bind their selected method and preserve private static
 versus public/protected virtual classification. Exact overload selection is
 staged for #136.
+Constructors are distinct, non-virtual class members selected through
+`Class(args)`, `new Class(args)`, or same-class `this(args)` delegation; their
+source function names are labels rather than callable methods. Direct
+construction produces a noncopyable class value, while `new` produces an owned
+raw `pointer<Class>`. There is no implicit constructor. The analyzer currently
+requires one unambiguous constructor, validates arguments and visibility, and
+requires every own field to be initialized on every normal path. Constructor
+overload selection and delegation-cycle checks remain staged for #136, while
+base-chain validation remains staged for #137.
 Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
 the released `SOL-S001` through `SOL-S047` catalog and extend it with staged
-class, field, method and receiver validation through `SOL-S066`. They are ordered by module and
+class, field, method, receiver and constructor validation through `SOL-S072`. They are ordered by module and
 half-open source span.
 
 `compiler/src/semantic_foundation_test.sol` validates the lower-level catalog,
