@@ -77,6 +77,23 @@ fn launch() -> int
         return 180 + overload_edges
     end
 
+    let inheritance: int = test_class_inheritance()
+    if inheritance != 0 then
+        console::print_line("semantic analysis test failed: class inheritance")
+        return 190 + inheritance
+    end
+    let inheritance_modules: int = test_inheritance_modules()
+    if inheritance_modules != 0 then
+        console::print_line("semantic analysis test failed: inherited module names")
+        return 200 + inheritance_modules
+    end
+
+    let object_returns: int = test_object_return_and_reconstruction_rules()
+    if object_returns != 0 then
+        console::print_line("semantic analysis test failed: object return and reconstruction rules")
+        return 210 + object_returns
+    end
+
     let core: int = test_core_diagnostics()
 
     if core != 0 then
@@ -99,6 +116,163 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_object_return_and_reconstruction_rules() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "class Person\n    @constructor\n    fn build() -> void\n        return\n    end\n    fn create() -> pointer<Person>\n        return new Person()\n    end\nend\nclass Holder\n    person: Person\n    @constructor\n    fn build() -> void\n        this.person = Person()\n    end\nend\nfn create() -> pointer<Person>\n    return new Person()\nend\nfn use(holder: pointer<Holder>) -> void\n    let direct: Holder = Holder()\n    direct.person = Person()\n    holder->person = Person()\n    return\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("object.returns", source, false)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    if failure != 0 then
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "class Person\n    @constructor\n    fn build() -> void\n        return\n    end\n    fn copy() -> Person\n        return this\n    end\nend\nclass Holder\n    person: Person\n    @constructor\n    fn build() -> void\n        this.person = Person()\n    end\nend\nfn create() -> Person\n    return Person()\nend\nfn copy() -> Person\n    let value: Person = Person()\n    return value\nend\nfn use(holder: pointer<Holder>) -> void\n    let direct: Holder = Holder()\n    let person: Person = Person()\n    direct.person = person\n    holder->person = person\n    return\nend"
+    )
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 3
+    end
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze("invalid.object.returns", invalid, false)
+    if semantic_test_code_count(invalid_program, "SOL-S086") != 3 || semantic_test_code_count(invalid_program, "SOL-S072") != 2 then
+        failure = 4
+    end
+    let return_reference: pointer<SyntaxNode> = semantic_function_return_type(semantic_direct_child(syntax_child(invalid.parsed.root, 0), syntax_kind_function_declaration(), 1))
+    if !semantic_test_code_has_span(invalid_program, "SOL-S086", return_reference->span.start.offset, return_reference->span.end_position.offset) then
+        failure = 5
+    end
+    if !semantic_test_diagnostics_ordered(invalid_program) then
+        failure = 6
+    end
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
+end
+
+fn test_class_inheritance() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "class Child << Parent\n    label: string\n    @constructor\n    fn from_int(id: int) -> void\n        @mut let normalized: int = id\n        if normalized < 0 then\n            normalized = 0\n        end\n        base(normalized)\n        base.read()\n        this.label = \"child\"\n    end\n    @constructor\n    fn from_text(text: string) -> void\n        this(1)\n        this.label = text\n    end\n    @override\n    fn describe() -> string\n        return this.label\n    end\n    fn inherited() -> int\n        return this.read()\n    end\n    fn select(value: string) -> string\n        return value\n    end\n    fn accept(value: pointer<Parent>) -> void\n        return\n    end\nend\nclass Parent\n    @protected\n    value: int\n    @private\n    secret: int\n    @protected\n    @constructor\n    fn build(value: int) -> void\n        this.value = value\n        this.secret = 0\n    end\n    fn describe() -> string\n        return \"parent\"\n    end\n    @protected\n    fn read() -> int\n        return this.value\n    end\n    fn select(value: int) -> int\n        return value\n    end\nend\nfn use() -> void\n    let direct: Child = Child(1)\n    let dynamic: pointer<Child> = new Child(\"text\")\n    let parent: pointer<Parent> = dynamic\n    @mut let other: pointer<Parent> = null\n    other = dynamic\n    let base_value: int = direct.select(2)\n    let child_value: string = dynamic->select(\"value\")\n    dynamic->accept(parent)\n    return\nend\nclass Branches\n    value: int\n    @constructor\n    fn build(flag: boolean) -> void\n        if flag then\n            this.value = 1\n            return\n        else\n            this.value = 2\n        end\n        this.read()\n    end\n    fn read() -> int\n        return this.value\n    end\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("inheritance", source, false)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    let child: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, syntax_child(source.parsed.root, 0))
+    let parent: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, syntax_child(source.parsed.root, 1))
+    let describe: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, semantic_direct_child(child->declaration, syntax_kind_function_declaration(), 2))
+    if failure == 0 && (child->base_class != parent || describe->overridden_method == null) then
+        failure = 3
+    end
+    if failure == 0 && describe->overridden_method->owner != parent then
+        failure = 4
+    end
+    let constructor_body: pointer<SyntaxNode> = semantic_function_body(semantic_direct_child(child->declaration, syntax_kind_function_declaration(), 0))
+    let base_call: pointer<SyntaxNode> = syntax_child(syntax_child(constructor_body, 2), 0)
+    if failure == 0 && (semantic_model_called_constructor(program, base_call)->owner != parent || semantic_model_type_of_expression(program, base_call)->name != "void") then
+        failure = 5
+    end
+    let use_body: pointer<SyntaxNode> = semantic_function_body(syntax_child(source.parsed.root, 2))
+    let inherited_call: pointer<SyntaxNode> = syntax_child(syntax_child(use_body, 5), 2)
+    let local_call: pointer<SyntaxNode> = syntax_child(syntax_child(use_body, 6), 2)
+    if failure == 0 && (semantic_model_called_function(program, inherited_call)->owner != parent || semantic_model_called_function(program, local_call)->owner != child) then
+        failure = 6
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    if failure != 0 then
+        return failure
+    end
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "class Parent\n    @private\n    secret: int\n    @protected\n    value: int\n    @constructor\n    fn build() -> void\n        this.secret = 0\n        this.value = 1\n    end\n    fn method() -> int\n        return 1\n    end\nend\nclass Child << Parent\n    secret: int\n    @constructor\n    fn build() -> void\n        let early: int = this.secret\n        if true then\n            base()\n        end\n        return\n    end\n    @override\n    @private\n    fn method() -> string\n        return \"wrong\"\n    end\n    @override\n    fn missing() -> void\n        return\n    end\n    fn access(other: pointer<Child>) -> int\n        return other->value\n    end\n    fn accept(value: pointer<Parent>) -> void\n        return\n    end\nend\nclass Reads\n    first: int\n    second: int\n    @constructor\n    fn build() -> void\n        this.first = this.second\n        this.read()\n        while true do\n            this.second = 1\n        end\n    end\n    fn read() -> int\n        return this.first\n    end\nend\nclass CycleA << CycleB\nend\nclass CycleB << CycleA\nend\nstruct Data\n    value: int\nend\nclass Wrong << Data\nend\nfn invalid(parent: pointer<Parent>, child: pointer<Child>) -> void\n    let down: pointer<Child> = parent\n    child->accept(child)\n    return\nend"
+    )
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 7
+    end
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze("invalid.inheritance", invalid, false)
+    if !semantic_test_has_code(invalid_program, "SOL-S077") || !semantic_test_has_code(invalid_program, "SOL-S078") || !semantic_test_has_code(invalid_program, "SOL-S079") || !semantic_test_has_code(invalid_program, "SOL-S080") || !semantic_test_has_code(invalid_program, "SOL-S081") || !semantic_test_has_code(invalid_program, "SOL-S082") || !semantic_test_has_code(invalid_program, "SOL-S083") || !semantic_test_has_code(invalid_program, "SOL-S084") || !semantic_test_has_code(invalid_program, "SOL-S085") || !semantic_test_has_code(invalid_program, "SOL-S057") || !semantic_test_has_code(invalid_program, "SOL-S008") || !semantic_test_has_code(invalid_program, "SOL-S015") then
+        failure = 8
+    end
+    let invalid_child: pointer<SyntaxNode> = syntax_child(invalid.parsed.root, 1)
+    let hidden_field: pointer<SyntaxNode> = semantic_direct_child(invalid_child, syntax_kind_class_field_declaration(), 0)
+    let cycle: pointer<SyntaxNode> = semantic_direct_child(syntax_child(invalid.parsed.root, 3), syntax_kind_class_base_clause(), 0)
+    let wrong_override: pointer<SyntaxNode> = semantic_direct_child(invalid_child, syntax_kind_function_declaration(), 1)
+    let missing_override: pointer<SyntaxNode> = semantic_direct_child(invalid_child, syntax_kind_function_declaration(), 2)
+    if !semantic_test_code_has_span(invalid_program, "SOL-S078", cycle->span.start.offset, cycle->span.end_position.offset) || !semantic_test_code_has_span(invalid_program, "SOL-S079", hidden_field->span.start.offset, hidden_field->span.end_position.offset) || !semantic_test_code_has_span(invalid_program, "SOL-S080", missing_override->span.start.offset, missing_override->span.end_position.offset) || !semantic_test_code_has_span(invalid_program, "SOL-S081", wrong_override->span.start.offset, wrong_override->span.end_position.offset) then
+        failure = 9
+    end
+    if !semantic_test_diagnostics_ordered(invalid_program) then
+        failure = 10
+    end
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
+end
+
+fn test_inheritance_modules() -> int
+    let library: ParsedSemanticSource = parse_semantic_test_source("@protected\nclass Base\n    @protected\n    value: int\n    @protected\n    @constructor\n    fn build() -> void\n        this.value = 1\n    end\nend\n@private\nclass Hidden\nend")
+    let application: ParsedSemanticSource = parse_semantic_test_source("inject namespace library as model\nclass Child << model::Base\n    @constructor\n    fn build() -> void\n        base()\n    end\n    fn read() -> int\n        return this.value\n    end\nend")
+    if !semantic_test_parse_valid(library) || !semantic_test_parse_valid(application) then
+        destroy_semantic_test_source(application)
+        destroy_semantic_test_source(library)
+        return 1
+    end
+    let sources: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(sources, source_module("application", application.parsed.root))
+    vector_push<SourceModule>(sources, source_module("library", library.parsed.root))
+    let program: pointer<SemanticProgram> = analyze_library_modules(sources)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    let child: pointer<SyntaxNode> = syntax_child(application.parsed.root, 1)
+    let base: pointer<SemanticSymbol> = semantic_model_declared_symbol(program, syntax_child(library.parsed.root, 0))
+    if semantic_model_base_class(program, child) != base then
+        failure = 3
+    end
+    let constructor: pointer<SyntaxNode> = semantic_direct_child(child, syntax_kind_function_declaration(), 0)
+    let receiver: pointer<SemanticSymbol> = semantic_model_base_receiver(program, constructor)
+    if receiver == null then
+        failure = 4
+    else
+        if receiver->owner != base || receiver->name != "base" then
+            failure = 4
+        end
+    end
+    destroy_semantic_program(program)
+    destroy_vector<SourceModule>(sources)
+    destroy_semantic_test_source(application)
+
+    let invalid: ParsedSemanticSource = parse_semantic_test_source("inject namespace library as model\nclass Bad << model::Hidden\nend\nclass Unknown << absent::Base\nend")
+    let invalid_sources: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(invalid_sources, source_module("invalid", invalid.parsed.root))
+    vector_push<SourceModule>(invalid_sources, source_module("library", library.parsed.root))
+    let invalid_program: pointer<SemanticProgram> = analyze_library_modules(invalid_sources)
+    if !semantic_test_has_code(invalid_program, "SOL-S077") || !semantic_test_has_code(invalid_program, "SOL-S003") then
+        failure = 5
+    end
+    destroy_semantic_program(invalid_program)
+    destroy_vector<SourceModule>(invalid_sources)
+    destroy_semantic_test_source(invalid)
+    destroy_semantic_test_source(library)
+    return failure
 end
 
 fn test_overload_resolution() -> int

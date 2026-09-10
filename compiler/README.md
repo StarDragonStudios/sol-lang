@@ -254,7 +254,8 @@ declaration order and avoids making a map implementation a prerequisite for the
 frontend; the representation can be replaced without changing the lookup API.
 
 Ownership is explicit. A scope owns every successfully declared symbol, and a
-symbol owns its child symbols and constructed semantic type. The type catalog
+symbol owns its child symbols and constructed semantic type. Base-class and
+overridden-method links are borrowed, never additional owners. The type catalog
 owns its canonical primitive and error types. Parent scopes, syntax
 declarations, symbol owners, pointer element types and generic type arguments
 are borrowed. Consequently, child scopes must be destroyed before parents, the
@@ -271,10 +272,12 @@ association tables and diagnostics while borrowing the parsed syntax trees.
 
 1. register modules and predeclare classes, interfaces, structs and functions;
 2. resolve direct, selective and namespace injections;
-3. establish class-member scopes and bind class/struct fields plus function and
-   method signatures;
-4. validate recursive value layouts and executable entry points;
-5. bind function bodies and validate reachable generic specializations.
+3. resolve class bases, reject cycles, establish class-member scopes and bind
+   class/struct fields plus function, method and constructor signatures;
+4. validate inherited members, exact overrides, overload declarations, recursive
+   value layouts and executable entry points;
+5. bind bodies, check constructor flow/delegation graphs and validate reachable
+   generic specializations.
 
 Forward declarations and cyclic function-level module dependencies are valid.
 Only declarations made directly by a module are exports, so injected names are
@@ -307,16 +310,43 @@ requires every own field to be initialized on every normal path. Constructors
 cannot accept generic arguments. Same-class delegation cannot repeat or form
 direct/indirect cycles; `this(...)` produces `void`, not a fresh class value.
 Neither delegation nor `new` can initialize/reconstruct a direct class binding.
-Inherited overload lookup, base-chain and early-instance validation remain staged
-for #137.
+Class lookup follows one validated base chain and keeps inherited overloads;
+private methods are excluded from accessible inheritance. All inherited field
+names remain reserved, including private fields. Exact overrides require
+`@override`, the same return type and non-reduced visibility. Protected members
+are accessible in their class/subclasses only through `this` or `base`.
+`base.method()` binds the base implementation explicitly. Base relationships,
+overridden methods and base receivers are queryable through the semantic model.
+
+Derived constructors must reach `base(...)` directly or through `this(...)`.
+The invocation must be one top-level statement. Before it, the flexible prologue
+may compute using locals/parameters but cannot access the early instance.
+Constructor flow intersects branch initialization sets, ignores loop-only writes
+as guarantees, and validates every normal exit. Own fields cannot be read before
+initialization; `this` methods require complete own-field initialization, while
+base-method calls are available after base initialization.
+
+Class-pointer views may upcast during typed initialization and assignment;
+downcasts and direct-value slicing are excluded. Method/constructor argument
+matching stays exact, requiring callers to create the typed view first.
+Object returns must use pointer types, even when the returned expression would
+construct a fresh instance. Direct class fields also require fresh exact-class
+construction rather than copying an existing instance or storing a pointer.
+Interface requirements, abstract completeness and the remaining top-level type
+API visibility rules continue in #138; executable layout/dispatch remain in
+#139–#142.
 Statement binding validates declarations,
 assignments and mutability, conditions, calls and returns. Invalid nodes receive
 the canonical error type to suppress avoidable cascades. Diagnostics preserve
 the released `SOL-S001` through `SOL-S047` catalog and extend it with staged
-class, field, method, receiver and constructor validation through `SOL-S076`.
+class, field, method, receiver and constructor validation through `SOL-S086`.
 `SOL-S065` now identifies ambiguous exact overloads; `SOL-S073`–`SOL-S076`
 identify duplicate signatures, no matching overload, repeated delegation and
-delegation cycles respectively. They are ordered by module and
+delegation cycles respectively. `SOL-S077`–`SOL-S085` cover invalid/cyclic bases,
+inherited field hiding, invalid overrides, constructor invocation placement,
+missing base initialization, early instance access and uninitialized reads.
+`SOL-S086` rejects direct object return types.
+They are ordered by module and
 half-open source span.
 
 `compiler/src/semantic_foundation_test.sol` validates the lower-level catalog,
