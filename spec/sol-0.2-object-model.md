@@ -179,6 +179,11 @@ ranking. Returns do not select overloads. Equal parameter signatures are
 duplicates. Method selection uses the receiver's static type, then dynamic
 dispatch chooses the implementation of that signature.
 
+Pointer upcasts do not participate in method or constructor argument matching,
+even when there is only one candidate. A caller must first create a view with
+the required static pointer type (for example, `let base: pointer<Base> = derived`)
+and pass that view. This keeps adding overloads from changing conversion rules.
+
 Exact interface requirements unify. Incompatible ones are errors. A compatible
 inherited concrete public method may satisfy an interface requirement.
 
