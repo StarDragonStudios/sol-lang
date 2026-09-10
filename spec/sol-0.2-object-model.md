@@ -75,7 +75,8 @@ incompatible equal-name/parameter requirements are invalid. Interface cycles
 are invalid.
 
 Abstract classes may contain fields, constructors, implemented methods and
-bodyless `@fn` methods. Concrete classes must implement every inherited abstract
+bodyless `@fn` methods. Bodyless instance methods cannot be private, since private
+methods cannot be overridden. Concrete classes must implement every inherited abstract
 and interface requirement. Abstract classes and interfaces are not constructible.
 
 ```text
@@ -103,7 +104,9 @@ Top-level type visibility is:
   only in an inheritance/implementation list and while implementing it.
 
 Public APIs cannot expose protected/private types in public fields, parameters
-or returns. Sol 0.2 has no `@internal` visibility.
+or returns, including nested pointer/generic references and inherited public
+members. Qualified type names such as `model::Person` are valid in signatures,
+type arguments and `new`, not only class headers. Sol 0.2 has no `@internal` visibility.
 
 Member visibility is public everywhere the type is visible; private only in the
 declaring class; protected in that class and subclasses through `this` or
@@ -145,7 +148,8 @@ end
 ```
 
 `this.member` accesses the current instance; `base.method()` selects the base
-implementation. `this` cannot be rebound and is invalid outside instance
+implementation and therefore requires a method body, not an abstract requirement.
+`this` cannot be rebound and is invalid outside instance
 members. Unqualified names resolve parameters, locals and module symbols, not
 instance members. Externally, direct instances use `.` and pointers use `->`.
 No unary `*`, `&` or hidden dereference syntax is added.

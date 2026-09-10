@@ -53,6 +53,12 @@ fn launch() -> int
         return 100 + classes
     end
 
+    let qualified: int = test_qualified_object_types()
+    if qualified != 0 then
+        console::print_line("self-host grammar test failed: qualified object types")
+        return 120 + qualified
+    end
+
     let diagnostics: int = test_grammar_diagnostics()
 
     if diagnostics != 0 then
@@ -61,6 +67,28 @@ fn launch() -> int
     end
 
     return 0
+end
+
+fn test_qualified_object_types() -> int
+    let result: GrammarParse = parse_source("fn accept(value: pointer<model::Person>) -> pointer<model::Role>\n    return new model::Person()\nend")
+    if !result.parsed.successful then
+        destroy_grammar_parse(result)
+        return 1
+    end
+    let function: pointer<SyntaxNode> = syntax_child(result.parsed.root, 0)
+    let parameter: pointer<SyntaxNode> = syntax_child(function, 1)
+    let reference: pointer<SyntaxNode> = syntax_child(syntax_child(parameter, 1), 1)
+    @mut let failure: int = 0
+    if reference->text != "model::Person" || syntax_child_count(reference) != 2 || syntax_child(reference, 0)->text != "model" || syntax_child(reference, 1)->text != "Person" || reference->span.end_position.offset - reference->span.start.offset != 13 then
+        failure = 2
+    end
+    destroy_grammar_parse(result)
+    let invalid: GrammarParse = parse_source("@fn bad(value: pointer<model::>) -> void")
+    if invalid.parsed.successful then
+        failure = 3
+    end
+    destroy_grammar_parse(invalid)
+    return failure
 end
 
 fn test_class_declarations_and_lifetime_syntax() -> int
