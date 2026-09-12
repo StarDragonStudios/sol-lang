@@ -37,6 +37,28 @@ fn lower_function(context: pointer<LoweringContext>, entry: pointer<LoweringFunc
         return false
     end
     let declaration: pointer<SyntaxNode> = entry->instantiation->function->declaration
+    let callable: pointer<SemanticSymbol> = entry->instantiation->function
+    if callable->kind == semantic_symbol_kind_method() || callable->kind == semantic_symbol_kind_constructor() then
+        let receiver_symbol: pointer<SemanticSymbol> = semantic_model_method_receiver(context->semantic, declaration)
+        let receiver: pointer<IrParameter> = create_ir_parameter(context->arena, function_context->next_value, "this", entry->reference->receiver_type)
+        function_context->next_value = function_context->next_value + 1
+        @mut let invalid: boolean = receiver_symbol == null
+        if !invalid then
+            invalid = receiver == null
+        end
+        if !invalid then
+            invalid = !define_ir_callable(context->arena, function_context->function, entry->reference->kind, entry->reference->owner, receiver, entry->reference->dispatch, entry->reference->overridden)
+        end
+        if invalid then
+            destroy_lowering_function_context(function_context)
+            return lowering_fail(context, context->arena->error)
+        end
+        vector_push<LoweringValueBinding>(function_context->bindings, LoweringValueBinding { symbol: receiver_symbol, parameter: receiver, local: null })
+        let base_symbol: pointer<SemanticSymbol> = semantic_model_base_receiver(context->semantic, declaration)
+        if base_symbol != null then
+            vector_push<LoweringValueBinding>(function_context->bindings, LoweringValueBinding { symbol: base_symbol, parameter: receiver, local: null })
+        end
+    end
     @mut let parameter_index: int = 0
     while parameter_index < lowering_function_parameter_count(declaration) do
         let parameter_declaration: pointer<SyntaxNode> = lowering_function_parameter(declaration, parameter_index)
@@ -79,6 +101,14 @@ fn lower_function(context: pointer<LoweringContext>, entry: pointer<LoweringFunc
     if !lower_block(function_context, body) then
         destroy_lowering_function_context(function_context)
         return false
+    end
+    if function_context->current != null then
+        if callable->kind == semantic_symbol_kind_constructor() then
+            if !lowering_finish_block(function_context, create_ir_return(context->arena, null)) then
+                destroy_lowering_function_context(function_context)
+                return false
+            end
+        end
     end
     if function_context->current != null then
         destroy_lowering_function_context(function_context)
@@ -300,6 +330,14 @@ fn lower_statement(context: pointer<LoweringFunctionContext>, statement: pointer
     if statement->kind == syntax_kind_while_statement() then
         return lower_while_statement(context, statement)
     end
+    if statement->kind == syntax_kind_delete_statement() then
+        let value: pointer<IrValue> = lower_expression(context, syntax_child(statement, 0))
+        let instruction: pointer<IrInstruction> = create_ir_object_delete(context->global->arena, value)
+        if instruction == null then
+            return lowering_fail(context->global, context->global->arena->error)
+        end
+        return lowering_emit(context, instruction)
+    end
     if statement->kind == syntax_kind_block() then
         return lower_block(context, statement)
     end
@@ -314,10 +352,6 @@ fn lower_variable_declaration(context: pointer<LoweringFunctionContext>, declara
     if symbol->kind != semantic_symbol_kind_local_variable() then
         return lowering_fail(context->global, "variable declaration has no canonical local symbol")
     end
-    let initializer: pointer<IrValue> = lower_expression(context, syntax_child(declaration, 2))
-    if initializer == null then
-        return false
-    end
     let semantic: pointer<SemanticType> = semantic_model_type_of_reference(context->global->semantic, syntax_child(declaration, 1))
     let concrete: pointer<LoweringType> = lowering_type(context->global, semantic, context->entry->instantiation->function, context->entry->instantiation->arguments)
     let type: pointer<IrType> = lowering_ir_type(context->global, concrete)
@@ -328,7 +362,15 @@ fn lower_variable_declaration(context: pointer<LoweringFunctionContext>, declara
     if local == null then
         return false
     end
-    let instruction: pointer<IrInstruction> = create_ir_local_initialize(context->global->arena, local, initializer)
+    if type->kind == ir_type_class() then
+        return lower_object_initialization(context, local, syntax_child(declaration, 2), false)
+    end
+    let initializer: pointer<IrValue> = lower_expression(context, syntax_child(declaration, 2))
+    if initializer == null then
+        return false
+    end
+    let exact_initializer: pointer<IrValue> = lower_value_as(context, initializer, type)
+    let instruction: pointer<IrInstruction> = create_ir_local_initialize(context->global->arena, local, exact_initializer)
     if instruction == null then
         return lowering_fail(context->global, context->global->arena->error)
     end
@@ -346,12 +388,18 @@ fn lower_assignment(context: pointer<LoweringFunctionContext>, statement: pointe
         destroy_lowering_value_binding(binding)
         return lowering_fail(context->global, "assignment target has no lowered local")
     end
+    if binding->local->type->kind == ir_type_class() then
+        let local: pointer<IrLocal> = binding->local
+        destroy_lowering_value_binding(binding)
+        return lower_object_initialization(context, local, syntax_child(statement, 1), true)
+    end
     let value: pointer<IrValue> = lower_expression(context, syntax_child(statement, 1))
     if value == null then
         destroy_lowering_value_binding(binding)
         return false
     end
-    let instruction: pointer<IrInstruction> = create_ir_local_store(context->global->arena, binding->local, value)
+    let exact_value: pointer<IrValue> = lower_value_as(context, value, binding->local->type)
+    let instruction: pointer<IrInstruction> = create_ir_local_store(context->global->arena, binding->local, exact_value)
     destroy_lowering_value_binding(binding)
     if instruction == null then
         return lowering_fail(context->global, context->global->arena->error)
@@ -359,7 +407,86 @@ fn lower_assignment(context: pointer<LoweringFunctionContext>, statement: pointe
     return lowering_emit(context, instruction)
 end
 
+fn lower_object_initialization(context: pointer<LoweringFunctionContext>, local: pointer<IrLocal>, expression: pointer<SyntaxNode>, reconstruct: boolean) -> boolean
+    if expression->kind == syntax_kind_parenthesized_expression() then
+        return lower_object_initialization(context, local, syntax_child(expression, 0), reconstruct)
+    end
+    let constructor_symbol: pointer<SemanticSymbol> = semantic_model_called_constructor(context->global->semantic, expression)
+    let entry: pointer<LoweringFunctionEntry> = lowering_plain_function_entry(context->global, constructor_symbol)
+    @mut let invalid: boolean = constructor_symbol == null
+    if !invalid then
+        invalid = entry == null
+    end
+    if !invalid then
+        invalid = entry->reference == null
+    end
+    if invalid then
+        return lowering_fail(context->global, "object construction has no canonical IR constructor")
+    end
+    let arguments: pointer<Vector<pointer<IrValue>>> = lower_call_arguments(context, expression)
+    if arguments == null then
+        return false
+    end
+    @mut let instruction: pointer<IrInstruction> = null
+    if reconstruct then
+        instruction = create_ir_object_reconstruct(context->global->arena, local, entry->reference, arguments)
+    else
+        instruction = create_ir_object_initialize(context->global->arena, local, entry->reference, arguments)
+    end
+    destroy_vector<pointer<IrValue>>(arguments)
+    if instruction == null then
+        return lowering_fail(context->global, context->global->arena->error)
+    end
+    return lowering_emit(context, instruction)
+end
+
+fn lower_call_arguments(context: pointer<LoweringFunctionContext>, call: pointer<SyntaxNode>) -> pointer<Vector<pointer<IrValue>>>
+    let arguments: pointer<Vector<pointer<IrValue>>> = create_vector<pointer<IrValue>>()
+    @mut let index: int = 0
+    while index < lowering_call_value_count(call) do
+        let value: pointer<IrValue> = lower_expression(context, lowering_call_value(call, index))
+        if value == null then
+            destroy_vector<pointer<IrValue>>(arguments)
+            return null
+        end
+        vector_push<pointer<IrValue>>(arguments, value)
+        index = index + 1
+    end
+    return arguments
+end
+
 fn lower_field_assignment(context: pointer<LoweringFunctionContext>, statement: pointer<SyntaxNode>) -> boolean
+    let object_access: pointer<SyntaxNode> = syntax_child(statement, 0)
+    let anchor: pointer<SyntaxNode> = lower_object_field_anchor(context, object_access)
+    if anchor != null && anchor != object_access then
+        return lower_nested_object_field_assignment(context, statement, anchor)
+    end
+    let object_field_symbol: pointer<SemanticSymbol> = semantic_model_accessed_field(context->global->semantic, object_access)
+    @mut let matches: boolean = object_field_symbol != null
+    if matches then
+        matches = object_field_symbol->kind == semantic_symbol_kind_class_field()
+    end
+    if matches then
+        let receiver: pointer<IrValue> = lower_object_receiver(context, syntax_child(object_access, 0))
+        let field: pointer<IrObjectField> = lower_ir_object_field(context, object_field_symbol)
+        if field == null then
+            return false
+        end
+        @mut let matches_2: boolean = field != null
+        if matches_2 then
+            matches_2 = field->type->kind == ir_type_class()
+        end
+        if matches_2 then
+            return lower_object_field_construction(context, receiver, field, syntax_child(statement, 1))
+        end
+        let value: pointer<IrValue> = lower_expression(context, syntax_child(statement, 1))
+        let exact_value: pointer<IrValue> = lower_value_as(context, value, field->type)
+        let instruction: pointer<IrInstruction> = create_ir_object_field_store(context->global->arena, receiver, field, exact_value)
+        if instruction == null then
+            return lowering_fail(context->global, context->global->arena->error)
+        end
+        return lowering_emit(context, instruction)
+    end
     let symbol: pointer<SemanticSymbol> = semantic_model_field_assignment_target(context->global->semantic, statement)
     let binding: pointer<LoweringValueBinding> = lowering_binding(context, symbol)
     if symbol == null || binding == null then
@@ -382,7 +509,9 @@ fn lower_field_assignment(context: pointer<LoweringFunctionContext>, statement: 
         destroy_lowering_value_binding(binding)
         return false
     end
-    let instruction: pointer<IrInstruction> = create_ir_struct_field_store(context->global->arena, binding->local, path, value)
+    let target_type: pointer<IrType> = vector_get<pointer<IrStructField>>(path, vector_length<pointer<IrStructField>>(path) - 1)->type
+    let exact_value: pointer<IrValue> = lower_value_as(context, value, target_type)
+    let instruction: pointer<IrInstruction> = create_ir_struct_field_store(context->global->arena, binding->local, path, exact_value)
     destroy_vector<pointer<IrStructField>>(path)
     destroy_lowering_value_binding(binding)
     if instruction == null then
@@ -391,7 +520,73 @@ fn lower_field_assignment(context: pointer<LoweringFunctionContext>, statement: 
     return lowering_emit(context, instruction)
 end
 
+fn lower_object_field_anchor(context: pointer<LoweringFunctionContext>, access: pointer<SyntaxNode>) -> pointer<SyntaxNode>
+    if access->kind != syntax_kind_field_access_expression() && access->kind != syntax_kind_pointer_field_access_expression() then
+        return null
+    end
+    @mut let field: pointer<SemanticSymbol> = semantic_model_accessed_field(context->global->semantic, access)
+    if access->kind == syntax_kind_pointer_field_access_expression() then
+        field = semantic_model_accessed_pointer_field(context->global->semantic, access)
+    end
+    if field != null then
+        if field->kind == semantic_symbol_kind_class_field() then
+            return access
+        end
+    end
+    return lower_object_field_anchor(context, syntax_child(access, 0))
+end
+
+fn lower_nested_object_field_assignment(context: pointer<LoweringFunctionContext>, statement: pointer<SyntaxNode>, anchor: pointer<SyntaxNode>) -> boolean
+    let access: pointer<SyntaxNode> = syntax_child(statement, 0)
+    let receiver: pointer<IrValue> = lower_object_receiver(context, syntax_child(anchor, 0))
+    @mut let symbol: pointer<SemanticSymbol> = semantic_model_accessed_field(context->global->semantic, anchor)
+    if anchor->kind == syntax_kind_pointer_field_access_expression() then
+        symbol = semantic_model_accessed_pointer_field(context->global->semantic, anchor)
+    end
+    let field: pointer<IrObjectField> = lower_ir_object_field(context, symbol)
+    if receiver == null || field == null then
+        return false
+    end
+    let path: pointer<Vector<pointer<IrStructField>>> = create_vector<pointer<IrStructField>>()
+    if !lower_field_path(context, access, path) then
+        destroy_vector<pointer<IrStructField>>(path)
+        return false
+    end
+    let value: pointer<IrValue> = lower_expression(context, syntax_child(statement, 1))
+    if value == null then
+        destroy_vector<pointer<IrStructField>>(path)
+        return false
+    end
+    let load: pointer<IrInstruction> = create_ir_object_field_load(context->global->arena, lowering_next_value(context), receiver, field)
+    if !lowering_emit(context, load) then
+        destroy_vector<pointer<IrStructField>>(path)
+        return false
+    end
+    let local: pointer<IrLocal> = create_ir_local(context->global->arena, context->next_local, "$object_field", field->type, ir_local_mutable())
+    context->next_local = context->next_local + 1
+    @mut let valid: boolean = lowering_emit(context, create_ir_local_initialize(context->global->arena, local, load->result))
+    if valid then
+        let target_type: pointer<IrType> = vector_get<pointer<IrStructField>>(path, vector_length<pointer<IrStructField>>(path) - 1)->type
+        let exact_value: pointer<IrValue> = lower_value_as(context, value, target_type)
+        valid = lowering_emit(context, create_ir_struct_field_store(context->global->arena, local, path, exact_value))
+    end
+    destroy_vector<pointer<IrStructField>>(path)
+    if !valid then
+        return false
+    end
+    let updated: pointer<IrInstruction> = create_ir_local_load(context->global->arena, lowering_next_value(context), local)
+    if !lowering_emit(context, updated) then
+        return false
+    end
+    return lowering_emit(context, create_ir_object_field_store(context->global->arena, receiver, field, updated->result))
+end
+
+
 fn lower_field_path(context: pointer<LoweringFunctionContext>, access: pointer<SyntaxNode>, path: pointer<Vector<pointer<IrStructField>>>) -> boolean
+    let anchor: pointer<SyntaxNode> = lower_object_field_anchor(context, access)
+    if anchor == access then
+        return true
+    end
     let target: pointer<SyntaxNode> = syntax_child(access, 0)
     if target->kind == syntax_kind_field_access_expression() then
         if !lower_field_path(context, target, path) then
@@ -422,6 +617,26 @@ fn lower_pointer_field_assignment(context: pointer<LoweringFunctionContext>, sta
     if semantic_field == null then
         return lowering_fail(context->global, "pointer-field assignment lowered a non-pointer-to-struct target")
     end
+    if semantic_field->kind == semantic_symbol_kind_class_field() then
+        let object_field: pointer<IrObjectField> = lower_ir_object_field(context, semantic_field)
+        if object_field == null then
+            return false
+        end
+        @mut let matches: boolean = object_field != null
+        if matches then
+            matches = object_field->type->kind == ir_type_class()
+        end
+        if matches then
+            return lower_object_field_construction(context, pointer_value, object_field, syntax_child(statement, 1))
+        end
+        let object_value: pointer<IrValue> = lower_expression(context, syntax_child(statement, 1))
+        let exact_value: pointer<IrValue> = lower_value_as(context, object_value, object_field->type)
+        let object_instruction: pointer<IrInstruction> = create_ir_object_field_store(context->global->arena, pointer_value, object_field, exact_value)
+        if object_instruction == null then
+            return lowering_fail(context->global, context->global->arena->error)
+        end
+        return lowering_emit(context, object_instruction)
+    end
     if pointer_value->type->kind != ir_type_pointer() || pointer_value->type->element_type->kind != ir_type_struct() then
         return lowering_fail(context->global, "pointer-field assignment lowered a non-pointer-to-struct target")
     end
@@ -430,7 +645,8 @@ fn lower_pointer_field_assignment(context: pointer<LoweringFunctionContext>, sta
     if value == null then
         return false
     end
-    let instruction: pointer<IrInstruction> = create_ir_pointer_field_store(context->global->arena, pointer_value, field, value)
+    let exact_value: pointer<IrValue> = lower_value_as(context, value, field->type)
+    let instruction: pointer<IrInstruction> = create_ir_pointer_field_store(context->global->arena, pointer_value, field, exact_value)
     if instruction == null then
         return lowering_fail(context->global, context->global->arena->error)
     end
@@ -464,9 +680,36 @@ fn lower_return_statement(context: pointer<LoweringFunctionContext>, statement: 
         if value == null then
             return false
         end
+        value = lower_value_as(context, value, context->function->return_type)
     end
     let terminator: pointer<IrTerminator> = create_ir_return(context->global->arena, value)
     return lowering_finish_block(context, terminator)
+end
+
+fn lower_value_as(context: pointer<LoweringFunctionContext>, value: pointer<IrValue>, expected: pointer<IrType>) -> pointer<IrValue>
+    @mut let invalid: boolean = value == null
+    if !invalid then
+        invalid = expected == null
+    end
+    if !invalid then
+        invalid = ir_type_equals(value->type, expected)
+    end
+    if invalid then
+        return value
+    end
+    if value->type->kind == ir_type_pointer() && expected->kind == ir_type_pointer() && ir_object_is_subtype(value->type->element_type, expected->element_type) then
+        let view: pointer<IrInstruction> = create_ir_object_view(context->global->arena, lowering_next_value(context), value, expected)
+        @mut let invalid_2: boolean = view == null
+        if !invalid_2 then
+            invalid_2 = !lowering_emit(context, view)
+        end
+        if invalid_2 then
+            return null
+        end
+        return view->result
+    end
+    lowering_fail(context->global, "lowered value cannot be represented as the expected IR type")
+    return null
 end
 
 fn lower_conditional_statement(context: pointer<LoweringFunctionContext>, statement: pointer<SyntaxNode>) -> boolean
@@ -608,7 +851,11 @@ fn lower_expression(context: pointer<LoweringFunctionContext>, expression: point
                                             if expression->kind == syntax_kind_index_expression() then
                                                 value = lower_index_expression(context, expression)
                                             else
-                                                lowering_fail(context->global, "unsupported expression syntax during IR lowering")
+                                                if expression->kind == syntax_kind_new_expression() then
+                                                    value = lower_new_expression(context, expression)
+                                                else
+                                                    lowering_fail(context->global, "unsupported expression syntax during IR lowering")
+                                                end
                                             end
                                         end
                                     end
@@ -629,6 +876,35 @@ fn lower_expression(context: pointer<LoweringFunctionContext>, expression: point
         return null
     end
     return value
+end
+
+fn lower_new_expression(context: pointer<LoweringFunctionContext>, expression: pointer<SyntaxNode>) -> pointer<IrValue>
+    let class_symbol: pointer<SemanticSymbol> = semantic_model_constructed_class(context->global->semantic, expression)
+    let constructor_symbol: pointer<SemanticSymbol> = semantic_model_called_constructor(context->global->semantic, expression)
+    let object: pointer<LoweringObjectEntry> = lowering_object_entry(context->global, class_symbol)
+    let constructor: pointer<LoweringFunctionEntry> = lowering_plain_function_entry(context->global, constructor_symbol)
+    @mut let invalid: boolean = object == null
+    if !invalid then
+        invalid = constructor == null
+    end
+    if invalid then
+        lowering_fail(context->global, "new expression has no canonical IR class or constructor")
+        return null
+    end
+    let arguments: pointer<Vector<pointer<IrValue>>> = lower_call_arguments(context, expression)
+    if arguments == null then
+        return null
+    end
+    let instruction: pointer<IrInstruction> = create_ir_object_new(context->global->arena, lowering_next_value(context), object->ir_type, constructor->reference, arguments)
+    destroy_vector<pointer<IrValue>>(arguments)
+    @mut let invalid_2: boolean = instruction == null
+    if !invalid_2 then
+        invalid_2 = !lowering_emit(context, instruction)
+    end
+    if invalid_2 then
+        return null
+    end
+    return instruction->result
 end
 
 fn lower_expression_type(context: pointer<LoweringFunctionContext>, expression: pointer<SyntaxNode>) -> pointer<IrType>
@@ -883,11 +1159,28 @@ fn lower_name(context: pointer<LoweringFunctionContext>, expression: pointer<Syn
     let binding: pointer<LoweringValueBinding> = lowering_binding(context, symbol)
     if symbol == null || binding == null then
         destroy_lowering_value_binding(binding)
-        lowering_fail(context->global, "name expression has no lowered semantic value")
+        lowering_fail(context->global, "name expression has no lowered semantic value: " + expression->text)
         return null
     end
     if binding->parameter != null then
-        let value: pointer<IrValue> = binding->parameter->value
+        @mut let value: pointer<IrValue> = binding->parameter->value
+        let expected: pointer<IrType> = lower_expression_type(context, expression)
+        @mut let matches: boolean = expected != null
+        if matches then
+            matches = !ir_type_equals(value->type, expected)
+        end
+        if matches then
+            let view: pointer<IrInstruction> = create_ir_object_view(context->global->arena, lowering_next_value(context), value, expected)
+            @mut let invalid_2: boolean = view == null
+            if !invalid_2 then
+                invalid_2 = !lowering_emit(context, view)
+            end
+            if invalid_2 then
+                destroy_lowering_value_binding(binding)
+                return null
+            end
+            value = view->result
+        end
         destroy_lowering_value_binding(binding)
         return value
     end
@@ -922,7 +1215,11 @@ fn lower_unary(context: pointer<LoweringFunctionContext>, expression: pointer<Sy
         end
     end
     let instruction: pointer<IrInstruction> = create_ir_unary_instruction(context->global->arena, lowering_next_value(context), operator, operand)
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid: boolean = instruction == null
+    if !invalid then
+        invalid = !lowering_emit(context, instruction)
+    end
+    if invalid then
         return null
     end
     return instruction->result
@@ -936,7 +1233,11 @@ fn lower_binary(context: pointer<LoweringFunctionContext>, expression: pointer<S
     end
     let operator: int = lower_binary_operator(expression->variant)
     let instruction: pointer<IrInstruction> = create_ir_binary_instruction(context->global->arena, lowering_next_value(context), operator, left, right)
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid: boolean = instruction == null
+    if !invalid then
+        invalid = !lowering_emit(context, instruction)
+    end
+    if invalid then
         return null
     end
     return instruction->result
@@ -983,7 +1284,11 @@ fn lower_binary_operator(variant: int) -> int
 end
 
 fn lower_call(context: pointer<LoweringFunctionContext>, call: pointer<SyntaxNode>) -> pointer<IrInstruction>
-    let target: pointer<SemanticSymbol> = semantic_model_called_function(context->global->semantic, call)
+    @mut let target: pointer<SemanticSymbol> = semantic_model_called_function(context->global->semantic, call)
+    let constructor_target: pointer<SemanticSymbol> = semantic_model_called_constructor(context->global->semantic, call)
+    if target == null then
+        target = constructor_target
+    end
     if target == null then
         lowering_fail(context->global, "call expression has no canonical semantic function")
         return null
@@ -1010,29 +1315,223 @@ fn lower_call(context: pointer<LoweringFunctionContext>, call: pointer<SyntaxNod
         lowering_fail(context->global, "called function has no canonical IR reference")
         return null
     end
-    let arguments: pointer<Vector<pointer<IrValue>>> = create_vector<pointer<IrValue>>()
-    index = 0
-    while index < lowering_call_value_count(call) do
-        let value: pointer<IrValue> = lower_expression(context, lowering_call_value(call, index))
-        if value == null then
-            destroy_vector<pointer<IrValue>>(arguments)
+    @mut let receiver_expression: pointer<SyntaxNode> = null
+    @mut let exact_receiver: pointer<IrValue> = null
+    if entry->reference->kind == ir_function_kind_method() then
+        let callee: pointer<SyntaxNode> = syntax_child(call, 0)
+        receiver_expression = syntax_child(callee, 0)
+        let receiver: pointer<IrValue> = lower_object_receiver(context, receiver_expression)
+        exact_receiver = lower_receiver_view(context, receiver, entry->reference->receiver_type)
+        if exact_receiver == null then
             return null
         end
-        vector_push<pointer<IrValue>>(arguments, value)
-        index = index + 1
+    end
+    let arguments: pointer<Vector<pointer<IrValue>>> = lower_call_arguments(context, call)
+    if arguments == null then
+        return null
     end
     @mut let instruction: pointer<IrInstruction> = null
-    if entry->reference->return_type->value_type then
-        instruction = create_ir_value_call_instruction(context->global->arena, lowering_next_value(context), entry->reference, arguments)
+    if entry->reference->kind == ir_function_kind_constructor() then
+        let receiver: pointer<IrValue> = lower_current_constructor_receiver(context, entry->reference)
+        instruction = create_ir_constructor_call(context->global->arena, entry->reference, receiver, arguments)
     else
-        instruction = create_ir_void_call_instruction(context->global->arena, entry->reference, arguments)
+        if entry->reference->kind == ir_function_kind_method() then
+            let dispatch: int = lower_method_dispatch(context, target, receiver_expression)
+            if entry->reference->return_type->value_type then
+                instruction = create_ir_method_call(context->global->arena, lowering_next_value(context), entry->reference, exact_receiver, arguments, dispatch)
+            else
+                instruction = create_ir_void_method_call(context->global->arena, entry->reference, exact_receiver, arguments, dispatch)
+            end
+        else
+            if entry->reference->return_type->value_type then
+                instruction = create_ir_value_call_instruction(context->global->arena, lowering_next_value(context), entry->reference, arguments)
+            else
+                instruction = create_ir_void_call_instruction(context->global->arena, entry->reference, arguments)
+            end
+        end
     end
     destroy_vector<pointer<IrValue>>(arguments)
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid: boolean = instruction == null
+    if !invalid then
+        invalid = !lowering_emit(context, instruction)
+    end
+    if invalid then
         lowering_fail(context->global, context->global->arena->error)
         return null
     end
     return instruction
+end
+
+fn lower_current_constructor_receiver(context: pointer<LoweringFunctionContext>, target: pointer<IrFunctionReference>) -> pointer<IrValue>
+    let current: pointer<SemanticSymbol> = context->entry->instantiation->function
+    let receiver_symbol: pointer<SemanticSymbol> = semantic_model_method_receiver(context->global->semantic, current->declaration)
+    let binding: pointer<LoweringValueBinding> = lowering_binding(context, receiver_symbol)
+    @mut let invalid: boolean = binding == null
+    if !invalid then
+        invalid = binding->parameter == null
+    end
+    if invalid then
+        destroy_lowering_value_binding(binding)
+        lowering_fail(context->global, "constructor delegation has no current receiver")
+        return null
+    end
+    let receiver: pointer<IrValue> = lower_receiver_view(context, binding->parameter->value, target->receiver_type)
+    destroy_lowering_value_binding(binding)
+    return receiver
+end
+
+fn lower_object_receiver(context: pointer<LoweringFunctionContext>, expression: pointer<SyntaxNode>) -> pointer<IrValue>
+    if expression->kind == syntax_kind_parenthesized_expression() then
+        return lower_object_receiver(context, syntax_child(expression, 0))
+    end
+    let receiver_symbol: pointer<SemanticSymbol> = semantic_model_resolved_name(context->global->semantic, expression)
+    if receiver_symbol != null then
+        if receiver_symbol->kind == semantic_symbol_kind_receiver() then
+            let owner: pointer<LoweringObjectEntry> = lowering_object_entry(context->global, receiver_symbol->owner)
+            if owner == null then
+                return null
+            end
+            return lower_receiver_view(context, context->function->receiver->value, create_ir_pointer_type(context->global->arena, owner->ir_type))
+        end
+    end
+    let semantic: pointer<SemanticType> = semantic_model_type_of_expression(context->global->semantic, expression)
+    @mut let matches: boolean = semantic != null
+    if matches then
+        matches = semantic->kind == semantic_type_kind_class()
+    end
+    if matches then
+        matches = (expression->kind == syntax_kind_field_access_expression() || expression->kind == syntax_kind_pointer_field_access_expression())
+    end
+    if matches then
+        @mut let owner: pointer<IrValue> = null
+        @mut let field_symbol: pointer<SemanticSymbol> = null
+        if expression->kind == syntax_kind_field_access_expression() then
+            owner = lower_object_receiver(context, syntax_child(expression, 0))
+            field_symbol = semantic_model_accessed_field(context->global->semantic, expression)
+        else
+            owner = lower_expression(context, syntax_child(expression, 0))
+            field_symbol = semantic_model_accessed_pointer_field(context->global->semantic, expression)
+        end
+        let field: pointer<IrObjectField> = lower_ir_object_field(context, field_symbol)
+        let address: pointer<IrInstruction> = create_ir_object_field_address(context->global->arena, lowering_next_value(context), owner, field)
+        @mut let invalid_2: boolean = address == null
+        if !invalid_2 then
+            invalid_2 = !lowering_emit(context, address)
+        end
+        if invalid_2 then
+            return null
+        end
+        return address->result
+    end
+    @mut let matches_3: boolean = semantic != null
+    if matches_3 then
+        matches_3 = semantic->kind == semantic_type_kind_class()
+    end
+    if matches_3 then
+        matches_3 = expression->kind == syntax_kind_name_expression()
+    end
+    if matches_3 then
+        let symbol: pointer<SemanticSymbol> = semantic_model_resolved_name(context->global->semantic, expression)
+        let binding: pointer<LoweringValueBinding> = lowering_binding(context, symbol)
+        @mut let invalid_4: boolean = binding == null
+        if !invalid_4 then
+            invalid_4 = binding->local == null
+        end
+        if invalid_4 then
+            destroy_lowering_value_binding(binding)
+            lowering_fail(context->global, "object receiver has no lowered storage")
+            return null
+        end
+        let address: pointer<IrInstruction> = create_ir_object_address(context->global->arena, lowering_next_value(context), binding->local)
+        destroy_lowering_value_binding(binding)
+        @mut let invalid_5: boolean = address == null
+        if !invalid_5 then
+            invalid_5 = !lowering_emit(context, address)
+        end
+        if invalid_5 then
+            return null
+        end
+        return address->result
+    end
+    return lower_expression(context, expression)
+end
+
+fn lower_object_field_construction(context: pointer<LoweringFunctionContext>, receiver: pointer<IrValue>, field: pointer<IrObjectField>, expression: pointer<SyntaxNode>) -> boolean
+    if expression->kind == syntax_kind_parenthesized_expression() then
+        return lower_object_field_construction(context, receiver, field, syntax_child(expression, 0))
+    end
+    let constructor_symbol: pointer<SemanticSymbol> = semantic_model_called_constructor(context->global->semantic, expression)
+    let constructor: pointer<LoweringFunctionEntry> = lowering_plain_function_entry(context->global, constructor_symbol)
+    if constructor == null then
+        return lowering_fail(context->global, "object field construction has no canonical IR constructor")
+    end
+    let arguments: pointer<Vector<pointer<IrValue>>> = lower_call_arguments(context, expression)
+    if arguments == null then
+        return false
+    end
+    let instruction: pointer<IrInstruction> = create_ir_object_field_construct(context->global->arena, receiver, field, constructor->reference, arguments)
+    destroy_vector<pointer<IrValue>>(arguments)
+    if instruction == null then
+        return lowering_fail(context->global, context->global->arena->error)
+    end
+    return lowering_emit(context, instruction)
+end
+
+fn lower_receiver_view(context: pointer<LoweringFunctionContext>, receiver: pointer<IrValue>, expected: pointer<IrType>) -> pointer<IrValue>
+    @mut let invalid: boolean = receiver == null
+    if !invalid then
+        invalid = expected == null
+    end
+    if invalid then
+        return null
+    end
+    if ir_type_equals(receiver->type, expected) then
+        return receiver
+    end
+    let view: pointer<IrInstruction> = create_ir_object_view(context->global->arena, lowering_next_value(context), receiver, expected)
+    @mut let invalid_2: boolean = view == null
+    if !invalid_2 then
+        invalid_2 = !lowering_emit(context, view)
+    end
+    if invalid_2 then
+        return null
+    end
+    return view->result
+end
+
+fn lower_method_dispatch(context: pointer<LoweringFunctionContext>, method: pointer<SemanticSymbol>, receiver: pointer<SyntaxNode>) -> int
+    if receiver->kind == syntax_kind_parenthesized_expression() then
+        return lower_method_dispatch(context, method, syntax_child(receiver, 0))
+    end
+    @mut let invalid: boolean = method == null
+    if !invalid then
+        invalid = !semantic_method_is_virtual(method)
+    end
+    if invalid then
+        return ir_dispatch_direct()
+    end
+    let receiver_symbol: pointer<SemanticSymbol> = semantic_model_resolved_name(context->global->semantic, receiver)
+    @mut let matches_2: boolean = receiver_symbol != null
+    if matches_2 then
+        matches_2 = receiver_symbol->name == "base"
+    end
+    if matches_2 then
+        return ir_dispatch_direct()
+    end
+    @mut let matches_3: boolean = context->entry->instantiation->function->kind == semantic_symbol_kind_constructor()
+    if matches_3 then
+        matches_3 = receiver_symbol != null
+    end
+    if matches_3 then
+        matches_3 = receiver_symbol->kind == semantic_symbol_kind_receiver()
+    end
+    if matches_3 then
+        return ir_dispatch_direct()
+    end
+    if method->owner->kind == semantic_symbol_kind_interface() then
+        return ir_dispatch_interface()
+    end
+    return ir_dispatch_virtual()
 end
 
 fn lower_struct_construction(context: pointer<LoweringFunctionContext>, expression: pointer<SyntaxNode>) -> pointer<IrValue>
@@ -1067,15 +1566,36 @@ fn lower_struct_construction(context: pointer<LoweringFunctionContext>, expressi
     end
     let instruction: pointer<IrInstruction> = create_ir_struct_construct(context->global->arena, lowering_next_value(context), type, values)
     destroy_vector<pointer<IrValue>>(values)
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid: boolean = instruction == null
+    if !invalid then
+        invalid = !lowering_emit(context, instruction)
+    end
+    if invalid then
         return null
     end
     return instruction->result
 end
 
 fn lower_field_access(context: pointer<LoweringFunctionContext>, expression: pointer<SyntaxNode>) -> pointer<IrValue>
-    let target: pointer<IrValue> = lower_expression(context, syntax_child(expression, 0))
     let semantic_field: pointer<SemanticSymbol> = semantic_model_accessed_field(context->global->semantic, expression)
+    @mut let matches: boolean = semantic_field != null
+    if matches then
+        matches = semantic_field->kind == semantic_symbol_kind_class_field()
+    end
+    if matches then
+        let receiver: pointer<IrValue> = lower_object_receiver(context, syntax_child(expression, 0))
+        let object_field: pointer<IrObjectField> = lower_ir_object_field(context, semantic_field)
+        let object_instruction: pointer<IrInstruction> = create_ir_object_field_load(context->global->arena, lowering_next_value(context), receiver, object_field)
+        @mut let invalid_2: boolean = object_instruction == null
+        if !invalid_2 then
+            invalid_2 = !lowering_emit(context, object_instruction)
+        end
+        if invalid_2 then
+            return null
+        end
+        return object_instruction->result
+    end
+    let target: pointer<IrValue> = lower_expression(context, syntax_child(expression, 0))
     if target == null || semantic_field == null then
         lowering_fail(context->global, "field access lowered a non-struct target")
         return null
@@ -1086,7 +1606,11 @@ fn lower_field_access(context: pointer<LoweringFunctionContext>, expression: poi
     end
     let field: pointer<IrStructField> = vector_get<pointer<IrStructField>>(target->type->fields, semantic_field->index)
     let instruction: pointer<IrInstruction> = create_ir_struct_extract(context->global->arena, lowering_next_value(context), target, field)
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid_3: boolean = instruction == null
+    if !invalid_3 then
+        invalid_3 = !lowering_emit(context, instruction)
+    end
+    if invalid_3 then
             return null
         end
     return instruction->result
@@ -1099,16 +1623,55 @@ fn lower_pointer_field_access(context: pointer<LoweringFunctionContext>, express
         lowering_fail(context->global, "pointer-field access lowered a non-pointer-to-struct target")
         return null
     end
+    if semantic_field->kind == semantic_symbol_kind_class_field() then
+        let object_field: pointer<IrObjectField> = lower_ir_object_field(context, semantic_field)
+        let object_instruction: pointer<IrInstruction> = create_ir_object_field_load(context->global->arena, lowering_next_value(context), target, object_field)
+        @mut let invalid: boolean = object_instruction == null
+        if !invalid then
+            invalid = !lowering_emit(context, object_instruction)
+        end
+        if invalid then
+            return null
+        end
+        return object_instruction->result
+    end
     if target->type->kind != ir_type_pointer() || target->type->element_type->kind != ir_type_struct() then
         lowering_fail(context->global, "pointer-field access lowered a non-pointer-to-struct target")
         return null
     end
     let field: pointer<IrStructField> = vector_get<pointer<IrStructField>>(target->type->element_type->fields, semantic_field->index)
     let instruction: pointer<IrInstruction> = create_ir_pointer_field_load(context->global->arena, lowering_next_value(context), target, field)
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid_2: boolean = instruction == null
+    if !invalid_2 then
+        invalid_2 = !lowering_emit(context, instruction)
+    end
+    if invalid_2 then
             return null
         end
     return instruction->result
+end
+
+fn lower_ir_object_field(context: pointer<LoweringFunctionContext>, symbol: pointer<SemanticSymbol>) -> pointer<IrObjectField>
+    @mut let invalid: boolean = symbol == null
+    if !invalid then
+        invalid = symbol->kind != semantic_symbol_kind_class_field()
+    end
+    if invalid then
+        return null
+    end
+    let owner: pointer<LoweringObjectEntry> = lowering_object_entry(context->global, symbol->owner)
+    @mut let invalid_2: boolean = owner == null
+    if !invalid_2 then
+        invalid_2 = symbol->index < 0
+    end
+    if !invalid_2 then
+        invalid_2 = symbol->index >= vector_length<pointer<IrObjectField>>(owner->ir_type->object_fields)
+    end
+    if invalid_2 then
+        lowering_fail(context->global, "object field has no canonical IR identity")
+        return null
+    end
+    return vector_get<pointer<IrObjectField>>(owner->ir_type->object_fields, symbol->index)
 end
 
 fn lower_index_expression(context: pointer<LoweringFunctionContext>, expression: pointer<SyntaxNode>) -> pointer<IrValue>
@@ -1125,7 +1688,11 @@ fn lower_index_expression(context: pointer<LoweringFunctionContext>, expression:
             instruction = create_ir_pointer_index_load(context->global->arena, lowering_next_value(context), target, index)
         end
     end
-    if instruction == null || !lowering_emit(context, instruction) then
+    @mut let invalid: boolean = instruction == null
+    if !invalid then
+        invalid = !lowering_emit(context, instruction)
+    end
+    if invalid then
         lowering_fail(context->global, "index expression lowered an unsupported target")
         return null
     end

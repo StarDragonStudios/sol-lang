@@ -37,7 +37,15 @@ fn format_ir_module(module: pointer<IrModule>) -> string
     @mut let index: int = 0
     while index < vector_length<pointer<IrType>>(module->structs) do
         text = text + format_ir_struct(vector_get<pointer<IrType>>(module->structs, index))
-        if index + 1 < vector_length<pointer<IrType>>(module->structs) || vector_length<pointer<IrFunction>>(module->functions) > 0 then
+        if index + 1 < vector_length<pointer<IrType>>(module->structs) || vector_length<pointer<IrType>>(module->objects) > 0 || vector_length<pointer<IrFunction>>(module->functions) > 0 then
+            text = text + "\n"
+        end
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<IrType>>(module->objects) do
+        text = text + format_ir_object(vector_get<pointer<IrType>>(module->objects, index))
+        if index + 1 < vector_length<pointer<IrType>>(module->objects) || vector_length<pointer<IrFunction>>(module->functions) > 0 then
             text = text + "\n"
         end
         index = index + 1
@@ -51,6 +59,51 @@ fn format_ir_module(module: pointer<IrModule>) -> string
         index = index + 1
     end
     return text + "  }\n"
+end
+
+fn format_ir_object(type: pointer<IrType>) -> string
+    @mut let text: string = "    "
+    if type->abstract_type && type->kind == ir_type_class() then
+        text = text + "abstract "
+    end
+    if type->kind == ir_type_interface() then
+        text = text + "interface " + type->name
+    else
+        text = text + "class " + type->name
+    end
+    if type->base_type != null then
+        text = text + " extends " + type->base_type->name
+    end
+    if vector_length<pointer<IrType>>(type->interfaces) > 0 then
+        text = text + " implements "
+        @mut let interface_index: int = 0
+        while interface_index < vector_length<pointer<IrType>>(type->interfaces) do
+            if interface_index > 0 then
+                text = text + ", "
+            end
+            text = text + vector_get<pointer<IrType>>(type->interfaces, interface_index)->name
+            interface_index = interface_index + 1
+        end
+    end
+    text = text + " {\n"
+    @mut let index: int = 0
+    while index < vector_length<pointer<IrObjectField>>(type->object_fields) do
+        let field: pointer<IrObjectField> = vector_get<pointer<IrObjectField>>(type->object_fields, index)
+        text = text + "      field" + format_ir_int(field->index) + " " + field->name + ": " + field->type->name + "\n"
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<IrRequirementImplementation>>(type->requirements) do
+        let mapping: pointer<IrRequirementImplementation> = vector_get<pointer<IrRequirementImplementation>>(type->requirements, index)
+        text = text + "      requirement @function" + format_ir_int(mapping->requirement->id) + " -> "
+        if mapping->implementation == null then
+            text = text + "abstract\n"
+        else
+            text = text + "@function" + format_ir_int(mapping->implementation->id) + "\n"
+        end
+        index = index + 1
+    end
+    return text + "    }\n"
 end
 
 fn format_ir_struct(type: pointer<IrType>) -> string
@@ -91,17 +144,36 @@ fn format_ir_function(function: pointer<IrFunction>) -> string
 end
 
 fn format_ir_signature(function: pointer<IrFunction>) -> string
-    @mut let text: string = "@function" + format_ir_int(function->id) + " " + function->name + "("
+    @mut let text: string = "@function" + format_ir_int(function->id) + " "
+    if function->kind == ir_function_kind_method() then
+        text = text + "method "
+    else
+        if function->kind == ir_function_kind_constructor() then
+            text = text + "constructor "
+        end
+    end
+    text = text + function->name + "("
+    if function->receiver != null then
+        text = text + "%" + format_ir_int(function->receiver->value->id) + " this: " + function->receiver->value->type->name
+    end
     @mut let index: int = 0
     while index < vector_length<pointer<IrParameter>>(function->parameters) do
         let parameter: pointer<IrParameter> = vector_get<pointer<IrParameter>>(function->parameters, index)
-        if index > 0 then
+        if index > 0 || function->receiver != null then
             text = text + ", "
         end
         text = text + "%" + format_ir_int(parameter->value->id) + " " + parameter->name + ": " + parameter->value->type->name
         index = index + 1
     end
-    return text + ") -> " + function->return_type->name
+    text = text + ") -> " + function->return_type->name
+    if function->kind != ir_function_kind_function() then
+        text = text + " [" + format_ir_dispatch(function->dispatch)
+        if function->overridden != null then
+            text = text + ", overrides @function" + format_ir_int(function->overridden->id)
+        end
+        text = text + "]"
+    end
+    return text
 end
 
 fn format_ir_block(block: pointer<IrBasicBlock>, emitted: pointer<Vector<pointer<IrValue>>>) -> string
@@ -141,6 +213,46 @@ fn format_ir_required_constant(value: pointer<IrValue>, emitted: pointer<Vector<
 end
 
 fn format_ir_instruction(instruction: pointer<IrInstruction>) -> string
+    if instruction->kind == ir_instruction_object_initialize() then
+        return "object_initialize local" + format_ir_int(instruction->local->id) + ", @function" + format_ir_int(instruction->target->id) + "(" + format_ir_operands(instruction->operands) + ")"
+    end
+    if instruction->kind == ir_instruction_object_reconstruct() then
+        return "object_reconstruct local" + format_ir_int(instruction->local->id) + ", @function" + format_ir_int(instruction->target->id) + "(" + format_ir_operands(instruction->operands) + ")"
+    end
+    if instruction->kind == ir_instruction_object_address() then
+        return format_ir_result(instruction) + "object_address local" + format_ir_int(instruction->local->id)
+    end
+    if instruction->kind == ir_instruction_object_field_load() then
+        return format_ir_result(instruction) + "object_field_load %" + format_ir_int(ir_instruction_operand(instruction, 0)->id) + "." + instruction->object_field->owner->name + "::" + instruction->object_field->name
+    end
+    if instruction->kind == ir_instruction_object_field_store() then
+        return "object_field_store %" + format_ir_int(ir_instruction_operand(instruction, 0)->id) + "." + instruction->object_field->owner->name + "::" + instruction->object_field->name + ", %" + format_ir_int(ir_instruction_operand(instruction, 1)->id)
+    end
+    if instruction->kind == ir_instruction_object_field_address() then
+        return format_ir_result(instruction) + "object_field_address %" + format_ir_int(ir_instruction_operand(instruction, 0)->id) + "." + instruction->object_field->owner->name + "::" + instruction->object_field->name
+    end
+    if instruction->kind == ir_instruction_object_field_construct() then
+        return "object_field_construct %" + format_ir_int(ir_instruction_operand(instruction, 0)->id) + "." + instruction->object_field->owner->name + "::" + instruction->object_field->name + ", @function" + format_ir_int(instruction->target->id) + "(" + format_ir_operands_after_first(instruction->operands) + ")"
+    end
+    if instruction->kind == ir_instruction_method_call() || instruction->kind == ir_instruction_void_method_call() then
+        @mut let text: string = ""
+        if instruction->result != null then
+            text = format_ir_result(instruction)
+        end
+        return text + format_ir_dispatch(instruction->dispatch) + "_call @function" + format_ir_int(instruction->target->id) + "(" + format_ir_operands(instruction->operands) + ")"
+    end
+    if instruction->kind == ir_instruction_constructor_call() then
+        return "constructor_call @function" + format_ir_int(instruction->target->id) + "(" + format_ir_operands(instruction->operands) + ")"
+    end
+    if instruction->kind == ir_instruction_object_new() then
+        return format_ir_result(instruction) + "object_new " + instruction->object_type->name + ", @function" + format_ir_int(instruction->target->id) + "(" + format_ir_operands(instruction->operands) + ")"
+    end
+    if instruction->kind == ir_instruction_object_delete() then
+        return "object_delete %" + format_ir_int(ir_instruction_operand(instruction, 0)->id)
+    end
+    if instruction->kind == ir_instruction_object_view() then
+        return format_ir_result(instruction) + "object_view %" + format_ir_int(ir_instruction_operand(instruction, 0)->id) + " as " + instruction->result->type->name
+    end
     if instruction->kind == ir_instruction_local_initialize() then
         return "initialize local" + format_ir_int(instruction->local->id) + " " + format_ir_local_kind(instruction->local->kind) + " " + instruction->local->name + ": " + instruction->local->type->name + ", %" + format_ir_int(ir_instruction_operand(instruction, 0)->id)
     end
@@ -195,6 +307,16 @@ fn format_ir_instruction(instruction: pointer<IrInstruction>) -> string
     return "<unknown instruction>"
 end
 
+fn format_ir_dispatch(dispatch: int) -> string
+    if dispatch == ir_dispatch_virtual() then
+        return "virtual"
+    end
+    if dispatch == ir_dispatch_interface() then
+        return "interface"
+    end
+    return "direct"
+end
+
 fn format_ir_terminator(terminator: pointer<IrTerminator>) -> string
     if terminator->kind == ir_terminator_return() then
         if terminator->value == null then
@@ -220,6 +342,19 @@ fn format_ir_operands(values: pointer<Vector<pointer<IrValue>>>) -> string
     @mut let index: int = 0
     while index < vector_length<pointer<IrValue>>(values) do
         if index > 0 then
+            text = text + ", "
+        end
+        text = text + "%" + format_ir_int(vector_get<pointer<IrValue>>(values, index)->id)
+        index = index + 1
+    end
+    return text
+end
+
+fn format_ir_operands_after_first(values: pointer<Vector<pointer<IrValue>>>) -> string
+    @mut let text: string = ""
+    @mut let index: int = 1
+    while index < vector_length<pointer<IrValue>>(values) do
+        if index > 1 then
             text = text + ", "
         end
         text = text + "%" + format_ir_int(vector_get<pointer<IrValue>>(values, index)->id)

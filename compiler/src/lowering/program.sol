@@ -35,9 +35,18 @@ fn lower_semantic_program(semantic: pointer<SemanticProgram>) -> IrLoweringResul
     if plan == null then
         return finish_lowering_failure(context, null, context->error)
     end
-    @mut let assigned: boolean = lowering_assign_structs(context, plan)
+    @mut let assigned: boolean = lowering_assign_object_shells(context)
+    if assigned then
+        assigned = lowering_assign_structs(context, plan)
+    end
+    if assigned then
+        assigned = lowering_assign_objects(context)
+    end
     if assigned then
         assigned = lowering_assign_functions(context, plan)
+    end
+    if assigned then
+        assigned = lowering_assign_object_requirements(context)
     end
     if !assigned then
         let message: string = context->error
@@ -145,6 +154,24 @@ fn populate_lowered_modules(context: pointer<LoweringContext>, modules: pointer<
         struct_index = struct_index + 1
     end
 
+    @mut let object_index: int = 0
+    while object_index < vector_length<pointer<LoweringObjectEntry>>(context->objects) do
+        let entry: pointer<LoweringObjectEntry> = vector_get<pointer<LoweringObjectEntry>>(context->objects, object_index)
+        let owner: pointer<SemanticModule> = lowering_object_owner(context, entry->symbol)
+        let module: pointer<IrModule> = lowering_ir_module(modules, owner)
+        @mut let invalid: boolean = owner == null
+        if !invalid then
+            invalid = module == null
+        end
+        if !invalid then
+            invalid = !ir_module_add_object(context->arena, module, entry->ir_type)
+        end
+        if invalid then
+            return lowering_fail(context, "lowered object has no canonical module owner")
+        end
+        object_index = object_index + 1
+    end
+
     @mut let function_index: int = 0
     while function_index < vector_length<pointer<LoweringFunctionEntry>>(context->functions) do
         let entry: pointer<LoweringFunctionEntry> = vector_get<pointer<LoweringFunctionEntry>>(context->functions, function_index)
@@ -161,24 +188,46 @@ fn populate_lowered_modules(context: pointer<LoweringContext>, modules: pointer<
     return true
 end
 
+fn lowering_assign_object_requirements(context: pointer<LoweringContext>) -> boolean
+    @mut let object_index: int = 0
+    while object_index < vector_length<pointer<LoweringObjectEntry>>(context->objects) do
+        let object: pointer<LoweringObjectEntry> = vector_get<pointer<LoweringObjectEntry>>(context->objects, object_index)
+        @mut let index: int = 0
+        while index < vector_length<pointer<SemanticSymbol>>(object->symbol->requirements) do
+            let requirement_symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->symbol->requirements, index)
+            let implementation_symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->symbol->implementations, index)
+            @mut let function_index: int = 0
+            while function_index < vector_length<pointer<LoweringFunctionEntry>>(context->functions) do
+                let requirement_entry: pointer<LoweringFunctionEntry> = vector_get<pointer<LoweringFunctionEntry>>(context->functions, function_index)
+                if requirement_entry->instantiation->function == requirement_symbol then
+                    @mut let implementation_reference: pointer<IrFunctionReference> = null
+                    if implementation_symbol != null then
+                        let implementation_instance: pointer<LoweringInstantiation> = lowering_find_instantiation(context, implementation_symbol, requirement_entry->instantiation->arguments)
+                        let implementation_entry: pointer<LoweringFunctionEntry> = lowering_function_entry(context, implementation_instance)
+                        if implementation_entry == null then
+                            return lowering_fail(context, "object requirement implementation has no canonical IR callable")
+                        end
+                        implementation_reference = implementation_entry->reference
+                    end
+                    if !ir_object_add_requirement(context->arena, object->ir_type, requirement_entry->reference, implementation_reference) then
+                        return lowering_fail(context, context->arena->error)
+                    end
+                end
+                function_index = function_index + 1
+            end
+            index = index + 1
+        end
+        object_index = object_index + 1
+    end
+    return true
+end
+
 fn lowering_ir_module(modules: pointer<Vector<LoweringModuleEntry>>, semantic: pointer<SemanticModule>) -> pointer<IrModule>
     @mut let index: int = 0
     while index < vector_length<LoweringModuleEntry>(modules) do
         let entry: LoweringModuleEntry = vector_get<LoweringModuleEntry>(modules, index)
         if entry.semantic == semantic then
             return entry.module
-        end
-        index = index + 1
-    end
-    return null
-end
-
-fn lowering_plain_function_entry(context: pointer<LoweringContext>, symbol: pointer<SemanticSymbol>) -> pointer<LoweringFunctionEntry>
-    @mut let index: int = 0
-    while index < vector_length<pointer<LoweringFunctionEntry>>(context->functions) do
-        let entry: pointer<LoweringFunctionEntry> = vector_get<pointer<LoweringFunctionEntry>>(context->functions, index)
-        if entry->instantiation->function == symbol && vector_length<pointer<LoweringType>>(entry->instantiation->arguments) == 0 then
-            return entry
         end
         index = index + 1
     end

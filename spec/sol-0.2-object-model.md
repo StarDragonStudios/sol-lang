@@ -188,6 +188,14 @@ even when there is only one candidate. A caller must first create a view with
 the required static pointer type (for example, `let base: pointer<Base> = derived`)
 and pass that view. This keeps adding overloads from changing conversion rules.
 
+During constructor execution, a call written through `this` dispatches
+statically to the implementation owned by the class whose constructor is
+currently executing. A base constructor therefore cannot enter an override in
+a derived class before the derived fields have been initialized. Calls written
+through `base` are always direct. Once construction has completed,
+public/protected calls through ordinary object pointers and interface views use
+normal dynamic dispatch.
+
 Exact interface requirements unify. Incompatible ones are errors. A compatible
 inherited concrete public method may satisfy an interface requirement.
 

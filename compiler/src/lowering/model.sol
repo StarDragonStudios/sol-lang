@@ -3,6 +3,7 @@ inject std.collections.vector
 inject frontend.syntax only SyntaxNode, syntax_child_count, syntax_child
 inject semantics.types
 inject semantics.symbol
+inject semantics.scope
 inject semantics.model
 inject ir.model
 
@@ -36,6 +37,12 @@ struct LoweringStructEntry
     ir_type: pointer<IrType>
 end
 
+struct LoweringObjectEntry
+    symbol: pointer<SemanticSymbol>
+    type: pointer<LoweringType>
+    ir_type: pointer<IrType>
+end
+
 struct LoweringContext
     semantic: pointer<SemanticProgram>
     arena: pointer<IrArena>
@@ -43,8 +50,10 @@ struct LoweringContext
     instantiations: pointer<Vector<pointer<LoweringInstantiation>>>
     function_owners: pointer<Vector<LoweringOwner>>
     struct_owners: pointer<Vector<LoweringOwner>>
+    object_owners: pointer<Vector<LoweringOwner>>
     functions: pointer<Vector<pointer<LoweringFunctionEntry>>>
     structs: pointer<Vector<pointer<LoweringStructEntry>>>
+    objects: pointer<Vector<pointer<LoweringObjectEntry>>>
     error: string
 end
 
@@ -67,8 +76,10 @@ fn create_lowering_context(semantic: pointer<SemanticProgram>) -> pointer<Loweri
     context->instantiations = create_vector<pointer<LoweringInstantiation>>()
     context->function_owners = create_vector<LoweringOwner>()
     context->struct_owners = create_vector<LoweringOwner>()
+    context->object_owners = create_vector<LoweringOwner>()
     context->functions = create_vector<pointer<LoweringFunctionEntry>>()
     context->structs = create_vector<pointer<LoweringStructEntry>>()
+    context->objects = create_vector<pointer<LoweringObjectEntry>>()
     context->error = ""
     if context->arena == null then
         destroy_lowering_context(context, false)
@@ -81,7 +92,12 @@ fn destroy_lowering_context(context: pointer<LoweringContext>, keep_arena: boole
     if context == null then
         return
     end
-    @mut let index: int = vector_length<pointer<LoweringStructEntry>>(context->structs)
+    @mut let index: int = vector_length<pointer<LoweringObjectEntry>>(context->objects)
+    while index > 0 do
+        index = index - 1
+        memory::free<LoweringObjectEntry>(vector_get<pointer<LoweringObjectEntry>>(context->objects, index))
+    end
+    index = vector_length<pointer<LoweringStructEntry>>(context->structs)
     while index > 0 do
         index = index - 1
         memory::free<LoweringStructEntry>(vector_get<pointer<LoweringStructEntry>>(context->structs, index))
@@ -106,8 +122,10 @@ fn destroy_lowering_context(context: pointer<LoweringContext>, keep_arena: boole
         memory::free<LoweringType>(type)
     end
     destroy_vector<pointer<LoweringStructEntry>>(context->structs)
+    destroy_vector<pointer<LoweringObjectEntry>>(context->objects)
     destroy_vector<pointer<LoweringFunctionEntry>>(context->functions)
     destroy_vector<LoweringOwner>(context->struct_owners)
+    destroy_vector<LoweringOwner>(context->object_owners)
     destroy_vector<LoweringOwner>(context->function_owners)
     destroy_vector<pointer<LoweringInstantiation>>(context->instantiations)
     destroy_vector<pointer<LoweringType>>(context->types)
@@ -162,6 +180,19 @@ fn lowering_collect_owners(context: pointer<LoweringContext>) -> boolean
                 else
                     if symbol->kind == semantic_symbol_kind_struct() then
                         vector_push<LoweringOwner>(context->struct_owners, LoweringOwner { symbol: symbol, module: module })
+                    else
+                        if symbol->kind == semantic_symbol_kind_class() || symbol->kind == semantic_symbol_kind_interface() then
+                            vector_push<LoweringOwner>(context->object_owners, LoweringOwner { symbol: symbol, module: module })
+                            let members: pointer<Scope> = semantic_model_class_scope(context->semantic, symbol->declaration)
+                            @mut let member_index: int = 0
+                            while member_index < scope_declared_symbol_count(members) do
+                                let member: pointer<SemanticSymbol> = scope_declared_symbol(members, member_index)
+                                if member->kind == semantic_symbol_kind_method() || member->kind == semantic_symbol_kind_constructor() then
+                                    vector_push<LoweringOwner>(context->function_owners, LoweringOwner { symbol: member, module: module })
+                                end
+                                member_index = member_index + 1
+                            end
+                        end
                     end
                 end
             end
@@ -170,6 +201,18 @@ fn lowering_collect_owners(context: pointer<LoweringContext>) -> boolean
         module_index = module_index + 1
     end
     return true
+end
+
+fn lowering_object_owner(context: pointer<LoweringContext>, symbol: pointer<SemanticSymbol>) -> pointer<SemanticModule>
+    @mut let index: int = 0
+    while index < vector_length<LoweringOwner>(context->object_owners) do
+        let owner: LoweringOwner = vector_get<LoweringOwner>(context->object_owners, index)
+        if owner.symbol == symbol then
+            return owner.module
+        end
+        index = index + 1
+    end
+    return null
 end
 
 fn lowering_function_owner(context: pointer<LoweringContext>, function: pointer<SemanticSymbol>) -> pointer<SemanticModule>
@@ -242,11 +285,31 @@ fn lowering_type(context: pointer<LoweringContext>, semantic: pointer<SemanticTy
         return result
     end
 
+    if semantic->kind == semantic_type_kind_class() || semantic->kind == semantic_type_kind_interface() then
+        return intern_lowering_object_type(context, semantic->identity, semantic->name, semantic->kind == semantic_type_kind_interface())
+    end
+
     if semantic->kind != semantic_type_kind_primitive() then
         lowering_fail(context, "unsupported semantic type '" + semantic->name + "' during IR lowering")
         return null
     end
     return intern_lowering_primitive_type(context, semantic->name)
+end
+
+fn intern_lowering_object_type(context: pointer<LoweringContext>, identity: pointer<SyntaxNode>, name: string, interface_type: boolean) -> pointer<LoweringType>
+    @mut let kind: int = lowering_type_class()
+    if interface_type then
+        kind = lowering_type_interface()
+    end
+    @mut let index: int = 0
+    while index < vector_length<pointer<LoweringType>>(context->types) do
+        let type: pointer<LoweringType> = vector_get<pointer<LoweringType>>(context->types, index)
+        if type->kind == kind && type->identity == identity then
+            return type
+        end
+        index = index + 1
+    end
+    return allocate_lowering_type(context, kind, name, identity, null, null)
 end
 
 fn intern_lowering_primitive_type(context: pointer<LoweringContext>, name: string) -> pointer<LoweringType>
@@ -333,7 +396,7 @@ fn create_lowering_instantiation(context: pointer<LoweringContext>, function: po
         lowering_fail(context, "invalid function specialization")
         return null
     end
-    if function->kind != semantic_symbol_kind_function() then
+    if function->kind != semantic_symbol_kind_function() && function->kind != semantic_symbol_kind_method() && function->kind != semantic_symbol_kind_constructor() then
         lowering_fail(context, "invalid function specialization")
         return null
     end
@@ -387,6 +450,15 @@ fn lowering_type_qualified_name(context: pointer<LoweringContext>, type: pointer
     if type->kind == lowering_type_pointer() then
         return "pointer<" + lowering_type_qualified_name(context, type->element) + ">"
     end
+    if type->kind == lowering_type_class() || type->kind == lowering_type_interface() then
+        let object_symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(context->semantic, type->identity)
+        let object_module: pointer<SemanticModule> = lowering_object_owner(context, object_symbol)
+        if object_symbol == null || object_module == null then
+            lowering_fail(context, "object type has no semantic owner")
+            return "<missing-object>"
+        end
+        return object_module->name + "::" + object_symbol->name
+    end
     if type->kind != lowering_type_struct() then
         return type->name
     end
@@ -436,6 +508,18 @@ fn lowering_struct_entry(context: pointer<LoweringContext>, type: pointer<Loweri
     return null
 end
 
+fn lowering_object_entry(context: pointer<LoweringContext>, symbol: pointer<SemanticSymbol>) -> pointer<LoweringObjectEntry>
+    @mut let index: int = 0
+    while index < vector_length<pointer<LoweringObjectEntry>>(context->objects) do
+        let entry: pointer<LoweringObjectEntry> = vector_get<pointer<LoweringObjectEntry>>(context->objects, index)
+        if entry->symbol == symbol then
+            return entry
+        end
+        index = index + 1
+    end
+    return null
+end
+
 fn lowering_type_primitive() -> int
     return 1
 end
@@ -444,4 +528,10 @@ fn lowering_type_struct() -> int
 end
 fn lowering_type_pointer() -> int
     return 3
+end
+fn lowering_type_class() -> int
+    return 4
+end
+fn lowering_type_interface() -> int
+    return 5
 end

@@ -35,6 +35,15 @@ fn generate_llvm_ir(program: pointer<IrProgram>, module_name: string) -> LlvmGen
         invalid.error = "LLVM module name must not be empty"
         return invalid
     end
+    @mut let module_index: int = 0
+    while module_index < vector_length<pointer<IrModule>>(program->modules) do
+        let module: pointer<IrModule> = vector_get<pointer<IrModule>>(program->modules, module_index)
+        if vector_length<pointer<IrType>>(module->objects) != 0 then
+            invalid.error = "LLVM object layout, dispatch and runtime generation are not implemented yet"
+            return invalid
+        end
+        module_index = module_index + 1
+    end
 
     let context: pointer<LlvmGenerationContext> = create_llvm_context(program)
     if context == null then

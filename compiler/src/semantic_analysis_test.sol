@@ -17,6 +17,11 @@ end
 
 @init
 fn launch() -> int
+    let deletion: int = test_delete_binding()
+    if deletion != 0 then
+        console::print_line("semantic analysis test failed: delete binding")
+        return 200 + deletion
+    end
     let bindings: int = test_binding_index()
 
     if bindings != 0 then
@@ -252,6 +257,38 @@ fn test_object_type_visibility() -> int
     destroy_semantic_test_source(library)
     return failure
 end
+
+fn test_delete_binding() -> int
+    let source: ParsedSemanticSource = parse_semantic_test_source(
+        "class Person\n    @constructor\n    fn build() -> void\n        return\n    end\nend\nfn use() -> void\n    let person: pointer<Person> = new Person()\n    delete person\n    let empty: pointer<Person> = null\n    delete empty\n    return\nend"
+    )
+    if !semantic_test_parse_valid(source) then
+        destroy_semantic_test_source(source)
+        return 1
+    end
+    let program: pointer<SemanticProgram> = semantic_test_analyze("delete.valid", source, false)
+    @mut let failure: int = 0
+    if !semantic_program_successful(program) then
+        failure = 2
+    end
+    destroy_semantic_program(program)
+    destroy_semantic_test_source(source)
+    let invalid: ParsedSemanticSource = parse_semantic_test_source(
+        "@interface\nclass Role\nend\nfn invalid(value: int, raw: pointer<int>, role: pointer<Role>) -> void\n    delete value\n    delete raw\n    delete role\n    delete unknown\n    return\nend"
+    )
+    if !semantic_test_parse_valid(invalid) then
+        destroy_semantic_test_source(invalid)
+        return 3
+    end
+    let invalid_program: pointer<SemanticProgram> = semantic_test_analyze("delete.invalid", invalid, false)
+    if semantic_test_code_count(invalid_program, "SOL-S096") != 3 || semantic_program_diagnostic_count(invalid_program) != 4 then
+        failure = 4
+    end
+    destroy_semantic_program(invalid_program)
+    destroy_semantic_test_source(invalid)
+    return failure
+end
+
 
 fn test_object_return_and_reconstruction_rules() -> int
     let source: ParsedSemanticSource = parse_semantic_test_source(

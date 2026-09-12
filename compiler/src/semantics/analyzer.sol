@@ -3000,6 +3000,21 @@ fn semantic_bind_statement(
         return
     end
 
+    if statement->kind == syntax_kind_delete_statement() then
+        let operand: pointer<SyntaxNode> = syntax_child(statement, 0)
+        let type: pointer<SemanticType> = semantic_bind_expression(program, module, operand, scope, null, function)
+        if type->kind == semantic_type_kind_error() then
+            return
+        end
+        if type->kind == semantic_type_kind_pointer() then
+            if type->element_type->kind == semantic_type_kind_class() then
+                return
+            end
+        end
+        semantic_report(program, module, "SOL-S096", "Operator 'delete' requires a class pointer.", operand)
+        return
+    end
+
     if statement->kind == syntax_kind_call_statement() then
         semantic_bind_expression(program, module, syntax_child(statement, 0), scope, null, function)
         return

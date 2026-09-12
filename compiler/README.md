@@ -391,18 +391,20 @@ The target-independent representation under `compiler/src/ir/` mirrors the
 canonical boundary documented in `docs/sol-ir.md` without depending on lexer,
 syntax, semantic, diagnostic, LLVM, C, ABI or platform types. It represents:
 
-* canonical primitive, concrete struct and typed pointer types;
+* canonical primitive, concrete struct, class, interface and typed pointer types;
 * deterministic function, block, local and value identifiers;
-* constants, typed operations, calls, locals, structs, pointers and immutable
-  string indexing;
+* constants, typed operations, calls, locals, structs, pointers, object storage,
+  fields, construction, deletion, views and immutable string indexing;
 * explicit basic blocks with separate return and branch terminators;
 * bodyless declarations, definitions, ordered modules, libraries and executable
   entry points;
 * deterministic text intended for tests and compiler inspection, not stable
   serialization.
 
-Sol 0.1.1 has no enums, tagged unions, interfaces, exceptions or object model,
-so IR variants use stable integer kinds with explicitly validated payloads.
+IR variants use stable integer kinds with explicitly validated payloads. The
+Sol 0.2 object graph remains target-independent: it records ownership,
+inheritance, requirements and dispatch without choosing offsets, headers,
+vtables or an ABI.
 Construction is incremental: blocks, functions, modules and programs become
 immutable by contract after they are sealed. Sealing verifies exact types,
 identifier uniqueness, value availability, local initialization and mutability,
@@ -421,7 +423,7 @@ structs and functions. Lowering depends on semantic and syntax models, but the
 IR package remains independent and performs no name or type resolution.
 
 `compiler/src/ir_test.sol` covers the type system, identities, values,
-instructions, structs, pointer operations, locals, calls, forward branches,
+instructions, structs, object types and operations, pointer operations, locals, calls, forward branches,
 loop back-edges, functions, modules, executable entry points, invalid graph
 rejection, deterministic formatting and complete arena destruction.
 
@@ -429,15 +431,15 @@ rejection, deterministic formatting and complete arena destruction.
 
 The lowering implementation under `compiler/src/lowering/` accepts only a
 complete, diagnostic-free `SemanticProgram`. It first builds a deterministic
-plan of concrete function and struct instances, assigns canonical IR identities
+plan of concrete function, method, constructor, struct and object instances, assigns canonical IR identities
 for forward references, and then lowers every function body into sealed basic
 blocks. Generic functions and structs are monomorphized from the semantic call
 graph; open type parameters never cross the typed-IR boundary.
 
-Lowering covers literals, locals, unary and binary operations, direct and
-qualified calls, struct construction and value-field mutation, raw-pointer
-field and index loads/stores, immutable string indexing, returns, conditionals
-and loop back-edges. Modules retain semantic source order and every concrete
+Lowering covers literals, locals, unary and binary operations, direct,
+qualified and instance calls, struct and object construction, object views and
+deletion, value/object-field mutation, raw-pointer field and index loads/stores,
+immutable string indexing, returns, conditionals and loop back-edges. Modules retain semantic source order and every concrete
 definition stays with its declaring module. Executable entry points are mapped
 to their canonical lowered function; library programs remain entryless.
 
@@ -449,4 +451,5 @@ symbol mangling remain outside this layer.
 
 `compiler/src/lowering_test.sol` exercises complete and rejected programs,
 deterministic repeated lowering, generic specialization, multiple modules,
-structs, raw pointers, primitive operations and explicit control flow.
+structs, classes/interfaces, construction and dispatch, raw pointers, primitive
+operations and explicit control flow.

@@ -6,6 +6,11 @@ inject ir.formatter
 
 @init
 fn launch() -> int
+    let object_rejections: int = test_ir_object_rejections()
+    if object_rejections != 0 then
+        console::print_line("self-host IR test failed: object rejection paths")
+        return 180 + object_rejections
+    end
     let types: int = test_ir_types_and_identifiers()
     if types != 0 then
         console::print_line("self-host IR test failed: types and identifiers")
@@ -16,6 +21,12 @@ fn launch() -> int
     if operations != 0 then
         console::print_line("self-host IR test failed: values and operations")
         return 30 + operations
+    end
+
+    let objects: int = test_ir_object_model()
+    if objects != 0 then
+        console::print_line("self-host IR test failed: object model")
+        return 45 + objects
     end
 
     let program: int = test_ir_program_and_formatter()
@@ -42,6 +53,195 @@ fn launch() -> int
         return 100 + graph
     end
 
+    return 0
+end
+
+fn test_ir_object_rejections() -> int
+    let arena: pointer<IrArena> = create_ir_arena()
+    let foreign: pointer<IrArena> = create_ir_arena()
+    let types: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    let fields: pointer<Vector<pointer<IrObjectField>>> = create_vector<pointer<IrObjectField>>()
+    let values: pointer<Vector<pointer<IrValue>>> = create_vector<pointer<IrValue>>()
+    let base: pointer<IrType> = create_ir_object_type(arena, "Base", false, false)
+    let derived: pointer<IrType> = create_ir_object_type(arena, "Derived", false, false)
+    let abstract: pointer<IrType> = create_ir_object_type(arena, "Abstract", false, true)
+    define_ir_object_type(arena, base, null, types, fields)
+    define_ir_object_type(arena, derived, base, types, fields)
+    define_ir_object_type(arena, abstract, null, types, fields)
+    let base_pointer: pointer<IrType> = create_ir_pointer_type(arena, base)
+    let derived_pointer: pointer<IrType> = create_ir_pointer_type(arena, derived)
+    let constructor: pointer<IrFunctionReference> = create_ir_function_reference(arena, 0, "build", types, arena->void_type)
+    define_ir_callable_reference(arena, constructor, ir_function_kind_constructor(), base, base_pointer, ir_dispatch_direct(), null)
+    let receiver: pointer<IrValue> = create_ir_null_constant(arena, 0, base_pointer)
+    @mut let failure: int = 0
+    if ir_object_is_subtype(null, null) || ir_object_is_subtype(base, derived) || !ir_object_is_subtype(derived, base) then
+        failure = 1
+    end
+    if create_ir_object_field(arena, base, 0, "foreign", foreign->integer_type) != null then
+        failure = 2
+    end
+    if define_ir_object_type(foreign, create_ir_object_type(foreign, "Foreign", false, false), base, types, fields) then
+        failure = 3
+    end
+    if create_ir_parameter(arena, 1, "copy", base) != null || create_ir_function(arena, 1, "copy", base, false) != null then
+        failure = 4
+    end
+    if create_ir_void_call_instruction(arena, constructor, values) != null || create_ir_void_method_call(arena, constructor, receiver, values, ir_dispatch_direct()) != null then
+        failure = 5
+    end
+    if create_ir_constructor_call(arena, constructor, receiver, values) == null || create_ir_object_view(arena, 2, receiver, derived_pointer) != null then
+        failure = 6
+    end
+    let immutable: pointer<IrLocal> = create_ir_local(arena, 0, "immutable", base, ir_local_immutable())
+    if create_ir_object_reconstruct(arena, immutable, constructor, values) != null || create_ir_object_new(arena, 3, abstract, constructor, values) != null then
+        failure = 7
+    end
+    let invented: pointer<IrObjectField> = create_ir_object_field(arena, base, 0, "not_declared", arena->integer_type)
+    if create_ir_object_field_load(arena, 4, receiver, invented) != null then
+        failure = 8
+    end
+    if define_ir_callable_reference(foreign, constructor, ir_function_kind_constructor(), base, base_pointer, ir_dispatch_direct(), null) then
+        failure = 9
+    end
+    let cycle: pointer<IrType> = create_ir_object_type(arena, "Cycle", false, false)
+    if define_ir_object_type(arena, cycle, cycle, types, fields) then
+        failure = 10
+    end
+    let function: pointer<IrFunction> = create_ir_function(arena, 2, "invalid_result", arena->void_type, true)
+    let block: pointer<IrBasicBlock> = create_ir_basic_block(arena, create_ir_block_target(arena, 0))
+    let allocation: pointer<IrInstruction> = create_ir_object_new(arena, 5, base, constructor, values)
+    allocation->result->type = arena->integer_type
+    ir_block_add_instruction(arena, block, allocation)
+    ir_block_terminate(arena, block, create_ir_return(arena, null))
+    ir_function_add_block(arena, function, block)
+    if seal_ir_function(arena, function) then
+        failure = 11
+    end
+    destroy_vector<pointer<IrType>>(types)
+    destroy_vector<pointer<IrObjectField>>(fields)
+    destroy_vector<pointer<IrValue>>(values)
+    destroy_ir_arena(foreign)
+    destroy_ir_arena(arena)
+    return failure
+end
+
+
+fn test_ir_object_model() -> int
+    let arena: pointer<IrArena> = create_ir_arena()
+    let empty_types: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    let empty_values: pointer<Vector<pointer<IrValue>>> = create_vector<pointer<IrValue>>()
+    let no_interfaces: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    let no_fields: pointer<Vector<pointer<IrObjectField>>> = create_vector<pointer<IrObjectField>>()
+
+    let named: pointer<IrType> = create_ir_object_type(arena, "objects::Named", true, true)
+    @mut let invalid: boolean = named == null
+    if !invalid then
+        invalid = !define_ir_object_type(arena, named, null, no_interfaces, no_fields)
+    end
+    if invalid then
+        return 1
+    end
+    let interfaces: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    vector_push<pointer<IrType>>(interfaces, named)
+    let person: pointer<IrType> = create_ir_object_type(arena, "objects::Person", false, false)
+    let fields: pointer<Vector<pointer<IrObjectField>>> = create_vector<pointer<IrObjectField>>()
+    let age: pointer<IrObjectField> = create_ir_object_field(arena, person, 0, "age", arena->integer_type)
+    vector_push<pointer<IrObjectField>>(fields, age)
+    @mut let invalid_2: boolean = person == null
+    if !invalid_2 then
+        invalid_2 = !define_ir_object_type(arena, person, null, interfaces, fields)
+    end
+    if invalid_2 then
+        return 2
+    end
+
+    let person_pointer: pointer<IrType> = create_ir_pointer_type(arena, person)
+    let named_pointer: pointer<IrType> = create_ir_pointer_type(arena, named)
+    let constructor_reference: pointer<IrFunctionReference> = create_ir_function_reference(arena, 0, "Person.init", empty_types, arena->void_type)
+    define_ir_callable_reference(arena, constructor_reference, ir_function_kind_constructor(), person, person_pointer, ir_dispatch_direct(), null)
+    let method_reference: pointer<IrFunctionReference> = create_ir_function_reference(arena, 1, "Person.get_age", empty_types, arena->integer_type)
+    define_ir_callable_reference(arena, method_reference, ir_function_kind_method(), person, person_pointer, ir_dispatch_virtual(), null)
+
+    let constructor: pointer<IrFunction> = create_ir_function(arena, 0, "Person.init", arena->void_type, false)
+    let constructor_receiver: pointer<IrParameter> = create_ir_parameter(arena, 0, "this", person_pointer)
+    define_ir_callable(arena, constructor, ir_function_kind_constructor(), person, constructor_receiver, ir_dispatch_direct(), null)
+    seal_ir_function(arena, constructor)
+    let method: pointer<IrFunction> = create_ir_function(arena, 1, "Person.get_age", arena->integer_type, false)
+    let method_receiver: pointer<IrParameter> = create_ir_parameter(arena, 0, "this", person_pointer)
+    define_ir_callable(arena, method, ir_function_kind_method(), person, method_receiver, ir_dispatch_virtual(), null)
+    seal_ir_function(arena, method)
+
+    let caller: pointer<IrFunction> = create_ir_function(arena, 2, "exercise", arena->void_type, true)
+    let block: pointer<IrBasicBlock> = create_ir_basic_block(arena, create_ir_block_target(arena, 0))
+    let local: pointer<IrLocal> = create_ir_local(arena, 0, "person", person, ir_local_mutable())
+    let initialize: pointer<IrInstruction> = create_ir_object_initialize(arena, local, constructor_reference, empty_values)
+    let address: pointer<IrInstruction> = create_ir_object_address(arena, 0, local)
+    let value: pointer<IrValue> = create_ir_int_constant(arena, 1, 42)
+    let store: pointer<IrInstruction> = create_ir_object_field_store(arena, address->result, age, value)
+    let load: pointer<IrInstruction> = create_ir_object_field_load(arena, 2, address->result, age)
+    let call: pointer<IrInstruction> = create_ir_method_call(arena, 3, method_reference, address->result, empty_values, ir_dispatch_virtual())
+    let view: pointer<IrInstruction> = create_ir_object_view(arena, 4, address->result, named_pointer)
+    let allocation: pointer<IrInstruction> = create_ir_object_new(arena, 5, person, constructor_reference, empty_values)
+    if allocation == null then
+        return 3
+    end
+    let deletion: pointer<IrInstruction> = create_ir_object_delete(arena, allocation->result)
+    @mut let invalid_3: boolean = initialize == null
+    if !invalid_3 then
+        invalid_3 = address == null
+    end
+    if !invalid_3 then
+        invalid_3 = store == null
+    end
+    if !invalid_3 then
+        invalid_3 = load == null
+    end
+    if !invalid_3 then
+        invalid_3 = call == null
+    end
+    if !invalid_3 then
+        invalid_3 = view == null
+    end
+    if !invalid_3 then
+        invalid_3 = deletion == null
+    end
+    if invalid_3 then
+        return 3
+    end
+    ir_block_add_instruction(arena, block, initialize)
+    ir_block_add_instruction(arena, block, address)
+    ir_block_add_instruction(arena, block, store)
+    ir_block_add_instruction(arena, block, load)
+    ir_block_add_instruction(arena, block, call)
+    ir_block_add_instruction(arena, block, view)
+    ir_block_add_instruction(arena, block, allocation)
+    ir_block_add_instruction(arena, block, deletion)
+    ir_block_terminate(arena, block, create_ir_return(arena, null))
+    ir_function_add_block(arena, caller, block)
+    if !seal_ir_function(arena, caller) then
+        return 4
+    end
+
+    let module: pointer<IrModule> = create_ir_module(arena, "objects")
+    ir_module_add_object(arena, module, named)
+    ir_module_add_object(arena, module, person)
+    ir_module_add_function(arena, module, constructor)
+    ir_module_add_function(arena, module, method)
+    ir_module_add_function(arena, module, caller)
+    seal_ir_module(arena, module)
+    let program: pointer<IrProgram> = create_ir_program(arena)
+    ir_program_add_module(program, module)
+    if !seal_ir_program(program) || format_ir_program(program) == "<invalid IR program>\n" then
+        return 5
+    end
+
+    destroy_vector<pointer<IrObjectField>>(fields)
+    destroy_vector<pointer<IrType>>(interfaces)
+    destroy_vector<pointer<IrObjectField>>(no_fields)
+    destroy_vector<pointer<IrType>>(no_interfaces)
+    destroy_vector<pointer<IrValue>>(empty_values)
+    destroy_vector<pointer<IrType>>(empty_types)
+    destroy_ir_program(program)
     return 0
 end
 

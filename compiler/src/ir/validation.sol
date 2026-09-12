@@ -22,12 +22,15 @@ fn seal_ir_function(arena: pointer<IrArena>, function: pointer<IrFunction>) -> b
         if vector_length<pointer<IrBasicBlock>>(function->blocks) != 0 then
             return ir_error(arena, "bodyless IR function must not contain blocks")
         end
-        function->sealed = true
-        return true
     end
 
-    if vector_length<pointer<IrBasicBlock>>(function->blocks) == 0 then
+    if function->has_body && vector_length<pointer<IrBasicBlock>>(function->blocks) == 0 then
         return ir_error(arena, "defined IR function must contain a basic block")
+    end
+    if function->kind != ir_function_kind_function() then
+        if !validate_ir_callable_owner(arena, function->kind, function->owner, function->dispatch, function->overridden) then
+            return false
+        end
     end
 
     let validation: pointer<IrFunctionValidation> = create_ir_function_validation(function)
@@ -51,6 +54,7 @@ fn seal_ir_module(arena: pointer<IrArena>, module: pointer<IrModule>) -> boolean
     if arena == null || module == null then
         return ir_error(arena, "cannot seal IR module")
     end
+
     if module->sealed then
         return ir_error(arena, "cannot seal IR module")
     end
@@ -63,6 +67,29 @@ fn seal_ir_module(arena: pointer<IrArena>, module: pointer<IrModule>) -> boolean
         end
         if type->kind != ir_type_struct() || !type->defined then
             return ir_error(arena, "IR module contains undefined struct")
+        end
+        index = index + 1
+    end
+
+    index = 0
+    while index < vector_length<pointer<IrType>>(module->objects) do
+        let type: pointer<IrType> = vector_get<pointer<IrType>>(module->objects, index)
+        @mut let invalid: boolean = type == null
+        if !invalid then
+            invalid = !type->defined
+        end
+        if !invalid then
+            invalid = (type->kind != ir_type_class() && type->kind != ir_type_interface())
+        end
+        if invalid then
+            return ir_error(arena, "IR module contains undefined object type")
+        end
+        @mut let previous: int = 0
+        while previous < index do
+            if vector_get<pointer<IrType>>(module->objects, previous)->name == type->name then
+                return ir_error(arena, "duplicate IR module object type")
+            end
+            previous = previous + 1
         end
         index = index + 1
     end
@@ -170,6 +197,32 @@ fn destroy_ir_function_validation(validation: pointer<IrFunctionValidation>) -> 
 end
 
 fn collect_ir_function_declarations(arena: pointer<IrArena>, validation: pointer<IrFunctionValidation>) -> boolean
+    if validation->function->kind != ir_function_kind_function() then
+        @mut let invalid: boolean = validation->function->receiver == null
+        if !invalid then
+            invalid = validation->function->owner == null
+        end
+        if !invalid then
+            invalid = validation->function->receiver->value == null
+        end
+        if !invalid then
+            invalid = validation->function->receiver->value->kind != ir_value_parameter()
+        end
+        if invalid then
+            return ir_error(arena, "invalid IR callable receiver")
+        end
+        if !validate_ir_value_identity(arena, validation, validation->function->receiver->value) then
+            return false
+        end
+    else
+        @mut let invalid_2: boolean = validation->function->receiver != null
+        if !invalid_2 then
+            invalid_2 = validation->function->owner != null
+        end
+        if invalid_2 then
+            return ir_error(arena, "ordinary IR function cannot have a receiver")
+        end
+    end
     @mut let parameter_index: int = 0
     while parameter_index < vector_length<pointer<IrParameter>>(validation->function->parameters) do
         let parameter: pointer<IrParameter> = vector_get<pointer<IrParameter>>(validation->function->parameters, parameter_index)
@@ -209,7 +262,7 @@ fn collect_ir_function_declarations(arena: pointer<IrArena>, validation: pointer
                 return ir_error(arena, "duplicate IR instruction instance")
             end
             vector_push<pointer<IrInstruction>>(validation->instructions, instruction)
-            if instruction->kind == ir_instruction_local_initialize() then
+            if instruction->kind == ir_instruction_local_initialize() || instruction->kind == ir_instruction_object_initialize() then
                 if instruction->local == null then
                     return ir_error(arena, "duplicate IR local initialization")
                 end
@@ -255,6 +308,9 @@ fn validate_ir_instruction_graph(arena: pointer<IrArena>, validation: pointer<Ir
         end
         index = index + 1
     end
+    if !validate_ir_object_instruction(arena, instruction) then
+        return false
+    end
     if instruction->result != null then
         if instruction->result->producer != instruction || instruction->result->kind != ir_value_instruction() then
             return ir_error(arena, "invalid IR instruction result")
@@ -265,6 +321,177 @@ fn validate_ir_instruction_graph(arena: pointer<IrArena>, validation: pointer<Ir
     end
     return true
 end
+
+fn validate_ir_object_result(arena: pointer<IrArena>, instruction: pointer<IrInstruction>, expected: pointer<IrType>) -> boolean
+    if expected == null then
+        if instruction->result != null then
+            return ir_error(arena, "side-effecting IR object instruction has a result")
+        end
+        return true
+    end
+    if instruction->result == null then
+        return ir_error(arena, "IR object instruction requires a result")
+    end
+    if !ir_type_equals(instruction->result->type, expected) then
+        return ir_error(arena, "IR object instruction result type mismatch")
+    end
+    return true
+end
+
+fn validate_ir_object_instruction(arena: pointer<IrArena>, instruction: pointer<IrInstruction>) -> boolean
+    let kind: int = instruction->kind
+    if kind < ir_instruction_object_initialize() then
+        return true
+    end
+    let count: int = vector_length<pointer<IrValue>>(instruction->operands)
+    if kind == ir_instruction_object_address() then
+        if instruction->local == null || count != 0 then
+            return ir_error(arena, "invalid IR object address")
+        end
+        if instruction->local->type->kind != ir_type_class() then
+            return ir_error(arena, "IR object address requires class storage")
+        end
+        return validate_ir_object_result(arena, instruction, create_ir_pointer_type(arena, instruction->local->type))
+    end
+    if kind == ir_instruction_object_field_load() || kind == ir_instruction_object_field_store() || kind == ir_instruction_object_field_address() then
+        @mut let expected_count: int = 1
+        if kind == ir_instruction_object_field_store() then
+            expected_count = 2
+        end
+        if count != expected_count then
+            return ir_error(arena, "IR object field operand count mismatch")
+        end
+        if !validate_ir_object_field(arena, vector_get<pointer<IrValue>>(instruction->operands, 0), instruction->object_field) then
+            return false
+        end
+        let type: pointer<IrType> = instruction->object_field->type
+        if kind == ir_instruction_object_field_address() then
+            if type->kind != ir_type_class() then
+                return ir_error(arena, "IR object field address requires class storage")
+            end
+            return validate_ir_object_result(arena, instruction, create_ir_pointer_type(arena, type))
+        end
+        if !type->value_type then
+            return ir_error(arena, "IR object field cannot be copied")
+        end
+        if kind == ir_instruction_object_field_store() then
+            if !ir_type_equals(type, vector_get<pointer<IrValue>>(instruction->operands, 1)->type) then
+                return ir_error(arena, "IR object field store type mismatch")
+            end
+            return validate_ir_object_result(arena, instruction, null)
+        end
+        return validate_ir_object_result(arena, instruction, type)
+    end
+    if kind == ir_instruction_object_delete() || kind == ir_instruction_object_view() then
+        if count != 1 then
+            return ir_error(arena, "IR object view/delete requires one operand")
+        end
+        let value: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
+        if value->type->kind != ir_type_pointer() then
+            return ir_error(arena, "IR object view/delete requires a pointer")
+        end
+        if kind == ir_instruction_object_delete() then
+            if value->type->element_type->kind != ir_type_class() || instruction->object_type != value->type->element_type then
+                return ir_error(arena, "IR object deletion type mismatch")
+            end
+            return validate_ir_object_result(arena, instruction, null)
+        end
+        if instruction->result == null then
+            return ir_error(arena, "IR object view requires a result")
+        end
+        let result_type: pointer<IrType> = instruction->result->type
+        if result_type == null then
+            return ir_error(arena, "IR object view result must have a type")
+        end
+        if result_type->kind != ir_type_pointer() then
+            return ir_error(arena, "IR object view result must be a pointer")
+        end
+        if !ir_object_is_subtype(value->type->element_type, result_type->element_type) then
+            return ir_error(arena, "IR object view is not an upcast")
+        end
+        return true
+    end
+    let target: pointer<IrFunctionReference> = instruction->target
+    if target == null then
+        return ir_error(arena, "IR object call requires a canonical target")
+    end
+    @mut let offset: int = 0
+    if kind == ir_instruction_method_call() || kind == ir_instruction_void_method_call() || kind == ir_instruction_constructor_call() || kind == ir_instruction_object_field_construct() then
+        offset = 1
+    end
+    if count < offset then
+        return ir_error(arena, "IR object call requires a receiver")
+    end
+    let arguments: pointer<Vector<pointer<IrValue>>> = create_vector<pointer<IrValue>>()
+    @mut let index: int = offset
+    while index < count do
+        vector_push<pointer<IrValue>>(arguments, vector_get<pointer<IrValue>>(instruction->operands, index))
+        index = index + 1
+    end
+    @mut let valid: boolean = validate_ir_call_arguments(arena, target, arguments)
+    if valid && (kind == ir_instruction_method_call() || kind == ir_instruction_void_method_call() || kind == ir_instruction_constructor_call()) then
+        @mut let dispatch: int = instruction->dispatch
+        if kind == ir_instruction_constructor_call() then
+            dispatch = ir_dispatch_direct()
+        end
+        valid = validate_ir_method_call(arena, target, vector_get<pointer<IrValue>>(instruction->operands, 0), arguments, dispatch)
+    end
+    destroy_vector<pointer<IrValue>>(arguments)
+    if !valid then
+        return false
+    end
+    if kind == ir_instruction_method_call() || kind == ir_instruction_void_method_call() then
+        if target->kind != ir_function_kind_method() then
+            return ir_error(arena, "IR method call targets a non-method")
+        end
+        if kind == ir_instruction_method_call() then
+            return validate_ir_object_result(arena, instruction, target->return_type)
+        end
+        if target->return_type != arena->void_type then
+            return ir_error(arena, "void IR method call must return void")
+        end
+        return validate_ir_object_result(arena, instruction, null)
+    end
+    if target->kind != ir_function_kind_constructor() then
+        return ir_error(arena, "IR construction targets a non-constructor")
+    end
+    if kind == ir_instruction_constructor_call() then
+        return validate_ir_object_result(arena, instruction, null)
+    end
+    @mut let destination: pointer<IrType> = null
+    if kind == ir_instruction_object_field_construct() then
+        if !validate_ir_object_field(arena, vector_get<pointer<IrValue>>(instruction->operands, 0), instruction->object_field) then
+            return false
+        end
+        destination = instruction->object_field->type
+    else
+        if kind == ir_instruction_object_new() then
+            destination = instruction->object_type
+        else
+            if kind != ir_instruction_object_initialize() && kind != ir_instruction_object_reconstruct() then
+                return ir_error(arena, "unknown IR object instruction")
+            end
+            if instruction->local == null then
+                return ir_error(arena, "IR object construction requires local storage")
+            end
+            if kind == ir_instruction_object_reconstruct() && instruction->local->kind != ir_local_mutable() then
+                return ir_error(arena, "IR object reconstruction requires mutable storage")
+            end
+            destination = instruction->local->type
+        end
+    end
+    if destination == null then
+        return ir_error(arena, "IR construction has no destination type")
+    end
+    if destination != target->owner || destination->kind != ir_type_class() || destination->abstract_type || !destination->defined then
+        return ir_error(arena, "IR construction requires the exact concrete class")
+    end
+    if kind == ir_instruction_object_new() then
+        return validate_ir_object_result(arena, instruction, create_ir_pointer_type(arena, destination))
+    end
+    return validate_ir_object_result(arena, instruction, null)
+end
+
 
 fn validate_ir_operand_value(arena: pointer<IrArena>, validation: pointer<IrFunctionValidation>, value: pointer<IrValue>) -> boolean
     if value == null then
@@ -332,6 +559,24 @@ fn validate_ir_program_calls(program: pointer<IrProgram>) -> boolean
 
     while module_index < vector_length<pointer<IrModule>>(program->modules) && valid do
         let module: pointer<IrModule> = vector_get<pointer<IrModule>>(program->modules, module_index)
+        @mut let object_index: int = 0
+        while object_index < vector_length<pointer<IrType>>(module->objects) && valid do
+            let object: pointer<IrType> = vector_get<pointer<IrType>>(module->objects, object_index)
+            @mut let requirement_index: int = 0
+            while requirement_index < vector_length<pointer<IrRequirementImplementation>>(object->requirements) && valid do
+                let mapping: pointer<IrRequirementImplementation> = vector_get<pointer<IrRequirementImplementation>>(object->requirements, requirement_index)
+                valid = validate_ir_program_call(program, references, mapping->requirement)
+                @mut let matches: boolean = valid
+                if matches then
+                    matches = mapping->implementation != null
+                end
+                if matches then
+                    valid = validate_ir_program_call(program, references, mapping->implementation)
+                end
+                requirement_index = requirement_index + 1
+            end
+            object_index = object_index + 1
+        end
         @mut let function_index: int = 0
         while function_index < vector_length<pointer<IrFunction>>(module->functions) && valid do
             let function: pointer<IrFunction> = vector_get<pointer<IrFunction>>(module->functions, function_index)
@@ -341,7 +586,7 @@ fn validate_ir_program_calls(program: pointer<IrProgram>) -> boolean
                 @mut let instruction_index: int = 0
                 while instruction_index < vector_length<pointer<IrInstruction>>(block->instructions) && valid do
                     let instruction: pointer<IrInstruction> = vector_get<pointer<IrInstruction>>(block->instructions, instruction_index)
-                    if instruction->kind == ir_instruction_value_call() || instruction->kind == ir_instruction_void_call() then
+                    if instruction->kind == ir_instruction_value_call() || instruction->kind == ir_instruction_void_call() || instruction->kind == ir_instruction_method_call() || instruction->kind == ir_instruction_void_method_call() || instruction->kind == ir_instruction_constructor_call() || instruction->kind == ir_instruction_object_initialize() || instruction->kind == ir_instruction_object_reconstruct() || instruction->kind == ir_instruction_object_field_construct() || instruction->kind == ir_instruction_object_new() then
                         valid = validate_ir_program_call(program, references, instruction->target)
                     end
                     instruction_index = instruction_index + 1
@@ -365,8 +610,17 @@ fn validate_ir_program_call(program: pointer<IrProgram>, references: pointer<Vec
     if function == null then
         return ir_error(program->arena, "IR call target does not match canonical function")
     end
-    if function->name != reference->name || !ir_type_equals(function->return_type, reference->return_type) || vector_length<pointer<IrParameter>>(function->parameters) != vector_length<pointer<IrType>>(reference->parameter_types) then
+    if function->name != reference->name || function->kind != reference->kind || function->owner != reference->owner || function->dispatch != reference->dispatch || function->overridden != reference->overridden || !ir_type_equals(function->return_type, reference->return_type) || vector_length<pointer<IrParameter>>(function->parameters) != vector_length<pointer<IrType>>(reference->parameter_types) then
         return ir_error(program->arena, "IR call target does not match canonical function")
+    end
+    if function->kind != ir_function_kind_function() then
+        @mut let invalid: boolean = function->receiver == null
+        if !invalid then
+            invalid = !ir_type_equals(function->receiver->value->type, reference->receiver_type)
+        end
+        if invalid then
+            return ir_error(program->arena, "IR call target receiver type mismatch")
+        end
     end
     @mut let index: int = 0
     while index < vector_length<pointer<IrParameter>>(function->parameters) do
@@ -436,7 +690,7 @@ fn ir_program_contains_module(program: pointer<IrProgram>, module: pointer<IrMod
 end
 
 fn ir_instruction_uses_local(instruction: pointer<IrInstruction>) -> boolean
-    return instruction->kind == ir_instruction_local_initialize() || instruction->kind == ir_instruction_local_load() || instruction->kind == ir_instruction_local_store() || instruction->kind == ir_instruction_struct_field_store()
+    return instruction->kind == ir_instruction_local_initialize() || instruction->kind == ir_instruction_local_load() || instruction->kind == ir_instruction_local_store() || instruction->kind == ir_instruction_struct_field_store() || instruction->kind == ir_instruction_object_initialize() || instruction->kind == ir_instruction_object_reconstruct() || instruction->kind == ir_instruction_object_address()
 end
 
 fn ir_target_or_id_exists(values: pointer<Vector<pointer<IrBlockTarget>>>, value: pointer<IrBlockTarget>) -> boolean
