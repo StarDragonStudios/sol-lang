@@ -3,6 +3,7 @@ inject std.collections.vector
 inject frontend.syntax
 inject semantics.types
 inject semantics.symbol
+inject semantics.scope
 inject semantics.model
 inject ir.model
 inject lowering.model
@@ -125,6 +126,10 @@ end
 
 fn lowering_called_instantiations(context: pointer<LoweringContext>, caller: pointer<LoweringInstantiation>) -> pointer<Vector<pointer<LoweringInstantiation>>>
     let result: pointer<Vector<pointer<LoweringInstantiation>>> = create_vector<pointer<LoweringInstantiation>>()
+    if !lowering_add_dispatch_specializations(context, caller, result) then
+        destroy_vector<pointer<LoweringInstantiation>>(result)
+        return null
+    end
     let body: pointer<SyntaxNode> = lowering_function_body(caller->function->declaration)
     if body == null then
         return result
@@ -134,7 +139,10 @@ fn lowering_called_instantiations(context: pointer<LoweringContext>, caller: poi
     @mut let index: int = 0
     while index < vector_length<pointer<SyntaxNode>>(calls) do
         let call: pointer<SyntaxNode> = vector_get<pointer<SyntaxNode>>(calls, index)
-        let target: pointer<SemanticSymbol> = semantic_model_called_function(context->semantic, call)
+        @mut let target: pointer<SemanticSymbol> = semantic_model_called_function(context->semantic, call)
+        if target == null then
+            target = semantic_model_called_constructor(context->semantic, call)
+        end
         if target == null then
             lowering_fail(context, "call in function '" + caller->function->name + "' has no canonical semantic target")
             destroy_vector<pointer<SyntaxNode>>(calls)
@@ -173,11 +181,65 @@ fn lowering_called_instantiations(context: pointer<LoweringContext>, caller: poi
     return result
 end
 
+fn lowering_related_callable(left: pointer<SemanticSymbol>, right: pointer<SemanticSymbol>) -> boolean
+    if left == null || right == null then
+        return false
+    end
+    return left->overridden_method == right || right->overridden_method == left
+end
+
+fn lowering_add_dispatch_specializations(context: pointer<LoweringContext>, caller: pointer<LoweringInstantiation>, result: pointer<Vector<pointer<LoweringInstantiation>>>) -> boolean
+    if caller->function->kind != semantic_symbol_kind_method() then
+        return true
+    end
+    @mut let index: int = 0
+    while index < vector_length<LoweringOwner>(context->function_owners) do
+        let candidate: pointer<SemanticSymbol> = vector_get<LoweringOwner>(context->function_owners, index).symbol
+        if lowering_related_callable(caller->function, candidate) then
+            let related: pointer<LoweringInstantiation> = create_lowering_instantiation(context, candidate, caller->arguments)
+            if related == null then
+                return false
+            end
+            vector_push<pointer<LoweringInstantiation>>(result, related)
+        end
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<LoweringOwner>(context->object_owners) do
+        let object: pointer<SemanticSymbol> = vector_get<LoweringOwner>(context->object_owners, index).symbol
+        @mut let requirement_index: int = 0
+        while requirement_index < vector_length<pointer<SemanticSymbol>>(object->requirements) do
+            let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->requirements, requirement_index)
+            let implementation: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->implementations, requirement_index)
+            @mut let candidate: pointer<SemanticSymbol> = null
+            if caller->function == requirement then
+                candidate = implementation
+            end
+            if caller->function == implementation then
+                candidate = requirement
+            end
+            if candidate != null then
+                let related: pointer<LoweringInstantiation> = create_lowering_instantiation(context, candidate, caller->arguments)
+                if related == null then
+                    return false
+                end
+                if !lowering_instantiation_in(result, related) then
+                    vector_push<pointer<LoweringInstantiation>>(result, related)
+                end
+            end
+            requirement_index = requirement_index + 1
+        end
+        index = index + 1
+    end
+    return true
+end
+
+
 fn lowering_collect_calls(node: pointer<SyntaxNode>, calls: pointer<Vector<pointer<SyntaxNode>>>) -> void
     if node == null then
         return
     end
-    if node->kind == syntax_kind_call_expression() then
+    if node->kind == syntax_kind_call_expression() || node->kind == syntax_kind_new_expression() then
         vector_push<pointer<SyntaxNode>>(calls, node)
     end
     @mut let index: int = 0
@@ -231,6 +293,25 @@ fn lowering_discover_structs(context: pointer<LoweringContext>, plan: pointer<Lo
             end
         end
         function_index = function_index + 1
+    end
+    @mut let object_index: int = 0
+    while object_index < vector_length<LoweringOwner>(context->object_owners) do
+        let owner: LoweringOwner = vector_get<LoweringOwner>(context->object_owners, object_index)
+        let members: pointer<Scope> = semantic_model_class_scope(context->semantic, owner.symbol->declaration)
+        @mut let member_index: int = 0
+        while member_index < scope_declared_symbol_count(members) do
+            let member: pointer<SemanticSymbol> = scope_declared_symbol(members, member_index)
+            if member->kind == semantic_symbol_kind_class_field() then
+                let semantic: pointer<SemanticType> = semantic_model_type_of_reference(context->semantic, semantic_symbol_declared_type_reference(member))
+                let type: pointer<LoweringType> = lowering_type(context, semantic, owner.symbol, null)
+                if type == null then
+                    return false
+                end
+                lowering_add_reachable_type(plan->structs, type)
+            end
+            member_index = member_index + 1
+        end
+        object_index = object_index + 1
     end
     @mut let struct_index: int = 0
     while struct_index < vector_length<pointer<LoweringType>>(plan->structs) do
@@ -409,6 +490,135 @@ fn lowering_assign_functions(context: pointer<LoweringContext>, plan: pointer<Lo
         end
         index = index + 1
     end
+
+    index = 0
+    while index < vector_length<pointer<LoweringFunctionEntry>>(context->functions) do
+        let entry: pointer<LoweringFunctionEntry> = vector_get<pointer<LoweringFunctionEntry>>(context->functions, index)
+        let symbol: pointer<SemanticSymbol> = entry->instantiation->function
+        if symbol->kind == semantic_symbol_kind_method() || symbol->kind == semantic_symbol_kind_constructor() then
+            let owner_entry: pointer<LoweringObjectEntry> = lowering_object_entry(context, symbol->owner)
+            if owner_entry == null then
+                return lowering_fail(context, "object callable has no canonical IR owner")
+            end
+            let receiver_type: pointer<IrType> = create_ir_pointer_type(context->arena, owner_entry->ir_type)
+            @mut let kind: int = ir_function_kind_method()
+            @mut let dispatch: int = ir_dispatch_direct()
+            if symbol->kind == semantic_symbol_kind_constructor() then
+                kind = ir_function_kind_constructor()
+            else
+                if semantic_method_is_virtual(symbol) then
+                    if symbol->owner->kind == semantic_symbol_kind_interface() then
+                        dispatch = ir_dispatch_interface()
+                    else
+                        dispatch = ir_dispatch_virtual()
+                    end
+                end
+            end
+            @mut let overridden: pointer<IrFunctionReference> = null
+            if symbol->overridden_method != null then
+                let override_instance: pointer<LoweringInstantiation> = lowering_find_instantiation(context, symbol->overridden_method, entry->instantiation->arguments)
+                let override_entry: pointer<LoweringFunctionEntry> = lowering_function_entry(context, override_instance)
+                if override_entry != null then
+                    overridden = override_entry->reference
+                end
+            end
+            if !define_ir_callable_reference(context->arena, entry->reference, kind, owner_entry->ir_type, receiver_type, dispatch, overridden) then
+                return lowering_fail(context, context->arena->error)
+            end
+        end
+        index = index + 1
+    end
+    return true
+end
+
+fn lowering_plain_function_entry(context: pointer<LoweringContext>, symbol: pointer<SemanticSymbol>) -> pointer<LoweringFunctionEntry>
+    @mut let index: int = 0
+    while index < vector_length<pointer<LoweringFunctionEntry>>(context->functions) do
+        let entry: pointer<LoweringFunctionEntry> = vector_get<pointer<LoweringFunctionEntry>>(context->functions, index)
+        if entry->instantiation->function == symbol && vector_length<pointer<LoweringType>>(entry->instantiation->arguments) == 0 then
+            return entry
+        end
+        index = index + 1
+    end
+    return null
+end
+
+fn lowering_assign_object_shells(context: pointer<LoweringContext>) -> boolean
+    @mut let index: int = 0
+    while index < vector_length<LoweringOwner>(context->object_owners) do
+        let owner: LoweringOwner = vector_get<LoweringOwner>(context->object_owners, index)
+        let type: pointer<LoweringType> = lowering_type(context, owner.symbol->type, owner.symbol, null)
+        let ir_type: pointer<IrType> = create_ir_object_type(context->arena, owner.module->name + "::" + owner.symbol->name, owner.symbol->kind == semantic_symbol_kind_interface(), owner.symbol->kind == semantic_symbol_kind_interface() || semantic_symbol_is_abstract(owner.symbol))
+        if type == null || ir_type == null then
+            return lowering_fail(context, context->arena->error)
+        end
+        let entry: pointer<LoweringObjectEntry> = memory::allocate<LoweringObjectEntry>(1)
+        if entry == null then
+            return lowering_fail(context, "lowering allocation failed")
+        end
+        entry->symbol = owner.symbol
+        entry->type = type
+        entry->ir_type = ir_type
+        vector_push<pointer<LoweringObjectEntry>>(context->objects, entry)
+        index = index + 1
+    end
+
+    return true
+end
+
+fn lowering_assign_objects(context: pointer<LoweringContext>) -> boolean
+    @mut let index: int = 0
+    while index < vector_length<pointer<LoweringObjectEntry>>(context->objects) do
+        let entry: pointer<LoweringObjectEntry> = vector_get<pointer<LoweringObjectEntry>>(context->objects, index)
+        @mut let base_type: pointer<IrType> = null
+        if entry->symbol->base_class != null then
+            let base_entry: pointer<LoweringObjectEntry> = lowering_object_entry(context, entry->symbol->base_class)
+            if base_entry == null then
+                return lowering_fail(context, "object base has no canonical IR type")
+            end
+            base_type = base_entry->ir_type
+        end
+        let interfaces: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+        @mut let interface_index: int = 0
+        while interface_index < vector_length<pointer<SemanticSymbol>>(entry->symbol->interfaces) do
+            let interface_entry: pointer<LoweringObjectEntry> = lowering_object_entry(context, vector_get<pointer<SemanticSymbol>>(entry->symbol->interfaces, interface_index))
+            if interface_entry == null then
+                destroy_vector<pointer<IrType>>(interfaces)
+                return lowering_fail(context, "object interface has no canonical IR type")
+            end
+            vector_push<pointer<IrType>>(interfaces, interface_entry->ir_type)
+            interface_index = interface_index + 1
+        end
+        let fields: pointer<Vector<pointer<IrObjectField>>> = create_vector<pointer<IrObjectField>>()
+        let members: pointer<Scope> = semantic_model_class_scope(context->semantic, entry->symbol->declaration)
+        @mut let member_index: int = 0
+        @mut let field_index: int = 0
+        while member_index < scope_declared_symbol_count(members) do
+            let member: pointer<SemanticSymbol> = scope_declared_symbol(members, member_index)
+            if member->kind == semantic_symbol_kind_class_field() then
+                let semantic_type: pointer<SemanticType> = semantic_model_type_of_reference(context->semantic, semantic_symbol_declared_type_reference(member))
+                let concrete: pointer<LoweringType> = lowering_type(context, semantic_type, entry->symbol, null)
+                let field_type: pointer<IrType> = lowering_ir_type(context, concrete)
+                let field: pointer<IrObjectField> = create_ir_object_field(context->arena, entry->ir_type, field_index, member->name, field_type)
+                if field == null then
+                    destroy_vector<pointer<IrObjectField>>(fields)
+                    destroy_vector<pointer<IrType>>(interfaces)
+                    return lowering_fail(context, context->arena->error)
+                end
+                vector_push<pointer<IrObjectField>>(fields, field)
+                field_index = field_index + 1
+            end
+            member_index = member_index + 1
+        end
+        if !define_ir_object_type(context->arena, entry->ir_type, base_type, interfaces, fields) then
+            destroy_vector<pointer<IrObjectField>>(fields)
+            destroy_vector<pointer<IrType>>(interfaces)
+            return lowering_fail(context, context->arena->error)
+        end
+        destroy_vector<pointer<IrObjectField>>(fields)
+        destroy_vector<pointer<IrType>>(interfaces)
+        index = index + 1
+    end
     return true
 end
 
@@ -421,6 +631,15 @@ fn lowering_ir_type(context: pointer<LoweringContext>, type: pointer<LoweringTyp
         let entry: pointer<LoweringStructEntry> = lowering_struct_entry(context, type)
         if entry == null then
             lowering_fail(context, "concrete struct type has no canonical IR type")
+            return null
+        end
+        return entry->ir_type
+    end
+    if type->kind == lowering_type_class() || type->kind == lowering_type_interface() then
+        let symbol: pointer<SemanticSymbol> = semantic_model_declared_symbol(context->semantic, type->identity)
+        let entry: pointer<LoweringObjectEntry> = lowering_object_entry(context, symbol)
+        if entry == null then
+            lowering_fail(context, "object type has no canonical IR type")
             return null
         end
         return entry->ir_type

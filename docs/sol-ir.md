@@ -68,6 +68,20 @@ an `IrPointerType` field may refer back to a canonical forward-declared
 value type and preserves typed pointer distinctions throughout lowering even
 though the LLVM backend uses opaque native pointers.
 
+Classes and interfaces are canonical non-value `IrType` definitions. They
+retain their qualified name, category, abstract state, one optional base class,
+ordered interfaces and declared storage fields. Every `IrObjectField` records
+its declaring owner and declaration index; it deliberately has no byte offset.
+Inherited interface requirements retain canonical requirement-to-implementation
+function references. This graph is the complete target-independent object
+contract, not a native layout.
+
+Pointers may name class and interface types even though those pointees are not
+values. A class pointer, base-class view and interface view remain distinct IR
+types. The `object_view` instruction is the only representation of an accepted
+upcast, so lowering never erases the selected static view or repeats semantic
+conversion lookup.
+
 Source-level generic parameters never appear as open Sol IR types.
 Semantic-to-IR lowering monomorphizes every reachable concrete generic function and struct
 application. Each concrete struct application becomes its own `IrStructType`,
@@ -109,6 +123,12 @@ An `IrFunction` contains:
 * ordered typed parameters;
 * an explicit return type;
 * either no body or an ordered list of basic blocks.
+
+Instance methods and constructors additionally contain a receiver parameter
+separate from their source parameter list, their declaring object type, their
+callable kind, default dispatch category and optional overridden-method
+reference. Constructors always return `void` and use direct dispatch. Ordinary
+functions never have a receiver.
 
 A bodyless function represents a declaration whose implementation is provided outside the current IR program.
 
@@ -196,6 +216,11 @@ The initial value forms are:
 * direct pointer loads;
 * indexed pointer loads.
 * Unicode-scalar string indexing.
+* object-storage addresses and object-field addresses;
+* object-field loads;
+* value-returning method calls;
+* dynamic object construction with `new`;
+* explicit base/interface object views.
 
 `IrStructConstructInstruction` consumes one value per field in canonical field
 order and produces the complete aggregate value. Semantic-to-IR lowering may
@@ -232,6 +257,39 @@ Operator constructors enforce their structural type rules immediately.
 
 Semantic analysis remains responsible for reporting source diagnostics. IR validation treats invalid construction as a compiler error.
 
+## Object operations
+
+Direct class instances are represented as non-value storage. They cannot be
+loaded into an `IrValue`, copied, moved, passed or returned. Initial construction
+and later mutable reconstruction are distinct side-effecting instructions.
+The `object_address` instruction exposes a typed pointer to that storage for field
+and method operations without prescribing stack placement. Direct class fields
+use the analogous field-construction and field-address operations.
+
+Object fields with value types use canonical field load/store instructions.
+Method calls carry the exact resolved function reference, receiver and one of
+`direct`, `virtual` or `interface` dispatch. Private calls and `base.method()`
+are direct. A call on `this` while a constructor is executing is also direct to
+the implementation of that constructor's class; outside construction,
+public/protected methods keep dynamic dispatch.
+
+Constructor delegation is an explicit direct call on an existing receiver.
+The `object_new` instruction separates allocation-backed construction from direct
+destination construction, and `object_delete` preserves deletion
+of the exact concrete class pointer. Their runtime mechanics, object headers,
+field offsets, vtables and ABI are intentionally left to later backend/runtime
+phases.
+
+Generic method dispatch is monomorphized as a closed-world graph: each reachable
+specialization includes its override and requirement/implementation counterparts.
+Uninstantiated generic methods do not create open types in IR. Nested value-field
+mutation preserves object identity by updating a temporary struct value and
+storing it back into the original object field.
+
+The current LLVM backend rejects modules containing object definitions with a
+deterministic unsupported-feature error. Object IR support alone does not enable
+native object code generation; that work belongs to #140–#142.
+
 ## Local storage
 
 `IrLocal` represents target-independent function-local storage.
@@ -240,7 +298,7 @@ Every local contains:
 
 * a deterministic `IrLocalId`;
 * a diagnostic source name;
-* an explicit value type;
+* an explicit value type or a direct class-storage type;
 * an `IrLocalKind`.
 
 The supported local kinds are:
@@ -275,7 +333,7 @@ the same diagnostic name while retaining different `IrLocalId` values and
 different canonical instances.
 
 Function validation requires every referenced local instance to be introduced
-by exactly one local-initialization instruction. Duplicate local identifiers,
+by exactly one value- or object-initialization instruction. Duplicate local identifiers,
 duplicate initialization and references to undeclared local instances are
 rejected.
 
@@ -293,6 +351,9 @@ A function reference contains:
 * the diagnostic function name;
 * the ordered parameter types;
 * the return type.
+
+Method and constructor references also retain their callable kind, declaring
+object, exact receiver pointer type, default dispatch and override identity.
 
 Function references do not contain:
 

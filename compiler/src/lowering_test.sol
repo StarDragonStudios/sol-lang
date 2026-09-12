@@ -18,6 +18,11 @@ end
 
 @init
 fn launch() -> int
+    let storage: int = test_object_storage_lowering()
+    if storage != 0 then
+        console::print_line("self-host lowering test failed: object storage")
+        return 200 + storage
+    end
     let complete: int = test_complete_lowering()
     if complete != 0 then
         console::print_line("self-host lowering test failed: complete lowering")
@@ -33,12 +38,135 @@ fn launch() -> int
         console::print_line("self-host lowering test failed: pointer and primitive lowering")
         return 50 + operations
     end
+    let objects: int = test_object_lowering()
+    if objects != 0 then
+        console::print_line("self-host lowering test failed: object lowering")
+        return 60 + objects
+    end
     let rejection: int = test_lowering_rejection()
     if rejection != 0 then
         console::print_line("self-host lowering test failed: rejection")
         return 70 + rejection
     end
     return 0
+end
+
+fn test_object_storage_lowering() -> int
+    let source: ParsedLoweringSource = parse_lowering_source(
+        "struct Box<T>\n    value: T\nend\nstruct Link\n    item: pointer<Derived>\nend\nclass Derived << Base\n    box: Box<int>\n    child: Child\n    @constructor\n    fn build() -> void\n        base()\n        this.box = Box<int> { value: 1 }\n        this.child = Child()\n        this.box.value = 2\n    end\n    @override\n    fn count() -> int\n        return base.count() + this.box.value\n    end\nend\nclass Base\n    @constructor\n    fn build() -> void\n        let initial: int = this.count()\n    end\n    fn count() -> int\n        return 1\n    end\nend\nclass Child\n    @constructor\n    fn build() -> void\n        return\n    end\nend\nfn use() -> void\n    @mut let item: Derived = Derived()\n    item.box.value = 3\n    item.child = Child()\n    item = Derived()\n    let heap: pointer<Derived> = new Derived()\n    heap->box.value = 4\n    delete heap\n    return\nend"
+    )
+    if !lowering_source_valid(source) then
+        destroy_lowering_source(source)
+        return 1
+    end
+    let modules: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(modules, source_module("storage", source.parsed.root))
+    let semantic: pointer<SemanticProgram> = analyze_library_modules(modules)
+    destroy_vector<SourceModule>(modules)
+    if !semantic_program_successful(semantic) then
+        @mut let index: int = 0
+        while index < semantic_program_diagnostic_count(semantic) do
+            console::print_line(semantic_program_diagnostic(semantic, index).diagnostic.message)
+            index = index + 1
+        end
+        destroy_semantic_program(semantic)
+        destroy_lowering_source(source)
+        return 2
+    end
+    let lowered: IrLoweringResult = lower_semantic_program(semantic)
+    @mut let failure: int = 0
+    if lowered.program == null then
+        console::print_line(lowered.error)
+        failure = 3
+    else
+        let formatted: string = format_ir_program(lowered.program)
+        if !lowering_text_contains(formatted, "object_reconstruct") || !lowering_text_contains(formatted, "object_field_construct") || !lowering_text_contains(formatted, "direct_call") then
+            failure = 4
+        end
+        destroy_ir_program(lowered.program)
+    end
+    destroy_semantic_program(semantic)
+    destroy_lowering_source(source)
+    return failure
+end
+
+
+fn test_object_lowering() -> int
+    let source: ParsedLoweringSource = parse_lowering_source(
+        "@interface\nclass Named\n    @fn name() -> string\n    @fn echo<T>(value: T) -> T\nend\nclass Person < Named\n    label: string\n    @constructor\n    fn build(label: string) -> void\n        this.label = label\n    end\n    @override\n    fn name() -> string\n        return this.label\n    end\n    @override\n    fn echo<T>(value: T) -> T\n        return value\n    end\nend\nfn use() -> void\n    let direct: Person = Person(\"direct\")\n    let first: string = direct.name()\n    let heap: pointer<Person> = new Person(\"heap\")\n    let named: pointer<Named> = heap\n    let second: string = named->name()\n    let echoed: int = named->echo<int>(7)\n    delete heap\n    return\nend\nfn receiver() -> pointer<Person>\n    return new Person(\"ordered\")\nend\nfn argument() -> int\n    return 7\nend\nfn ordered() -> int\n    return receiver()->echo<int>(argument())\nend"
+    )
+    if !lowering_source_valid(source) then
+        destroy_lowering_source(source)
+        return 1
+    end
+    let modules: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(modules, source_module("objects", source.parsed.root))
+    let semantic: pointer<SemanticProgram> = analyze_library_modules(modules)
+    destroy_vector<SourceModule>(modules)
+    @mut let invalid: boolean = semantic == null
+    if !invalid then
+        invalid = !semantic_program_successful(semantic)
+    end
+    if invalid then
+        destroy_semantic_program(semantic)
+        destroy_lowering_source(source)
+        return 2
+    end
+    let lowered: IrLoweringResult = lower_semantic_program(semantic)
+    @mut let failure: int = 0
+    if lowered.program == null then
+        console::print_line(lowered.error)
+        failure = 3
+    else
+        let module: pointer<IrModule> = vector_get<pointer<IrModule>>(lowered.program->modules, 0)
+        let formatted: string = format_ir_program(lowered.program)
+        let backend: LlvmGenerationResult = generate_llvm_ir(lowered.program, "objects")
+        let repeated: IrLoweringResult = lower_semantic_program(semantic)
+        if repeated.program == null then
+            failure = 10
+        else
+            if format_ir_program(repeated.program) != formatted then
+                failure = 10
+            end
+            destroy_ir_program(repeated.program)
+        end
+        @mut let function_index: int = 0
+        @mut let ordered_found: boolean = false
+        while function_index < vector_length<pointer<IrFunction>>(module->functions) do
+            let function: pointer<IrFunction> = vector_get<pointer<IrFunction>>(module->functions, function_index)
+            if function->name == "ordered" then
+                ordered_found = true
+                let block: pointer<IrBasicBlock> = vector_get<pointer<IrBasicBlock>>(function->blocks, 0)
+                if vector_length<pointer<IrInstruction>>(block->instructions) != 3 then
+                    failure = 7
+                else
+                    let first: pointer<IrInstruction> = vector_get<pointer<IrInstruction>>(block->instructions, 0)
+                    let second: pointer<IrInstruction> = vector_get<pointer<IrInstruction>>(block->instructions, 1)
+                    let call: pointer<IrInstruction> = vector_get<pointer<IrInstruction>>(block->instructions, 2)
+                    if first->target->name != "receiver" || second->target->name != "argument" || vector_get<pointer<IrValue>>(call->operands, 0) != first->result || vector_get<pointer<IrValue>>(call->operands, 1) != second->result then
+                        failure = 8
+                    end
+                end
+            end
+            function_index = function_index + 1
+        end
+        if !ordered_found then
+            failure = 9
+        end
+        if llvm_generation_succeeded(backend) || backend.text != "" then
+            failure = 6
+        end
+        if vector_length<pointer<IrType>>(module->objects) != 2 || !lowering_text_contains(formatted, "interface objects::Named") || !lowering_text_contains(formatted, "class objects::Person implements objects::Named") then
+            failure = 4
+        end
+        if failure == 0 && (!lowering_text_contains(formatted, "object_initialize") || !lowering_text_contains(formatted, "object_address") || !lowering_text_contains(formatted, "virtual_call") || !lowering_text_contains(formatted, "interface_call") || !lowering_text_contains(formatted, "object_new") || !lowering_text_contains(formatted, "object_view") || !lowering_text_contains(formatted, "object_delete")) then
+            failure = 5
+        end
+        destroy_ir_program(lowered.program)
+    end
+    destroy_semantic_program(semantic)
+    destroy_lowering_source(source)
+    return failure
 end
 
 fn parse_lowering_source(source: string) -> ParsedLoweringSource
@@ -72,7 +200,11 @@ fn test_complete_lowering() -> int
     vector_push<SourceModule>(modules, source_module("application", source.parsed.root))
     let semantic: pointer<SemanticProgram> = analyze_executable_program(modules)
     destroy_vector<SourceModule>(modules)
-    if semantic == null || !semantic_program_successful(semantic) then
+    @mut let invalid: boolean = semantic == null
+    if !invalid then
+        invalid = !semantic_program_successful(semantic)
+    end
+    if invalid then
         @mut let diagnostic_index: int = 0
         while semantic != null && diagnostic_index < semantic_program_diagnostic_count(semantic) do
             console::print_line(semantic_program_diagnostic(semantic, diagnostic_index).diagnostic.code + ": " + semantic_program_diagnostic(semantic, diagnostic_index).diagnostic.message)
@@ -135,7 +267,11 @@ fn test_pointer_and_primitive_lowering() -> int
     vector_push<SourceModule>(modules, source_module("operations", source.parsed.root))
     let semantic: pointer<SemanticProgram> = analyze_library_modules(modules)
     destroy_vector<SourceModule>(modules)
-    if semantic == null || !semantic_program_successful(semantic) then
+    @mut let invalid: boolean = semantic == null
+    if !invalid then
+        invalid = !semantic_program_successful(semantic)
+    end
+    if invalid then
         @mut let diagnostic_index: int = 0
         while semantic != null && diagnostic_index < semantic_program_diagnostic_count(semantic) do
             console::print_line(semantic_program_diagnostic(semantic, diagnostic_index).diagnostic.code + ": " + semantic_program_diagnostic(semantic, diagnostic_index).diagnostic.message)
