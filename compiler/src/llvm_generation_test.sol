@@ -7,6 +7,10 @@ inject backend.llvm
 
 @init
 fn launch() -> int
+    if test_recursive_object_layout_rejection() != 0 then
+        console::print_line("self-host LLVM generation test failed: recursive object layout")
+        return 30
+    end
     let invalid: LlvmGenerationResult = generate_llvm_ir(null, "invalid")
     if invalid.error != "LLVM generation requires an IR program" then
         console::print_line("self-host LLVM generation test failed: null input")
@@ -82,6 +86,31 @@ fn launch() -> int
     end
     return failure
 end
+
+fn test_recursive_object_layout_rejection() -> int
+    let arena: pointer<IrArena> = create_ir_arena()
+    let type: pointer<IrType> = create_ir_object_type(arena, "Recursive", false, false)
+    let interfaces: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    let fields: pointer<Vector<pointer<IrObjectField>>> = create_vector<pointer<IrObjectField>>()
+    vector_push<pointer<IrObjectField>>(fields, create_ir_object_field(arena, type, 0, "child", type))
+    define_ir_object_type(arena, type, null, interfaces, fields)
+    let module: pointer<IrModule> = create_ir_module(arena, "recursive")
+    ir_module_add_object(arena, module, type)
+    seal_ir_module(arena, module)
+    let program: pointer<IrProgram> = create_ir_program(arena)
+    ir_program_add_module(program, module)
+    seal_ir_program(program)
+    let generated: LlvmGenerationResult = generate_llvm_ir(program, "recursive")
+    @mut let failure: int = 0
+    if generated.error != "LLVM object layout contains recursive by-value storage" || generated.text != "" then
+        failure = 1
+    end
+    destroy_vector<pointer<IrType>>(interfaces)
+    destroy_vector<pointer<IrObjectField>>(fields)
+    destroy_ir_program(program)
+    return failure
+end
+
 
 fn create_unsupported_llvm_program() -> pointer<IrProgram>
     let arena: pointer<IrArena> = create_ir_arena()

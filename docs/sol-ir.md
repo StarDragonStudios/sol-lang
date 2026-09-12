@@ -286,9 +286,10 @@ Uninstantiated generic methods do not create open types in IR. Nested value-fiel
 mutation preserves object identity by updating a temporary struct value and
 storing it back into the original object field.
 
-The current LLVM backend rejects modules containing object definitions with a
-deterministic unsupported-feature error. Object IR support alone does not enable
-native object code generation; that work belongs to #140–#142.
+The LLVM backend lowers object storage, fields, direct construction/calls and
+raw allocation/deletion. Virtual and interface dispatch remain an explicit
+unsupported-feature boundary until #141. Native layout details are documented
+in `compiler-llvm-backend.md`, not embedded in the target-independent IR.
 
 ## Local storage
 
