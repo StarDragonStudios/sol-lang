@@ -165,7 +165,15 @@ fn format_ir_signature(function: pointer<IrFunction>) -> string
         text = text + "%" + format_ir_int(parameter->value->id) + " " + parameter->name + ": " + parameter->value->type->name
         index = index + 1
     end
-    return text + ") -> " + function->return_type->name
+    text = text + ") -> " + function->return_type->name
+    if function->kind != ir_function_kind_function() then
+        text = text + " [" + format_ir_dispatch(function->dispatch)
+        if function->overridden != null then
+            text = text + ", overrides @function" + format_ir_int(function->overridden->id)
+        end
+        text = text + "]"
+    end
+    return text
 end
 
 fn format_ir_block(block: pointer<IrBasicBlock>, emitted: pointer<Vector<pointer<IrValue>>>) -> string
