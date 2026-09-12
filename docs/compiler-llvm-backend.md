@@ -27,6 +27,8 @@ The bootstrap ABI maps Sol types as follows:
 | `string` | `%sol.string = type { ptr, i64, i64 }` |
 | `pointer<T>` | opaque `ptr` |
 | struct value | deterministic named `%sol.typeN` |
+| class storage | named `%sol.typeN`, never a copyable SSA value |
+| class/interface pointer view | opaque `ptr`, preserving the allocation address |
 | `void` | `void` |
 
 The two integer fields in `%sol.string` are the UTF-8 byte length and Unicode
@@ -49,7 +51,7 @@ accidentally consume a partial module.
 
 ## Supported Sol IR
 
-The emitter covers all instructions currently produced by semantic lowering:
+The emitter covers the procedural subset and the object-storage operations:
 
 - integer and floating arithmetic, comparisons and boolean operations;
 - locals, parameters, calls and `void` calls;
@@ -58,10 +60,54 @@ The emitter covers all instructions currently produced by semantic lowering:
 - direct, conditional and return terminators;
 - the native `main` adapter for a canonical Sol entry point;
 - string concatenation, equality and scalar indexing.
+- object destinations, field loads/stores/addresses and nested construction;
+- direct receiver calls and constructor delegation;
+- raw `new`/`delete` and identity-preserving class/interface pointer views.
+
+Virtual and interface calls still fail with a deterministic unsupported-dispatch
+error and empty output. Dynamic dispatch implementation belongs to #141.
 
 All functions and struct layouts are emitted before bodies can refer to them.
 The native adapter calls the zero-parameter Sol entry function, truncates its
 `i64` status to the platform C `int`, and returns it.
+
+## Object storage and construction
+
+Root classes contain a reserved opaque metadata pointer followed by their own
+fields in declaration order. Derived classes embed the complete direct base
+as their first field, followed by their own fields. Base tail padding is not
+reused. The same named type is used for direct local storage, embedded class
+fields and allocation-backed instances. Forward declarations are registered
+before layouts are emitted; recursive by-value layouts are rejected.
+
+LLVM computes padding, alignment and allocation size for the selected target.
+Field addresses use typed `getelementptr` with the canonical declaring class
+and field index, never a manually calculated byte offset. Every root object,
+including an empty class, therefore has nonzero size and pointer alignment.
+The supported targets are all 64-bit; the existing allocation boundary uses
+an `i64` size.
+
+Single inheritance places every base view at the original address. Interface
+views currently carry that same address and no independent storage; a view is
+emitted as a zero-offset, non-`inbounds` GEP so that null remains null. Interface
+dispatch is not enabled by this representation. This internal bootstrap layout
+is not a stable public object ABI.
+
+Callable signatures place an explicit `ptr` receiver before source parameters.
+Construction and reconstruction initialize the reserved header to null, then
+call the exact constructor on the destination. Base/`this` constructor delegation
+reuses that receiver and does not reset the header. Direct instances are never
+copied as aggregates and are never passed to `free` automatically.
+
+Each concrete constructor has an internal `@sol.object.newN` allocation helper.
+It derives the full class size from a one-element GEP, calls the existing
+`malloc` boundary, and returns null without entering the constructor on failure.
+On success it initializes the header, invokes the constructor exactly once and
+returns the original pointer. `delete` uses the existing `free` boundary, for
+which a null argument is a no-op. The source contract still forbids deleting
+direct storage or a non-concrete view; this raw model does not add provenance,
+double-free or use-after-free checks. No destructor, resource cleanup or GC is
+introduced here; runtime lifetime hardening remains in #142.
 
 ## Runtime boundary
 
@@ -90,6 +136,13 @@ compiled runtime validates UTF-8 at host input boundaries.
 names, layouts, functions, operations and the native entry adapter. The
 existing lowering suite also passes representative complete programs through
 LLVM generation.
+
+`compiler/src/fixtures/object_layout.sol` supplies a shared object program to
+the lowering suite and the linked native artifact fixture. It exercises base
+prefixes, mixed-alignment fields, embedded classes, reconstruction, private
+direct calls, UTF-8 strings, pointer views, empty-object identity and null
+deletion. Thus the existing Linux/Windows bootstrap and native-distribution
+jobs execute the object checks without an additional parallel test pipeline.
 
 Both bootstrap scripts compile `compiler/src/llvm_fixture.sol` with the frozen
 Sol 0.1.1 seed, run it to generate a non-trivial `.ll` module, and ask the host

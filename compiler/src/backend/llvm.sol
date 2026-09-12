@@ -35,15 +35,6 @@ fn generate_llvm_ir(program: pointer<IrProgram>, module_name: string) -> LlvmGen
         invalid.error = "LLVM module name must not be empty"
         return invalid
     end
-    @mut let module_index: int = 0
-    while module_index < vector_length<pointer<IrModule>>(program->modules) do
-        let module: pointer<IrModule> = vector_get<pointer<IrModule>>(program->modules, module_index)
-        if vector_length<pointer<IrType>>(module->objects) != 0 then
-            invalid.error = "LLVM object layout, dispatch and runtime generation are not implemented yet"
-            return invalid
-        end
-        module_index = module_index + 1
-    end
 
     let context: pointer<LlvmGenerationContext> = create_llvm_context(program)
     if context == null then
@@ -52,6 +43,9 @@ fn generate_llvm_ir(program: pointer<IrProgram>, module_name: string) -> LlvmGen
     end
 
     collect_llvm_types(context)
+    if !llvm_failed(context) then
+        validate_llvm_layouts(context)
+    end
     if !llvm_failed(context) then
         emit_llvm_program(context, module_name)
     end
@@ -141,10 +135,72 @@ fn collect_llvm_types(context: pointer<LlvmGenerationContext>) -> void
             vector_push<pointer<LlvmTypeBinding>>(context->types, binding)
             type_index = type_index + 1
         end
+        type_index = 0
+        while type_index < vector_length<pointer<IrType>>(module->objects) do
+            let type: pointer<IrType> = vector_get<pointer<IrType>>(module->objects, type_index)
+            if type->kind == ir_type_class() then
+                let binding: pointer<LlvmTypeBinding> = memory::allocate<LlvmTypeBinding>(1)
+                if binding == null then
+                    llvm_fail(context, "LLVM type catalog allocation failed")
+                    return
+                end
+                binding->type = type
+                binding->id = vector_length<pointer<LlvmTypeBinding>>(context->types)
+                vector_push<pointer<LlvmTypeBinding>>(context->types, binding)
+            end
+            type_index = type_index + 1
+        end
         module_index = module_index + 1
     end
     return
 end
+
+fn validate_llvm_layout(context: pointer<LlvmGenerationContext>, type: pointer<IrType>, active: pointer<Vector<pointer<IrType>>>, complete: pointer<Vector<pointer<IrType>>>) -> boolean
+    if type->kind != ir_type_class() && type->kind != ir_type_struct() then
+        return true
+    end
+    if ir_pointer_in_types(active, type) then
+        llvm_fail(context, "LLVM object layout contains recursive by-value storage")
+        return false
+    end
+    if ir_pointer_in_types(complete, type) then
+        return true
+    end
+    vector_push<pointer<IrType>>(active, type)
+    @mut let valid: boolean = true
+    if type->base_type != null then
+        valid = validate_llvm_layout(context, type->base_type, active, complete)
+    end
+    @mut let index: int = 0
+    while index < vector_length<pointer<IrObjectField>>(type->object_fields) && valid do
+        valid = validate_llvm_layout(context, vector_get<pointer<IrObjectField>>(type->object_fields, index)->type, active, complete)
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<IrStructField>>(type->fields) && valid do
+        valid = validate_llvm_layout(context, vector_get<pointer<IrStructField>>(type->fields, index)->type, active, complete)
+        index = index + 1
+    end
+    vector_pop<pointer<IrType>>(active)
+    if valid then
+        vector_push<pointer<IrType>>(complete, type)
+    end
+    return valid
+end
+
+fn validate_llvm_layouts(context: pointer<LlvmGenerationContext>) -> void
+    let active: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    let complete: pointer<Vector<pointer<IrType>>> = create_vector<pointer<IrType>>()
+    @mut let index: int = 0
+    while index < vector_length<pointer<LlvmTypeBinding>>(context->types) && !llvm_failed(context) do
+        validate_llvm_layout(context, vector_get<pointer<LlvmTypeBinding>>(context->types, index)->type, active, complete)
+        index = index + 1
+    end
+    destroy_vector<pointer<IrType>>(active)
+    destroy_vector<pointer<IrType>>(complete)
+    return
+end
+
 
 fn llvm_type_id(context: pointer<LlvmGenerationContext>, type: pointer<IrType>) -> int
     @mut let index: int = 0
@@ -167,7 +223,7 @@ fn llvm_type(context: pointer<LlvmGenerationContext>, type: pointer<IrType>) -> 
     if type->kind == ir_type_pointer() then
         return "ptr"
     end
-    if type->kind == ir_type_struct() then
+    if type->kind == ir_type_struct() || type->kind == ir_type_class() then
         return "%sol.type" + format_ir_int(llvm_type_id(context, type))
     end
     if type == context->program->arena->integer_type then
@@ -215,6 +271,17 @@ fn emit_llvm_structs(context: pointer<LlvmGenerationContext>) -> void
         let binding: pointer<LlvmTypeBinding> = vector_get<pointer<LlvmTypeBinding>>(context->types, index)
         @mut let fields: string = ""
         @mut let field_index: int = 0
+        if binding->type->kind == ir_type_class() then
+            fields = "ptr"
+            if binding->type->base_type != null then
+                fields = llvm_type(context, binding->type->base_type)
+            end
+            while field_index < vector_length<pointer<IrObjectField>>(binding->type->object_fields) do
+                fields = fields + ", " + llvm_type(context, vector_get<pointer<IrObjectField>>(binding->type->object_fields, field_index)->type)
+                field_index = field_index + 1
+            end
+        end
+        field_index = 0
         while field_index < vector_length<pointer<IrStructField>>(binding->type->fields) do
             if field_index > 0 then
                 fields = fields + ", "
@@ -345,9 +412,15 @@ end
 
 fn llvm_function_signature(context: pointer<LlvmGenerationContext>, function: pointer<IrFunction>, names: boolean) -> string
     @mut let parameters: string = ""
+    if function->receiver != null then
+        parameters = "ptr"
+        if names then
+            parameters = parameters + " %value" + format_ir_int(function->receiver->value->id)
+        end
+    end
     @mut let index: int = 0
     while index < vector_length<pointer<IrParameter>>(function->parameters) do
-        if index > 0 then
+        if index > 0 || function->receiver != null then
             parameters = parameters + ", "
         end
         let parameter: pointer<IrParameter> = vector_get<pointer<IrParameter>>(function->parameters, index)
@@ -372,6 +445,9 @@ fn emit_llvm_function(context: pointer<LlvmGenerationContext>, module: pointer<I
             return
         end
         llvm_line(context, "declare " + llvm_function_signature(context, function, false))
+        if function->kind == ir_function_kind_constructor() then
+            emit_llvm_object_allocator(context, function)
+        end
         return
     end
     llvm_line(context, "define " + llvm_function_signature(context, function, true) + " {")
@@ -381,6 +457,9 @@ fn emit_llvm_function(context: pointer<LlvmGenerationContext>, module: pointer<I
         block_index = block_index + 1
     end
     llvm_line(context, "}")
+    if function->kind == ir_function_kind_constructor() then
+        emit_llvm_object_allocator(context, function)
+    end
     return
 end
 
@@ -704,7 +783,7 @@ fn emit_llvm_local_allocations(context: pointer<LlvmGenerationContext>, function
         @mut let instruction_index: int = 0
         while instruction_index < vector_length<pointer<IrInstruction>>(block->instructions) do
             let instruction: pointer<IrInstruction> = vector_get<pointer<IrInstruction>>(block->instructions, instruction_index)
-            if instruction->kind == ir_instruction_local_initialize() then
+            if instruction->kind == ir_instruction_local_initialize() || instruction->kind == ir_instruction_object_initialize() then
                 llvm_line(context, "  %local" + format_ir_int(instruction->local->id) + " = alloca " + llvm_type(context, instruction->local->type))
             end
             instruction_index = instruction_index + 1
@@ -791,6 +870,10 @@ fn emit_llvm_string_fields(context: pointer<LlvmGenerationContext>, value: point
 end
 
 fn emit_llvm_instruction(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, block_id: int, instruction_id: int) -> void
+    if instruction->kind >= ir_instruction_object_initialize() then
+        emit_llvm_object_instruction(context, instruction, block_id, instruction_id)
+        return
+    end
     let result: string = llvm_instruction_result(instruction)
     if instruction->kind == ir_instruction_local_initialize() then
         llvm_line(context, "  store " + llvm_operand(context, vector_get<pointer<IrValue>>(instruction->operands, 0), block_id, instruction_id, 0) + ", ptr %local" + format_ir_int(instruction->local->id))
@@ -858,6 +941,124 @@ fn emit_llvm_instruction(context: pointer<LlvmGenerationContext>, instruction: p
     llvm_fail(context, "LLVM generation encountered an unsupported instruction")
     return
 end
+
+fn emit_llvm_object_allocator(context: pointer<LlvmGenerationContext>, constructor: pointer<IrFunction>) -> void
+    if constructor->owner->abstract_type then
+        return
+    end
+    @mut let parameters: string = ""
+    @mut let arguments: string = "ptr %object"
+    @mut let index: int = 0
+    while index < vector_length<pointer<IrParameter>>(constructor->parameters) do
+        let parameter: pointer<IrParameter> = vector_get<pointer<IrParameter>>(constructor->parameters, index)
+        let operand: string = llvm_type(context, parameter->value->type) + " %value" + format_ir_int(parameter->value->id)
+        if index > 0 then
+            parameters = parameters + ", "
+        end
+        parameters = parameters + operand
+        arguments = arguments + ", " + operand
+        index = index + 1
+    end
+    llvm_line(context, "")
+    llvm_line(context, "define internal ptr @sol.object.new" + format_ir_int(constructor->id) + "(" + parameters + ") {")
+    llvm_line(context, "entry:")
+    llvm_line(context, "  %end = getelementptr " + llvm_type(context, constructor->owner) + ", ptr null, i64 1")
+    llvm_line(context, "  %size = ptrtoint ptr %end to i64")
+    llvm_line(context, "  %object = call ptr @malloc(i64 %size)")
+    llvm_line(context, "  %failed = icmp eq ptr %object, null")
+    llvm_line(context, "  br i1 %failed, label %failure, label %construct")
+    llvm_line(context, "failure:")
+    llvm_line(context, "  ret ptr null")
+    llvm_line(context, "construct:")
+    llvm_line(context, "  store ptr null, ptr %object")
+    llvm_line(context, "  call void " + llvm_function_symbol(context, constructor->id) + "(" + arguments + ")")
+    llvm_line(context, "  ret ptr %object")
+    llvm_line(context, "}")
+    return
+end
+
+fn llvm_object_arguments(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, start: int, block_id: int, instruction_id: int, prefix: string) -> string
+    @mut let text: string = prefix
+    @mut let index: int = start
+    while index < vector_length<pointer<IrValue>>(instruction->operands) do
+        if text != "" then
+            text = text + ", "
+        end
+        text = text + llvm_operand(context, vector_get<pointer<IrValue>>(instruction->operands, index), block_id, instruction_id, index)
+        index = index + 1
+    end
+    return text
+end
+
+fn emit_llvm_object_construction(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, destination: string, start: int, block_id: int, instruction_id: int) -> void
+    llvm_line(context, "  store ptr null, ptr " + destination)
+    let arguments: string = llvm_object_arguments(context, instruction, start, block_id, instruction_id, "ptr " + destination)
+    llvm_line(context, "  call void " + llvm_function_symbol(context, instruction->target->id) + "(" + arguments + ")")
+    return
+end
+
+fn emit_llvm_object_instruction(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, block_id: int, instruction_id: int) -> void
+    let kind: int = instruction->kind
+    let result: string = llvm_instruction_result(instruction)
+    if kind == ir_instruction_object_initialize() || kind == ir_instruction_object_reconstruct() then
+        emit_llvm_object_construction(context, instruction, "%local" + format_ir_int(instruction->local->id), 0, block_id, instruction_id)
+        return
+    end
+    if kind == ir_instruction_object_address() then
+        llvm_line(context, "  " + result + " = getelementptr i8, ptr %local" + format_ir_int(instruction->local->id) + ", i64 0")
+        return
+    end
+    if kind == ir_instruction_object_view() then
+        let receiver: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
+        llvm_line(context, "  " + result + " = getelementptr i8, ptr " + llvm_value(receiver, block_id, instruction_id, 0) + ", i64 0")
+        return
+    end
+    if kind == ir_instruction_object_field_load() || kind == ir_instruction_object_field_store() || kind == ir_instruction_object_field_address() || kind == ir_instruction_object_field_construct() then
+        let field: pointer<IrObjectField> = instruction->object_field
+        let receiver: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
+        @mut let address: string = "%object.field." + format_ir_int(block_id) + "." + format_ir_int(instruction_id)
+        if kind == ir_instruction_object_field_address() then
+            address = result
+        end
+        llvm_line(context, "  " + address + " = getelementptr " + llvm_type(context, field->owner) + ", ptr " + llvm_value(receiver, block_id, instruction_id, 0) + ", i32 0, i32 " + format_ir_int(field->index + 1))
+        if kind == ir_instruction_object_field_construct() then
+            emit_llvm_object_construction(context, instruction, address, 1, block_id, instruction_id)
+            return
+        end
+        if kind == ir_instruction_object_field_load() then
+            llvm_line(context, "  " + result + " = load " + llvm_type(context, field->type) + ", ptr " + address)
+        end
+        if kind == ir_instruction_object_field_store() then
+            llvm_line(context, "  store " + llvm_operand(context, vector_get<pointer<IrValue>>(instruction->operands, 1), block_id, instruction_id, 1) + ", ptr " + address)
+        end
+        return
+    end
+    if kind == ir_instruction_constructor_call() then
+        emit_llvm_call(context, instruction, block_id, instruction_id)
+        return
+    end
+    if kind == ir_instruction_method_call() || kind == ir_instruction_void_method_call() then
+        if instruction->dispatch != ir_dispatch_direct() then
+            llvm_fail(context, "LLVM virtual and interface dispatch are not implemented yet")
+            return
+        end
+        emit_llvm_call(context, instruction, block_id, instruction_id)
+        return
+    end
+    if kind == ir_instruction_object_new() then
+        let arguments: string = llvm_object_arguments(context, instruction, 0, block_id, instruction_id, "")
+        llvm_line(context, "  " + result + " = call ptr @sol.object.new" + format_ir_int(instruction->target->id) + "(" + arguments + ")")
+        return
+    end
+    if kind == ir_instruction_object_delete() then
+        let value: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
+        llvm_line(context, "  call void @free(ptr " + llvm_value(value, block_id, instruction_id, 0) + ")")
+        return
+    end
+    llvm_fail(context, "LLVM generation encountered an unsupported object instruction")
+    return
+end
+
 
 fn llvm_instruction_result(instruction: pointer<IrInstruction>) -> string
     if instruction->result == null then
