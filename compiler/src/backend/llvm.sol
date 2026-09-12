@@ -2,6 +2,7 @@ inject namespace std.memory as memory
 inject std.collections.vector
 inject namespace std.string as strings
 inject ir.model
+inject ir.validation only ir_program_function
 inject ir.formatter only format_ir_int, quote_ir_string
 
 struct LlvmGenerationResult
@@ -17,6 +18,7 @@ end
 struct LlvmGenerationContext
     program: pointer<IrProgram>
     types: pointer<Vector<pointer<LlvmTypeBinding>>>
+    dispatch_methods: pointer<Vector<pointer<IrFunction>>>
     lines: pointer<Vector<string>>
     error: string
 end
@@ -43,6 +45,7 @@ fn generate_llvm_ir(program: pointer<IrProgram>, module_name: string) -> LlvmGen
     end
 
     collect_llvm_types(context)
+    collect_llvm_dispatch_methods(context)
     if !llvm_failed(context) then
         validate_llvm_layouts(context)
     end
@@ -72,6 +75,7 @@ fn create_llvm_context(program: pointer<IrProgram>) -> pointer<LlvmGenerationCon
     end
     context->program = program
     context->types = create_vector<pointer<LlvmTypeBinding>>()
+    context->dispatch_methods = create_vector<pointer<IrFunction>>()
     context->lines = create_vector<string>()
     context->error = ""
     return context
@@ -87,6 +91,7 @@ fn destroy_llvm_context(context: pointer<LlvmGenerationContext>) -> void
         memory::free<LlvmTypeBinding>(vector_get<pointer<LlvmTypeBinding>>(context->types, index))
     end
     destroy_vector<pointer<LlvmTypeBinding>>(context->types)
+    destroy_vector<pointer<IrFunction>>(context->dispatch_methods)
     destroy_vector<string>(context->lines)
     memory::free<LlvmGenerationContext>(context)
     return
@@ -154,6 +159,171 @@ fn collect_llvm_types(context: pointer<LlvmGenerationContext>) -> void
     end
     return
 end
+
+fn collect_llvm_dispatch_methods(context: pointer<LlvmGenerationContext>) -> void
+    @mut let module_index: int = 0
+    while module_index < vector_length<pointer<IrModule>>(context->program->modules) do
+        let module: pointer<IrModule> = vector_get<pointer<IrModule>>(context->program->modules, module_index)
+        @mut let index: int = 0
+        while index < vector_length<pointer<IrFunction>>(module->functions) do
+            let function: pointer<IrFunction> = vector_get<pointer<IrFunction>>(module->functions, index)
+            if function->kind == ir_function_kind_method() && function->dispatch != ir_dispatch_direct() then
+                vector_push<pointer<IrFunction>>(context->dispatch_methods, function)
+            end
+            index = index + 1
+        end
+        module_index = module_index + 1
+    end
+    return
+end
+
+fn llvm_dispatch_table_symbol(context: pointer<LlvmGenerationContext>, type: pointer<IrType>) -> string
+    return "@sol.dispatch" + format_ir_int(llvm_type_id(context, type))
+end
+
+fn llvm_dispatch_slot(context: pointer<LlvmGenerationContext>, id: int) -> int
+    @mut let index: int = 0
+    while index < vector_length<pointer<IrFunction>>(context->dispatch_methods) do
+        if vector_get<pointer<IrFunction>>(context->dispatch_methods, index)->id == id then
+            return index
+        end
+        index = index + 1
+    end
+    llvm_fail(context, "LLVM dynamic call has no canonical dispatch slot")
+    return -1
+end
+
+fn llvm_method_overrides(context: pointer<LlvmGenerationContext>, method: pointer<IrFunction>, target: pointer<IrFunction>) -> boolean
+    @mut let current: pointer<IrFunction> = method
+    @mut let remaining: int = vector_length<pointer<IrFunction>>(context->dispatch_methods) + 1
+    while current != null && remaining > 0 do
+        if current == target then
+            return true
+        end
+        if current->overridden == null then
+            return false
+        end
+        current = ir_program_function(context->program, current->overridden->id)
+        remaining = remaining - 1
+    end
+    if remaining == 0 then
+        llvm_fail(context, "LLVM dispatch encountered a cyclic override chain")
+    end
+    return false
+end
+
+fn llvm_resolve_dispatch(context: pointer<LlvmGenerationContext>, type: pointer<IrType>, requirement: pointer<IrFunction>) -> pointer<IrFunction>
+    if !ir_object_is_subtype(type, requirement->owner) then
+        return null
+    end
+    @mut let target: pointer<IrFunction> = requirement
+    if requirement->owner->kind == ir_type_interface() then
+        target = null
+        @mut let index: int = 0
+        while index < vector_length<pointer<IrRequirementImplementation>>(type->requirements) do
+            let mapping: pointer<IrRequirementImplementation> = vector_get<pointer<IrRequirementImplementation>>(type->requirements, index)
+            if mapping->requirement->id == requirement->id then
+                if mapping->implementation != null then
+                    target = ir_program_function(context->program, mapping->implementation->id)
+                end
+            end
+            index = index + 1
+        end
+    end
+    if target == null then
+        if !type->abstract_type then
+            llvm_fail(context, "LLVM concrete class has an unmapped interface requirement")
+        end
+        return null
+    end
+    @mut let selected: pointer<IrFunction> = target
+    @mut let index: int = 0
+    while index < vector_length<pointer<IrFunction>>(context->dispatch_methods) do
+        let candidate: pointer<IrFunction> = vector_get<pointer<IrFunction>>(context->dispatch_methods, index)
+        if candidate->owner->kind == ir_type_class() then
+            if ir_object_is_subtype(type, candidate->owner) && ir_object_is_subtype(candidate->owner, selected->owner) then
+                if llvm_method_overrides(context, candidate, target) then
+                    selected = candidate
+                end
+            end
+        end
+        index = index + 1
+    end
+    if !selected->has_body then
+        if !type->abstract_type then
+            llvm_fail(context, "LLVM concrete dispatch target has no implementation")
+        end
+        return null
+    end
+    return selected
+end
+
+fn llvm_dispatch_signature_matches(left: pointer<IrFunction>, right: pointer<IrFunction>) -> boolean
+    if !ir_type_equals(left->return_type, right->return_type) || vector_length<pointer<IrParameter>>(left->parameters) != vector_length<pointer<IrParameter>>(right->parameters) then
+        return false
+    end
+    @mut let index: int = 0
+    while index < vector_length<pointer<IrParameter>>(left->parameters) do
+        if !ir_type_equals(vector_get<pointer<IrParameter>>(left->parameters, index)->value->type, vector_get<pointer<IrParameter>>(right->parameters, index)->value->type) then
+            return false
+        end
+        index = index + 1
+    end
+    return true
+end
+
+fn emit_llvm_dispatch_tables(context: pointer<LlvmGenerationContext>) -> void
+    let count: int = vector_length<pointer<IrFunction>>(context->dispatch_methods)
+    @mut let type_index: int = 0
+    while type_index < vector_length<pointer<LlvmTypeBinding>>(context->types) && !llvm_failed(context) do
+        let type: pointer<IrType> = vector_get<pointer<LlvmTypeBinding>>(context->types, type_index)->type
+        if type->kind == ir_type_class() then
+            @mut let entries: string = ""
+            @mut let index: int = 0
+            while index < count do
+                let method: pointer<IrFunction> = vector_get<pointer<IrFunction>>(context->dispatch_methods, index)
+                let implementation: pointer<IrFunction> = llvm_resolve_dispatch(context, type, method)
+                if index > 0 then
+                    entries = entries + ", "
+                end
+                if implementation == null then
+                    entries = entries + "ptr null"
+                else
+                    if !llvm_dispatch_signature_matches(method, implementation) then
+                        llvm_fail(context, "LLVM dispatch implementation signature mismatch")
+                    end
+                    entries = entries + "ptr " + llvm_function_symbol(context, implementation->id)
+                end
+                index = index + 1
+            end
+            llvm_line(context, llvm_dispatch_table_symbol(context, type) + " = private constant [" + format_ir_int(count) + " x ptr] [" + entries + "]")
+        end
+        type_index = type_index + 1
+    end
+    return
+end
+
+fn emit_llvm_dynamic_call(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, block_id: int, instruction_id: int) -> void
+    let slot: int = llvm_dispatch_slot(context, instruction->target->id)
+    if slot < 0 then
+        return
+    end
+    let count: int = vector_length<pointer<IrFunction>>(context->dispatch_methods)
+    let receiver: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
+    let prefix: string = "%dispatch." + format_ir_int(block_id) + "." + format_ir_int(instruction_id)
+    llvm_line(context, "  " + prefix + ".table = load ptr, ptr " + llvm_value(receiver, block_id, instruction_id, 0))
+    llvm_line(context, "  " + prefix + ".slot = getelementptr [" + format_ir_int(count) + " x ptr], ptr " + prefix + ".table, i64 0, i64 " + format_ir_int(slot))
+    llvm_line(context, "  " + prefix + ".target = load ptr, ptr " + prefix + ".slot")
+    @mut let call: string = "  "
+    if instruction->result != null then
+        call = call + llvm_instruction_result(instruction) + " = "
+    end
+    let arguments: string = llvm_object_arguments(context, instruction, 0, block_id, instruction_id, "")
+    call = call + "call " + llvm_type(context, instruction->target->return_type) + " " + prefix + ".target(" + arguments + ")"
+    llvm_line(context, call)
+    return
+end
+
 
 fn validate_llvm_layout(context: pointer<LlvmGenerationContext>, type: pointer<IrType>, active: pointer<Vector<pointer<IrType>>>, complete: pointer<Vector<pointer<IrType>>>) -> boolean
     if type->kind != ir_type_class() && type->kind != ir_type_struct() then
@@ -254,6 +424,7 @@ fn emit_llvm_program(context: pointer<LlvmGenerationContext>, module_name: strin
     llvm_line(context, "")
     llvm_line(context, "%sol.string = type { ptr, i64, i64 }")
     emit_llvm_structs(context)
+    emit_llvm_dispatch_tables(context)
     llvm_line(context, "")
     emit_llvm_runtime_declarations(context)
     llvm_line(context, "")
@@ -970,7 +1141,7 @@ fn emit_llvm_object_allocator(context: pointer<LlvmGenerationContext>, construct
     llvm_line(context, "failure:")
     llvm_line(context, "  ret ptr null")
     llvm_line(context, "construct:")
-    llvm_line(context, "  store ptr null, ptr %object")
+    llvm_line(context, "  store ptr " + llvm_dispatch_table_symbol(context, constructor->owner) + ", ptr %object")
     llvm_line(context, "  call void " + llvm_function_symbol(context, constructor->id) + "(" + arguments + ")")
     llvm_line(context, "  ret ptr %object")
     llvm_line(context, "}")
@@ -991,7 +1162,7 @@ fn llvm_object_arguments(context: pointer<LlvmGenerationContext>, instruction: p
 end
 
 fn emit_llvm_object_construction(context: pointer<LlvmGenerationContext>, instruction: pointer<IrInstruction>, destination: string, start: int, block_id: int, instruction_id: int) -> void
-    llvm_line(context, "  store ptr null, ptr " + destination)
+    llvm_line(context, "  store ptr " + llvm_dispatch_table_symbol(context, instruction->target->owner) + ", ptr " + destination)
     let arguments: string = llvm_object_arguments(context, instruction, start, block_id, instruction_id, "ptr " + destination)
     llvm_line(context, "  call void " + llvm_function_symbol(context, instruction->target->id) + "(" + arguments + ")")
     return
@@ -1039,7 +1210,7 @@ fn emit_llvm_object_instruction(context: pointer<LlvmGenerationContext>, instruc
     end
     if kind == ir_instruction_method_call() || kind == ir_instruction_void_method_call() then
         if instruction->dispatch != ir_dispatch_direct() then
-            llvm_fail(context, "LLVM virtual and interface dispatch are not implemented yet")
+            emit_llvm_dynamic_call(context, instruction, block_id, instruction_id)
             return
         end
         emit_llvm_call(context, instruction, block_id, instruction_id)

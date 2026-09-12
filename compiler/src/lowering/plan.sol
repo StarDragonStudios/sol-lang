@@ -208,9 +208,9 @@ fn lowering_add_dispatch_specializations(context: pointer<LoweringContext>, call
     while index < vector_length<LoweringOwner>(context->object_owners) do
         let object: pointer<SemanticSymbol> = vector_get<LoweringOwner>(context->object_owners, index).symbol
         @mut let requirement_index: int = 0
-        while requirement_index < vector_length<pointer<SemanticSymbol>>(object->requirements) do
-            let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->requirements, requirement_index)
-            let implementation: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->implementations, requirement_index)
+        while requirement_index < vector_length<pointer<SemanticSymbol>>(object->requirement_aliases) do
+            let requirement: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->requirement_aliases, requirement_index)
+            let implementation: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->alias_implementations, requirement_index)
             @mut let candidate: pointer<SemanticSymbol> = null
             if caller->function == requirement then
                 candidate = implementation

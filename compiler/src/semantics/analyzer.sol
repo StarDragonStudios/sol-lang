@@ -353,6 +353,17 @@ fn semantic_class_methods(program: pointer<SemanticProgram>, type: pointer<Seman
 end
 
 fn semantic_add_requirement(program: pointer<SemanticProgram>, type: pointer<SemanticSymbol>, requirement: pointer<SemanticSymbol>) -> void
+    @mut let alias_index: int = 0
+    @mut let known: boolean = false
+    while alias_index < vector_length<pointer<SemanticSymbol>>(type->requirement_aliases) do
+        if vector_get<pointer<SemanticSymbol>>(type->requirement_aliases, alias_index) == requirement then
+            known = true
+        end
+        alias_index = alias_index + 1
+    end
+    if !known then
+        vector_push<pointer<SemanticSymbol>>(type->requirement_aliases, requirement)
+    end
     @mut let index: int = 0
     while index < vector_length<pointer<SemanticSymbol>>(type->requirements) do
         let previous: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, index)
@@ -382,8 +393,8 @@ fn semantic_inherit_requirements(program: pointer<SemanticProgram>, type: pointe
     end
     semantic_build_contract(program, parent)
     @mut let index: int = 0
-    while index < vector_length<pointer<SemanticSymbol>>(parent->requirements) do
-        semantic_add_requirement(program, type, vector_get<pointer<SemanticSymbol>>(parent->requirements, index))
+    while index < vector_length<pointer<SemanticSymbol>>(parent->requirement_aliases) do
+        semantic_add_requirement(program, type, vector_get<pointer<SemanticSymbol>>(parent->requirement_aliases, index))
         index = index + 1
     end
     return
@@ -448,6 +459,21 @@ fn semantic_build_contract(program: pointer<SemanticProgram>, type: pointer<Sema
             end
         end
         vector_push<pointer<SemanticSymbol>>(type->implementations, implementation)
+        index = index + 1
+    end
+    index = 0
+    while index < vector_length<pointer<SemanticSymbol>>(type->requirement_aliases) do
+        let alias: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirement_aliases, index)
+        @mut let implementation: pointer<SemanticSymbol> = null
+        @mut let canonical_index: int = 0
+        while canonical_index < vector_length<pointer<SemanticSymbol>>(type->requirements) do
+            let canonical: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(type->requirements, canonical_index)
+            if canonical->name == alias->name && semantic_callable_signatures_equal(program, canonical, alias) then
+                implementation = vector_get<pointer<SemanticSymbol>>(type->implementations, canonical_index)
+            end
+            canonical_index = canonical_index + 1
+        end
+        vector_push<pointer<SemanticSymbol>>(type->alias_implementations, implementation)
         index = index + 1
     end
     type->contract_state = 2

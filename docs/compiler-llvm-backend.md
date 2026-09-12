@@ -62,10 +62,8 @@ The emitter covers the procedural subset and the object-storage operations:
 - string concatenation, equality and scalar indexing.
 - object destinations, field loads/stores/addresses and nested construction;
 - direct receiver calls and constructor delegation;
-- raw `new`/`delete` and identity-preserving class/interface pointer views.
-
-Virtual and interface calls still fail with a deterministic unsupported-dispatch
-error and empty output. Dynamic dispatch implementation belongs to #141.
+- raw `new`/`delete` and identity-preserving class/interface pointer views;
+- virtual and interface calls, including monomorphized generic methods.
 
 All functions and struct layouts are emitted before bodies can refer to them.
 The native adapter calls the zero-parameter Sol entry function, truncates its
@@ -73,7 +71,7 @@ The native adapter calls the zero-parameter Sol entry function, truncates its
 
 ## Object storage and construction
 
-Root classes contain a reserved opaque metadata pointer followed by their own
+Root classes contain an opaque dispatch-table pointer followed by their own
 fields in declaration order. Derived classes embed the complete direct base
 as their first field, followed by their own fields. Base tail padding is not
 reused. The same named type is used for direct local storage, embedded class
@@ -89,12 +87,13 @@ an `i64` size.
 
 Single inheritance places every base view at the original address. Interface
 views currently carry that same address and no independent storage; a view is
-emitted as a zero-offset, non-`inbounds` GEP so that null remains null. Interface
-dispatch is not enabled by this representation. This internal bootstrap layout
-is not a stable public object ABI.
+emitted as a zero-offset, non-`inbounds` GEP so that null remains null. Both class
+and interface dispatch use the header at that address without receiver-adjustment
+thunks. This internal bootstrap layout is not a stable public object ABI.
 
 Callable signatures place an explicit `ptr` receiver before source parameters.
-Construction and reconstruction initialize the reserved header to null, then
+Construction and reconstruction initialize the header with the exact class's
+immutable dispatch table, then
 call the exact constructor on the destination. Base/`this` constructor delegation
 reuses that receiver and does not reset the header. Direct instances are never
 copied as aggregates and are never passed to `free` automatically.
@@ -108,6 +107,25 @@ which a null argument is a no-op. The source contract still forbids deleting
 direct storage or a non-concrete view; this raw model does not add provenance,
 double-free or use-after-free checks. No destructor, resource cleanup or GC is
 introduced here; runtime lifetime hardening remains in #142.
+
+## Dynamic method dispatch
+
+The closed program assigns deterministic dense slots to canonical virtual and
+interface method identities in module/function order. Each class has a private
+constant table with those slots; unrelated slots are null. Overrides select the
+most-derived implementation through canonical override links, not source-name
+lookup. Interface entries use the semantic requirement/implementation mappings,
+including every alias of a unified requirement from multiple interfaces.
+Generic specializations receive distinct slots with exact parameter and return
+types. Missing concrete implementations or incompatible signatures fail
+generation with empty output; abstract classes may retain unresolved slots.
+
+A dynamic call loads the table, loads its canonical slot and invokes the target
+with the unchanged receiver as its first argument. Constructor delegation,
+`base.method()`, private methods and constructor-local calls on `this` remain
+direct calls as selected by semantic analysis. Calls on null or invalid raw
+receivers are not checked. Tables are an internal bootstrap representation, not
+a stable plugin ABI or a commitment to a future dispatch-table format.
 
 ## Runtime boundary
 

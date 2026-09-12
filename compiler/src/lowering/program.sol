@@ -193,9 +193,9 @@ fn lowering_assign_object_requirements(context: pointer<LoweringContext>) -> boo
     while object_index < vector_length<pointer<LoweringObjectEntry>>(context->objects) do
         let object: pointer<LoweringObjectEntry> = vector_get<pointer<LoweringObjectEntry>>(context->objects, object_index)
         @mut let index: int = 0
-        while index < vector_length<pointer<SemanticSymbol>>(object->symbol->requirements) do
-            let requirement_symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->symbol->requirements, index)
-            let implementation_symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->symbol->implementations, index)
+        while index < vector_length<pointer<SemanticSymbol>>(object->symbol->requirement_aliases) do
+            let requirement_symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->symbol->requirement_aliases, index)
+            let implementation_symbol: pointer<SemanticSymbol> = vector_get<pointer<SemanticSymbol>>(object->symbol->alias_implementations, index)
             @mut let function_index: int = 0
             while function_index < vector_length<pointer<LoweringFunctionEntry>>(context->functions) do
                 let requirement_entry: pointer<LoweringFunctionEntry> = vector_get<pointer<LoweringFunctionEntry>>(context->functions, function_index)
