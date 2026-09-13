@@ -11,6 +11,7 @@ inject lowering.model only IrLoweringResult
 inject lowering.program
 inject backend.llvm
 inject fixtures.object_layout
+inject fixtures.object_dispatch
 
 struct ParsedLoweringSource
     lexical: LexResult
@@ -19,6 +20,11 @@ end
 
 @init
 fn launch() -> int
+    let dispatch: int = test_object_dispatch_generation()
+    if dispatch != 0 then
+        console::print_line("self-host lowering test failed: LLVM object dispatch")
+        return 220 + dispatch
+    end
     let layout: int = test_object_layout_generation()
     if layout != 0 then
         console::print_line("self-host lowering test failed: LLVM object layout")
@@ -57,6 +63,66 @@ fn launch() -> int
     return 0
 end
 
+fn test_object_dispatch_generation() -> int
+    let source: ParsedLoweringSource = parse_lowering_source(object_dispatch_source())
+    if !lowering_source_valid(source) then
+        destroy_lowering_source(source)
+        return 1
+    end
+    let modules: pointer<Vector<SourceModule>> = create_vector<SourceModule>()
+    vector_push<SourceModule>(modules, source_module("dispatch", source.parsed.root))
+    let semantic: pointer<SemanticProgram> = analyze_library_modules(modules)
+    destroy_vector<SourceModule>(modules)
+    if !semantic_program_successful(semantic) then
+        destroy_semantic_program(semantic)
+        destroy_lowering_source(source)
+        return 2
+    end
+    let lowered: IrLoweringResult = lower_semantic_program(semantic)
+    if lowered.program == null then
+        console::print_line(lowered.error)
+        destroy_semantic_program(semantic)
+        destroy_lowering_source(source)
+        return 3
+    end
+    let generated: LlvmGenerationResult = generate_llvm_ir(lowered.program, "dispatch")
+    let repeated: LlvmGenerationResult = generate_llvm_ir(lowered.program, "dispatch")
+    @mut let failure: int = 0
+    if !llvm_generation_succeeded(generated) || generated.text != repeated.text then
+        console::print_line(generated.error)
+        failure = 4
+    end
+    if !lowering_text_contains(generated.text, "@sol.dispatch") || !lowering_text_contains(generated.text, ".table = load ptr, ptr ") || !lowering_text_contains(generated.text, ".target = load ptr, ptr ") then
+        failure = 5
+    end
+    let module: pointer<IrModule> = vector_get<pointer<IrModule>>(lowered.program->modules, 0)
+    @mut let index: int = 0
+    @mut let checked: boolean = false
+    while index < vector_length<pointer<IrType>>(module->objects) && !checked do
+        let type: pointer<IrType> = vector_get<pointer<IrType>>(module->objects, index)
+        if !type->abstract_type && vector_length<pointer<IrRequirementImplementation>>(type->requirements) > 0 then
+            let mapping: pointer<IrRequirementImplementation> = vector_get<pointer<IrRequirementImplementation>>(type->requirements, 0)
+            let implementation: pointer<IrFunctionReference> = mapping->implementation
+            mapping->implementation = null
+            let invalid: LlvmGenerationResult = generate_llvm_ir(lowered.program, "invalid-dispatch")
+            mapping->implementation = implementation
+            if invalid.text != "" || invalid.error != "LLVM concrete class has an unmapped interface requirement" then
+                failure = 6
+            end
+            checked = true
+        end
+        index = index + 1
+    end
+    if !checked then
+        failure = 7
+    end
+    destroy_ir_program(lowered.program)
+    destroy_semantic_program(semantic)
+    destroy_lowering_source(source)
+    return failure
+end
+
+
 fn test_object_layout_generation() -> int
     let source: ParsedLoweringSource = parse_lowering_source(object_layout_source())
     if !lowering_source_valid(source) then
@@ -91,7 +157,7 @@ fn test_object_layout_generation() -> int
     if !lowering_text_contains(generated.text, "%size = ptrtoint ptr %end to i64") || !lowering_text_contains(generated.text, "br i1 %failed, label %failure, label %construct") || !lowering_text_contains(generated.text, "failure:\n  ret ptr null\nconstruct:") then
         failure = 6
     end
-    if !lowering_text_contains(generated.text, "store ptr null, ptr %object") || !lowering_text_contains(generated.text, "call void @free(ptr ") then
+    if !lowering_text_contains(generated.text, "store ptr @sol.dispatch") || !lowering_text_contains(generated.text, "call void @free(ptr ") then
         failure = 7
     end
     destroy_ir_program(lowered.program)
@@ -203,7 +269,7 @@ fn test_object_lowering() -> int
         if !ordered_found then
             failure = 9
         end
-        if llvm_generation_succeeded(backend) || backend.text != "" || backend.error != "LLVM virtual and interface dispatch are not implemented yet" then
+        if !llvm_generation_succeeded(backend) || backend.text == "" then
             failure = 6
         end
         if vector_length<pointer<IrType>>(module->objects) != 2 || !lowering_text_contains(formatted, "interface objects::Named") || !lowering_text_contains(formatted, "class objects::Person implements objects::Named") then

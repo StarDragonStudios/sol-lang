@@ -277,18 +277,19 @@ Constructor delegation is an explicit direct call on an existing receiver.
 The `object_new` instruction separates allocation-backed construction from direct
 destination construction, and `object_delete` preserves deletion
 of the exact concrete class pointer. Their runtime mechanics, object headers,
-field offsets, vtables and ABI are intentionally left to later backend/runtime
-phases.
+field offsets, vtables and ABI are intentionally backend/runtime concerns.
 
 Generic method dispatch is monomorphized as a closed-world graph: each reachable
 specialization includes its override and requirement/implementation counterparts.
+Requirement mappings retain every interface declaration identity even when
+semantic contract checking unifies equivalent signatures from several parents.
 Uninstantiated generic methods do not create open types in IR. Nested value-field
 mutation preserves object identity by updating a temporary struct value and
 storing it back into the original object field.
 
 The LLVM backend lowers object storage, fields, direct construction/calls and
-raw allocation/deletion. Virtual and interface dispatch remain an explicit
-unsupported-feature boundary until #141. Native layout details are documented
+raw allocation/deletion, as well as virtual and interface dispatch through
+canonical method identities. Native layout and dispatch details are documented
 in `compiler-llvm-backend.md`, not embedded in the target-independent IR.
 
 ## Local storage

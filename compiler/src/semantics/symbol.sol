@@ -15,6 +15,8 @@ struct SemanticSymbol
     interfaces: pointer<Vector<pointer<SemanticSymbol>>>
     requirements: pointer<Vector<pointer<SemanticSymbol>>>
     implementations: pointer<Vector<pointer<SemanticSymbol>>>
+    requirement_aliases: pointer<Vector<pointer<SemanticSymbol>>>
+    alias_implementations: pointer<Vector<pointer<SemanticSymbol>>>
     contract_state: int
     type: pointer<SemanticType>
     index: int
@@ -492,10 +494,14 @@ fn create_semantic_symbol(
     symbol->interfaces = null
     symbol->requirements = null
     symbol->implementations = null
+    symbol->requirement_aliases = null
+    symbol->alias_implementations = null
     if kind == semantic_symbol_kind_class() || kind == semantic_symbol_kind_interface() then
         symbol->interfaces = create_vector<pointer<SemanticSymbol>>()
         symbol->requirements = create_vector<pointer<SemanticSymbol>>()
         symbol->implementations = create_vector<pointer<SemanticSymbol>>()
+        symbol->requirement_aliases = create_vector<pointer<SemanticSymbol>>()
+        symbol->alias_implementations = create_vector<pointer<SemanticSymbol>>()
     end
     symbol->contract_state = 0
     symbol->type = null
@@ -528,6 +534,8 @@ fn destroy_semantic_symbol(symbol: pointer<SemanticSymbol>) -> void
     destroy_vector<pointer<SemanticSymbol>>(symbol->interfaces)
     destroy_vector<pointer<SemanticSymbol>>(symbol->requirements)
     destroy_vector<pointer<SemanticSymbol>>(symbol->implementations)
+    destroy_vector<pointer<SemanticSymbol>>(symbol->requirement_aliases)
+    destroy_vector<pointer<SemanticSymbol>>(symbol->alias_implementations)
     symbol->declaration = null
     symbol->owner = null
     symbol->base_class = null
