@@ -489,6 +489,8 @@ fn emit_llvm_runtime_declarations(context: pointer<LlvmGenerationContext>) -> vo
     llvm_line(context, "declare ptr @malloc(i64)")
     llvm_line(context, "declare ptr @realloc(ptr, i64)")
     llvm_line(context, "declare void @free(ptr)")
+    llvm_line(context, "declare ptr @sol_runtime_object_allocate(i64)")
+    llvm_line(context, "declare void @sol_runtime_object_delete(ptr)")
     return
 end
 
@@ -1135,7 +1137,7 @@ fn emit_llvm_object_allocator(context: pointer<LlvmGenerationContext>, construct
     llvm_line(context, "entry:")
     llvm_line(context, "  %end = getelementptr " + llvm_type(context, constructor->owner) + ", ptr null, i64 1")
     llvm_line(context, "  %size = ptrtoint ptr %end to i64")
-    llvm_line(context, "  %object = call ptr @malloc(i64 %size)")
+    llvm_line(context, "  %object = call ptr @sol_runtime_object_allocate(i64 %size)")
     llvm_line(context, "  %failed = icmp eq ptr %object, null")
     llvm_line(context, "  br i1 %failed, label %failure, label %construct")
     llvm_line(context, "failure:")
@@ -1223,7 +1225,7 @@ fn emit_llvm_object_instruction(context: pointer<LlvmGenerationContext>, instruc
     end
     if kind == ir_instruction_object_delete() then
         let value: pointer<IrValue> = vector_get<pointer<IrValue>>(instruction->operands, 0)
-        llvm_line(context, "  call void @free(ptr " + llvm_value(value, block_id, instruction_id, 0) + ")")
+        llvm_line(context, "  call void @sol_runtime_object_delete(ptr " + llvm_value(value, block_id, instruction_id, 0) + ")")
         return
     end
     llvm_fail(context, "LLVM generation encountered an unsupported object instruction")

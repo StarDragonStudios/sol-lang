@@ -157,7 +157,7 @@ fn test_object_layout_generation() -> int
     if !lowering_text_contains(generated.text, "%size = ptrtoint ptr %end to i64") || !lowering_text_contains(generated.text, "br i1 %failed, label %failure, label %construct") || !lowering_text_contains(generated.text, "failure:\n  ret ptr null\nconstruct:") then
         failure = 6
     end
-    if !lowering_text_contains(generated.text, "store ptr @sol.dispatch") || !lowering_text_contains(generated.text, "call void @free(ptr ") then
+    if !lowering_text_contains(generated.text, "store ptr @sol.dispatch") || !lowering_text_contains(generated.text, "call void @sol_runtime_object_delete(ptr ") || !lowering_text_contains(generated.text, "%object = call ptr @sol_runtime_object_allocate(i64 %size)") then
         failure = 7
     end
     destroy_ir_program(lowered.program)

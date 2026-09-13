@@ -43,6 +43,10 @@ Sol source
 
 ## Building stage 1
 
+The bootstrap tests require Python 3 (`python3` on Unix, `python` on Windows)
+alongside the seed and native Clang toolchain. Python only orchestrates host-side
+runtime tests; it is not part of the compiler or generated programs.
+
 On macOS, run:
 
 ```bash

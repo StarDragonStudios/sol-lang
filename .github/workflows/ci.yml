@@ -168,6 +168,7 @@ jobs:
                     SOL_LINKER: ${{ matrix.linker }}
                     SOL_SEED_TARGET: ${{ matrix.platform }}
                 run: |
+                    python runtime-c/test_object_lifetime.py
                     python compiler/seed/test_seed.py
                     python compiler/seed/build.py
 

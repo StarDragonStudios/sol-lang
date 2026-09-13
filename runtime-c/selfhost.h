@@ -9,6 +9,10 @@ typedef struct SolString {
     int64_t scalar_length;
 } SolString;
 
+/* Internal object storage boundary; construction and dispatch remain in LLVM. */
+void *sol_runtime_object_allocate(int64_t bytes);
+void sol_runtime_object_delete(void *object);
+
 int32_t sol_runtime_char_literal(int64_t function_id, int64_t value_id);
 void sol_runtime_string_literal(SolString *result, int64_t function_id, int64_t value_id);
 
