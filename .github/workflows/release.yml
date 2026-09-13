@@ -26,6 +26,15 @@ jobs:
         runs-on: ubuntu-latest
 
         steps:
+            -   name: Checkout release sources
+                uses: actions/checkout@v6
+
+            -   name: Validate requested tag against artifact version
+                env:
+                    RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+                run: |
+                    python -c 'import json, os, sys; version = json.load(open("compiler/seed/metadata.json"))["version"]; tag = os.environ["RELEASE_TAG"]; sys.exit(0 if tag == "v" + version else f"Tag {tag} does not match artifact version {version}")'
+
             -   name: Require the default branch for manual publication
                 env:
                     EVENT_NAME: ${{ github.event_name }}
@@ -40,7 +49,7 @@ jobs:
         name: Build native compiler (${{ matrix.platform }})
         needs: validate-source
         runs-on: ${{ matrix.runner }}
-        timeout-minutes: 90
+        timeout-minutes: 180
 
         strategy:
             fail-fast: false
@@ -80,13 +89,19 @@ jobs:
                     SOL_SEED_TARGET: ${{ matrix.platform }}
                 run: python compiler/seed/download.py
 
+            -   name: Test native object lifetime runtime
+                env:
+                    SOL_LINKER: ${{ matrix.linker }}
+                run: python runtime-c/test_object_lifetime.py
+
+            -   name: Test archive orchestration
+                run: python compiler/seed/test_seed.py
+
             -   name: Build and verify reproducible native compiler
                 env:
                     SOL_LINKER: ${{ matrix.linker }}
                     SOL_SEED_TARGET: ${{ matrix.platform }}
-                run: |
-                    python compiler/seed/test_seed.py
-                    python compiler/seed/build.py
+                run: python compiler/seed/build.py
 
             -   name: Upload native compiler release asset
                 uses: actions/upload-artifact@v7
@@ -175,7 +190,7 @@ jobs:
                 shell: bash
                 run: |
                     cat > dist/NATIVE-SEED-PROVENANCE.txt <<EOF
-                    Sol 0.1.1 native compiler seed
+                    Sol ${RELEASE_TAG#v} native compiler seed
                     tag: ${RELEASE_TAG}
                     commit: ${GITHUB_SHA}
                     repository: https://github.com/${GITHUB_REPOSITORY}
