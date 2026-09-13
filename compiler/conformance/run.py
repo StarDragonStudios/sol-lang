@@ -39,8 +39,8 @@ def make_seed_environment(environment: dict[str, str]) -> dict[str, str]:
     }
 
 
-def load_catalog() -> list[dict[str, object]]:
-    document = json.loads(CATALOG.read_text(encoding="utf-8"))
+def load_catalog(path: Path = CATALOG) -> list[dict[str, object]]:
+    document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("version") != 1 or not isinstance(document.get("cases"), list):
         fail("catalog must use version 1 and contain a cases array")
     cases = document["cases"]
@@ -242,6 +242,30 @@ def run_catalog_case(
     )
 
 
+def run_object_cases(selfhost_solc: Path, environment: dict[str, str]) -> None:
+    cases = load_catalog(CONFORMANCE / "objects.json")
+    for case in cases:
+        identifier = str(case["id"])
+        print(f"object conformance: {identifier}", flush=True)
+        root = BUILD / "objects" / identifier
+        root.mkdir(parents=True)
+        source = copy_case_source(case, root)
+        output = root / "native output"
+        result = compile_source(selfhost_solc, source, output, cwd=root, environment=environment)
+        if case["kind"] == "reject":
+            assert_result(result, int(case["compile_status"]), identifier)
+            first = result.stderr.splitlines()[0] if result.stderr.splitlines() else ""
+            if first != str(source) + str(case["diagnostic"]):
+                fail(f"{identifier}: diagnostic mismatch: {first!r}")
+            if output_executable(output).exists():
+                fail(f"{identifier}: rejected source left an executable")
+        else:
+            assert_result(result, 0, identifier)
+            assert_program_observation(output_executable(output), case,
+                                       runtime_root=root / "runtime", environment=environment,
+                                       label="Sol 0.2 candidate")
+
+
 def validate_selfhost_cli(
     selfhost_solc: Path,
     selfhost_sol: Path,
@@ -315,10 +339,13 @@ def validate_toolchain_failure(selfhost_solc: Path, environment: dict[str, str])
 
 
 def main() -> int:
+    objects_only = sys.argv[1:] == ["--objects-only"]
+    if sys.argv[1:] and not objects_only:
+        fail("expected no arguments or --objects-only")
     seed_value = os.environ.get("SOLC")
-    if not seed_value:
+    if not seed_value and not objects_only:
         fail("SOLC must identify the released Sol 0.1.1 compiler")
-    seed = Path(seed_value).resolve()
+    seed = Path(seed_value or ".").resolve()
     core = Path(os.environ.get("SOL_SELFHOST_CORE", COMPILER / "build" / "stage1" / ("solc-core.exe" if IS_WINDOWS else "solc-core"))).resolve()
     selfhost_solc = COMPILER / ("solc.bat" if IS_WINDOWS else "solc.sh")
     selfhost_sol = COMPILER / ("sol.bat" if IS_WINDOWS else "sol.sh")
@@ -331,6 +358,13 @@ def main() -> int:
     seed_environment = make_seed_environment(dict(os.environ))
     selfhost_environment, java_marker = make_no_java_environment(dict(os.environ))
     selfhost_environment["SOL_SELFHOST_CORE"] = str(core)
+
+    run_object_cases(selfhost_solc, selfhost_environment)
+    if objects_only:
+        if java_marker.exists():
+            fail("the object conformance run invoked Java")
+        print("object conformance: all cases passed")
+        return 0
 
     cases = load_catalog()
     for case in cases:

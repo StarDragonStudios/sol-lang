@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "object-dispatch",
+      "kind": "run",
+      "source": "objects/dispatch/main.sol",
+      "run_status": 0,
+      "stdin": "",
+      "stdout": "",
+      "stderr": "",
+      "files": {}
+    },
+    {
+      "id": "object-layout",
+      "kind": "run",
+      "source": "objects/layout/main.sol",
+      "run_status": 0,
+      "stdin": "",
+      "stdout": "",
+      "stderr": "",
+      "files": {}
+    },
+    {
+      "id": "object-abstract",
+      "kind": "reject",
+      "source": "objects/reject/abstract.sol",
+      "compile_status": 4,
+      "diagnostic": ":9:31: error [SOL-S093]: An abstract class cannot be constructed directly or with 'new'."
+    },
+    {
+      "id": "object-constructor-cycle",
+      "kind": "reject",
+      "source": "objects/reject/constructor-cycle.sol",
+      "compile_status": 4,
+      "diagnostic": ":4:9: error [SOL-S076]: Constructor delegation cycle in class 'Item'."
+    },
+    {
+      "id": "object-copy",
+      "kind": "reject",
+      "source": "objects/reject/copy.sol",
+      "compile_status": 4,
+      "diagnostic": ":10:17: error [SOL-S007]: Variable 'second' cannot have non-value type 'Item'."
+    },
+    {
+      "id": "object-cycle",
+      "kind": "reject",
+      "source": "objects/reject/cycle.sol",
+      "compile_status": 4,
+      "diagnostic": ":1:16: error [SOL-S078]: Class inheritance cycle involving 'First'."
+    },
+    {
+      "id": "object-delete-view",
+      "kind": "reject",
+      "source": "objects/reject/delete-view.sol",
+      "compile_status": 4,
+      "diagnostic": ":5:12: error [SOL-S096]: Operator 'delete' requires a class pointer."
+    },
+    {
+      "id": "object-downcast",
+      "kind": "reject",
+      "source": "objects/reject/downcast.sol",
+      "compile_status": 4,
+      "diagnostic": ":6:33: error [SOL-S008]: Cannot initialize variable 'child' of type 'pointer<Child>' with value of type 'pointer<Base>'."
+    },
+    {
+      "id": "object-exact-arguments",
+      "kind": "reject",
+      "source": "objects/reject/exact-arguments.sol",
+      "compile_status": 4,
+      "diagnostic": ":11:20: error [SOL-S015]: Argument of function 'accept' expects type 'pointer<Base>', but found 'pointer<Child>'."
+    },
+    {
+      "id": "object-interface",
+      "kind": "reject",
+      "source": "objects/reject/interface.sol",
+      "compile_status": 4,
+      "diagnostic": ":5:1: error [SOL-S091]: Concrete class 'Missing' does not implement 'value'."
+    },
+    {
+      "id": "object-override",
+      "kind": "reject",
+      "source": "objects/reject/override.sol",
+      "compile_status": 4,
+      "diagnostic": ":7:5: error [SOL-S080]: Overriding an inherited method requires '@override'."
+    },
+    {
+      "id": "object-private",
+      "kind": "reject",
+      "source": "objects/reject/private.sol",
+      "compile_status": 4,
+      "diagnostic": ":6:18: error [SOL-S057]: Field 'value' is not accessible in this context."
+    },
+    {
+      "id": "object-return-value",
+      "kind": "reject",
+      "source": "objects/reject/return-value.sol",
+      "compile_status": 4,
+      "diagnostic": ":3:17: error [SOL-S086]: Object return types must use pointer<Class>; direct-instance returns are not supported."
+    },
+    {
+      "id": "object-uninitialized",
+      "kind": "reject",
+      "source": "objects/reject/uninitialized.sol",
+      "compile_status": 4,
+      "diagnostic": ":5:9: error [SOL-S071]: Constructor can complete before field 'value' is initialized."
+    }
+  ]
+}
