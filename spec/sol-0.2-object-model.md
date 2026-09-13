@@ -1,14 +1,14 @@
 # Sol 0.2 object model
 
-Status: **approved source-language design, not implemented**. Tracks
+Status: **normative object-model specification for Sol 0.2**. Tracks
 [#129](https://github.com/StarDragonStudios/sol-lang/issues/129) within the
 [Sol 0.2 roadmap](https://github.com/StarDragonStudios/sol-lang/issues/113).
 
-This document defines the first Sol object model. Its examples are contracts
-for downstream compiler work. The staged frontend can represent Sol 0.2 class,
-`new` and `delete` syntax, but semantic acceptance and code generation remain
-under implementation. The Sol 0.1 specification remains normative until the
-semantic, IR, backend, runtime and conformance work is complete.
+This document defines the first Sol object model as part of the
+[Sol 0.2 specification](sol-0.2.md). Frontend, semantic analysis, typed IR,
+LLVM dispatch and native lifetime support are implemented; release validation
+and publication are tracked separately. Unchanged procedural behavior remains
+defined by the Sol 0.1 specification.
 
 ## Scope
 
@@ -199,6 +199,11 @@ normal dynamic dispatch.
 Exact interface requirements unify. Incompatible ones are errors. A compatible
 inherited concrete public method may satisfy an interface requirement.
 
+Instance methods may declare type parameters using the existing generic-function
+syntax. Reachable concrete specializations are monomorphized, including their
+override/interface counterparts. Runtime dispatch selects an implementation of
+the already resolved specialization; it does not perform overload inference.
+
 ## Constructors and definite initialization
 
 A constructor is any `fn` annotated `@constructor`. Its name is only a source
@@ -301,6 +306,11 @@ and use after delete are undefined behavior in this provisional model.
 copy of class instances is unauthorized. Direct instances do not use `delete`;
 their storage follows their destination. There are no destructors yet, so
 `delete` does not provide automatic external-resource cleanup.
+
+Allocation provenance is not tracked. A class pointer's static type alone does
+not prove that it is the original allocation view, so violating the deletion
+contract is not guaranteed to produce a diagnostic. The same resource-cleanup
+limitation applies to reconstruction and direct-storage scope exit.
 
 ## Pointer polymorphism
 
