@@ -1,6 +1,9 @@
 import unittest
 
-from run import make_seed_environment
+from run import CONFORMANCE, ConformanceFailure, load_catalog, make_seed_environment
+from pathlib import Path
+import json
+import tempfile
 
 
 class SeedEnvironmentTests(unittest.TestCase):
@@ -28,6 +31,22 @@ class SeedEnvironmentTests(unittest.TestCase):
 
     def test_environment_without_overrides_is_preserved(self):
         self.assertEqual(make_seed_environment({"PATH": "tools"}), {"PATH": "tools"})
+
+
+class ObjectCatalogTests(unittest.TestCase):
+    def test_catalogs_are_valid_and_separate(self):
+        baseline = {case["id"] for case in load_catalog()}
+        objects = load_catalog(CONFORMANCE / "objects.json")
+        self.assertFalse(baseline & {case["id"] for case in objects})
+        self.assertEqual({case["kind"] for case in objects}, {"run", "reject"})
+
+    def test_duplicate_object_case_is_rejected(self):
+        case = load_catalog(CONFORMANCE / "objects.json")[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "catalog.json"
+            path.write_text(json.dumps({"version": 1, "cases": [case, case]}))
+            with self.assertRaises(ConformanceFailure):
+                load_catalog(path)
 
 
 if __name__ == "__main__":
