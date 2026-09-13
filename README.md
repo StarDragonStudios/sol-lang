@@ -44,9 +44,10 @@ Sol source
 The complete host-native compilation pipeline is exposed through the compiler
 command-line interface.
 
-The [Sol 0.2 object-model design](spec/sol-0.2-object-model.md) records the
-approved source model and provisional manual-memory contract. It is not yet
-implemented compiler functionality.
+The [Sol 0.2 specification](spec/sol-0.2.md) defines the object model and
+provisional manual-memory contract implemented by the development compiler.
+Release validation and publication remain separate from implementation; the
+published bootstrap seed stays at Sol 0.1.1.
 
 ## Installation
 
