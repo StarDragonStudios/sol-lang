@@ -99,14 +99,30 @@ reuses that receiver and does not reset the header. Direct instances are never
 copied as aggregates and are never passed to `free` automatically.
 
 Each concrete constructor has an internal `@sol.object.newN` allocation helper.
-It derives the full class size from a one-element GEP, calls the existing
-`malloc` boundary, and returns null without entering the constructor on failure.
+It derives the full class size from a one-element GEP, calls
+`sol_runtime_object_allocate`, and returns null without entering the constructor on failure.
 On success it initializes the header, invokes the constructor exactly once and
-returns the original pointer. `delete` uses the existing `free` boundary, for
+returns the original pointer. `delete` uses `sol_runtime_object_delete`, for
 which a null argument is a no-op. The source contract still forbids deleting
 direct storage or a non-concrete view; this raw model does not add provenance,
 double-free or use-after-free checks. No destructor, resource cleanup or GC is
-introduced here; runtime lifetime hardening remains in #142.
+introduced here.
+
+The object runtime boundary is separate from raw `memory::allocate`/`free`.
+It currently uses C `malloc`/`free`, retaining their fundamental alignment;
+nonpositive or unrepresentable allocation sizes return null. LLVM owns header
+initialization and constructor invocation, while the runtime owns only the
+allocation-backed storage. Deletion neither clears aliases nor recursively
+releases pointer fields. Reconstruction and direct-storage scope exit likewise
+perform no implicit resource cleanup. There are no runtime ownership checks.
+
+`runtime-c/test_object_lifetime.py` tests invalid sizes, alignment, successful
+allocation/deletion and null deletion. With `--llvm` and `--literals` from the
+native artifact fixture it additionally forces allocator failure and verifies
+that generated construction returns null without invoking the constructor.
+The allocator interposer is test-only; the production runtime has no failure
+injection switch. Unix and Windows bootstrap run this linked regression, and
+the native distribution matrix runs the C runtime tests on all six targets.
 
 ## Dynamic method dispatch
 

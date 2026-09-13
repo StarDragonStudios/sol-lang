@@ -5,6 +5,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+void *sol_runtime_object_allocate(int64_t bytes) {
+    if (bytes <= 0 || (uint64_t)bytes > SIZE_MAX) return NULL;
+    return malloc((size_t)bytes);
+}
+
+void sol_runtime_object_delete(void *object) {
+    free(object);
+}
+
 static void sol_runtime_panic(const char *message) {
     fputs(message, stdout);
     fputc('\n', stdout);

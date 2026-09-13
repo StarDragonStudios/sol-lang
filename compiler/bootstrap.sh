@@ -132,6 +132,9 @@ compile_test "$NATIVE_ARTIFACT_SOURCE" -o "$NATIVE_ARTIFACT_OUTPUT"
 echo "bootstrap: generating deterministic native inputs"
 (cd "$REPO_ROOT" && "$NATIVE_ARTIFACT_OUTPUT")
 
+echo "bootstrap: validating object allocation failure and deletion"
+python3 "$REPO_ROOT/runtime-c/test_object_lifetime.py" --llvm "$NATIVE_FIXTURE_IR" --literals "$NATIVE_FIXTURE_LITERALS"
+
 echo "bootstrap: compiling and linking native executable"
 "$COMPILER_DIR/native-link.sh" "$NATIVE_FIXTURE_IR" "$NATIVE_FIXTURE_LITERALS" "$NATIVE_FIXTURE_OUTPUT"
 

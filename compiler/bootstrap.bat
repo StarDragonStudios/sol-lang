@@ -171,6 +171,10 @@ set "NATIVE_RESULT=%errorlevel%"
 popd
 if not "!NATIVE_RESULT!"=="0" exit /b !NATIVE_RESULT!
 
+echo bootstrap: validating object allocation failure and deletion
+python "%COMPILER_DIR%..\runtime-c\test_object_lifetime.py" --llvm "%NATIVE_FIXTURE_IR%" --literals "%NATIVE_FIXTURE_LITERALS%"
+if errorlevel 1 exit /b %errorlevel%
+
 echo bootstrap: compiling and linking native executable
 call "%COMPILER_DIR%native-link.bat" "%NATIVE_FIXTURE_IR%" "%NATIVE_FIXTURE_LITERALS%" "%NATIVE_FIXTURE_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
