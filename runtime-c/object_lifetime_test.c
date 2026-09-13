@@ -1,5 +1,9 @@
 /* Include the production implementation with a test-only allocator interposer.
  * No environment switches or failure-injection hooks enter the shipped runtime. */
+/* Exercise the portable C API without Microsoft's fopen_s migration warning. */
+#if defined(_WIN32) && !defined(_CRT_SECURE_NO_WARNINGS)
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 #include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
