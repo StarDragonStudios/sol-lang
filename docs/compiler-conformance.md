@@ -59,6 +59,30 @@ validated frontend cannot construct the invalid IR required to trigger them.
 Their stable rejection remains covered by the focused compiler lowering,
 LLVM and native-artifact suites run by the bootstrap.
 
+## Sol 0.2 object conformance
+
+`objects.json` is a separate candidate-only contract: the immutable 0.1.1 seed
+does not support objects and is not used as their behavioral oracle. Normal
+bootstrap runs both catalogs. To run only object conformance after building
+the candidate, use `python3 compiler/conformance/run.py --objects-only` with
+`SOL_SELFHOST_CORE` pointing to that core (use `python` on Windows).
+
+The readable native programs cover three-level inheritance, abstract methods,
+interface diamonds, generic dispatch, exact overload selection, constructor-time
+direct calls, private/base calls, mutation, reconstruction, embedded objects,
+target-aligned layouts, new/delete and identity-preserving pointer views.
+Twelve negative programs pin diagnostic code, message and one-based location
+for invalid copying/returns, initialization, visibility, overrides, contracts,
+abstract construction, downcasts, argument conversion, interface deletion and
+inheritance/delegation cycles. Rejections must leave no executable.
+
+The existing grammar/semantic suites cover the larger declaration and visibility
+matrix; IR/lowering suites cover canonical identities, validation failures and
+deterministic generation. The native lifetime test covers forced allocation
+failure without relying on exhausting system memory. Undefined raw-pointer
+operations are not executed as tests; in particular the compiler does not track
+allocation provenance to diagnose every invalid deletion through a class view.
+
 ## Isolation and cleanup
 
 All generated content lives under `compiler/build/conformance suite/`. Catalog
