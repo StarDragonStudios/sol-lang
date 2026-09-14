@@ -87,7 +87,7 @@ def validate_embedded_manifest(root: Path) -> None:
 
 def main() -> int:
     metadata = json.loads(METADATA.read_text(encoding="utf-8"))
-    version = metadata.get("version")
+    version = metadata.get("bootstrap_version")
     targets = metadata.get("targets")
     target = os.environ.get("SOL_SEED_TARGET")
     repository = os.environ.get("GITHUB_REPOSITORY", "StarDragonStudios/sol-lang")

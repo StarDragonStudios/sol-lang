@@ -226,6 +226,10 @@ def validate_conformance(seed: Path, core: Path, stage_name: str) -> None:
 
 
 def main() -> int:
+    if sys.argv[1:] not in ([], ["--verified-candidate-seed"]):
+        fail("expected no arguments or --verified-candidate-seed")
+    metadata = json.loads((COMPILER / "seed" / "metadata.json").read_text(encoding="utf-8"))
+    expected_version = metadata["version" if sys.argv[1:] else "bootstrap_version"]
     seed_value = os.environ.get("SOLC")
     if not seed_value:
         fail("SOLC must identify the released Sol 0.1.1 compiler")
@@ -233,8 +237,8 @@ def main() -> int:
     if not seed.is_file():
         fail(f"released seed compiler is missing: {seed}")
     version = run(seed, ["--version"], environment=dict(os.environ), label="seed version").stdout.strip()
-    if version != "Sol 0.1.1":
-        fail(f"expected Sol 0.1.1 seed compiler, got {version!r}")
+    if version != f"Sol {expected_version}":
+        fail(f"expected Sol {expected_version} seed compiler, got {version!r}")
     if BUILD.exists():
         shutil.rmtree(BUILD)
     BUILD.mkdir(parents=True)

@@ -51,6 +51,11 @@ published bootstrap seed stays at Sol 0.1.1.
 
 ## Installation
 
+Development builds now report `Sol 0.2.0`. Publication is still pending the
+[release checklist](docs/releases/sol-0.2.0.md); the following instructions refer
+to the existing published 0.1.1 seed. Candidate archives use the name
+`sol-bootstrap-0.2.0-<platform>` and the same directory/launcher layout.
+
 The official Sol 0.1.1 compiler is distributed through the portable native
 `sol-bootstrap-0.1.1-<platform>` archives. These are the verified stage-3
 toolchains produced by repeated self-compilation.

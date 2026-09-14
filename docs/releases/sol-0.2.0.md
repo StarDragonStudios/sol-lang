@@ -17,20 +17,22 @@ view. Invalid raw lifetime operations are not made safe by this release.
 
 ## Merge and version gates
 
-- [ ] Merge object conformance #143 and specification #144 with green CI.
-- [ ] Separate the immutable **input bootstrap version 0.1.1** from the
+- [x] Merge object conformance #143 and specification #144.
+- [x] Separate the immutable **input bootstrap version 0.1.1** from the
   **output distribution version 0.2.0** in metadata/download/build validation.
   Do not repoint the trusted download to an unpublished 0.2.0 seed.
-- [ ] Update both Unix and Windows launcher version output and candidate CLI
+- [x] Update both Unix and Windows launcher version output and candidate CLI
   expectations to 0.2.0, without changing the baseline seed expectations.
-- [ ] Make extracted-seed reconstruction accept the verified 0.2.0 candidate
+- [x] Make extracted-seed reconstruction accept the verified 0.2.0 candidate
   while keeping ordinary bootstrap rooted in the immutable 0.1.1 seed.
-- [ ] Update release workflow default tag, installation examples and archive
+- [x] Update release workflow default tag, installation examples and archive
   documentation after the version split is implemented.
 
-The version split is required: currently compiler/seed/metadata.json is used
-both for the trusted download and output archives. Changing its version alone
-would make CI try to download the release it is meant to build.
+`compiler/seed/metadata.json` now records `bootstrap_version` for downloads and
+`version` for output archives. Ordinary bootstrap still requires 0.1.1; only
+the extracted-package verification invokes `--verified-candidate-seed` to
+rebuild with the candidate. This option selects a version expectation, not a
+substitute for archive/checksum/provenance verification.
 
 ## Validation gates
 

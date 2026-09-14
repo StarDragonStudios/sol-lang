@@ -17,7 +17,7 @@ command_error() {
 }
 
 if [ "$#" -eq 1 ] && { [ "$1" = "--version" ] || [ "$1" = "-v" ]; }; then
-    echo "Sol 0.1.1"
+    echo "Sol 0.2.0"
     exit 0
 fi
 [ "$#" -gt 0 ] || command_error "Sol requires a command."

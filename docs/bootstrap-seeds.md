@@ -1,5 +1,18 @@
 # Native bootstrap seeds
 
+Development distribution version: **0.2.0**. Immutable input seed version:
+**0.1.1**. Metadata records these independently as `version` and
+`bootstrap_version`. Downloads continue to use the published 0.1.1 archives
+below; new candidate archives are named `sol-bootstrap-0.2.0-<target>`.
+Their publication is tracked by the [release gate](releases/sol-0.2.0.md).
+
+Fresh candidate extraction verifies checksums and provenance, compiles and
+executes both object layout and dispatch smoke programs with the packaged
+launcher, then proves that the verified candidate reproduces its own core.
+Only this last check selects `--verified-candidate-seed`; ordinary bootstrap
+continues to require the immutable input seed. Candidate overrides for core,
+standard library and native linker scripts are removed during package tests.
+
 Sol 0.1.1 publishes a minimal native bootstrap seed for each supported target:
 
 | Platform | Archive |

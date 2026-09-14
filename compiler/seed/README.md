@@ -1,6 +1,7 @@
 # Sol native compiler seed
 
-This archive is a native Sol 0.1.1 compiler toolchain and bootstrap root. It contains a
+This archive is a native Sol 0.2.0 compiler toolchain built from the immutable
+Sol 0.1.1 bootstrap root. It contains a
 stage-3 `solc-core`, public `solc` and `sol` commands, the native link driver,
 the C runtime and the canonical bootstrap standard library. It contains no
 JVM, Java classes or Java compiler launcher.
