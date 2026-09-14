@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tempfile
+import json
 import unittest
 from pathlib import Path
 
@@ -10,6 +11,11 @@ import download as trusted_seed
 
 
 class SeedArchiveTest(unittest.TestCase):
+    def test_input_seed_version_stays_immutable(self) -> None:
+        metadata = json.loads(seed.METADATA.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["bootstrap_version"], "0.1.1")
+        self.assertNotEqual(metadata["bootstrap_version"], metadata["version"])
+
     def test_released_archive_paths_must_be_canonical(self) -> None:
         self.assertTrue(trusted_seed.safe_member("sol-bootstrap-0.1.1/bin/solc"))
         self.assertFalse(trusted_seed.safe_member("../solc"))
@@ -29,7 +35,7 @@ class SeedArchiveTest(unittest.TestCase):
 
     def test_declared_target_matrix_is_complete_and_sorted(self) -> None:
         version, targets = seed.load_metadata()
-        self.assertEqual("0.1.1", version)
+        self.assertEqual("0.2.0", version)
         self.assertEqual(
             [
                 "linux-arm64",

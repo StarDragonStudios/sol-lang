@@ -9,7 +9,7 @@ function Exit-CommandError([string] $Message) {
 }
 
 if ($CliArguments.Count -eq 1 -and ($CliArguments[0] -eq "--version" -or $CliArguments[0] -eq "-v")) {
-    [Console]::Out.WriteLine("Sol 0.1.1")
+    [Console]::Out.WriteLine("Sol 0.2.0")
     exit 0
 }
 if ($CliArguments.Count -eq 0) { Exit-CommandError "Sol requires a command." }

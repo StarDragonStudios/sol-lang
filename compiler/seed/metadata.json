@@ -1,5 +1,6 @@
 {
-  "version": "0.1.1",
+  "version": "0.2.0",
+  "bootstrap_version": "0.1.1",
   "targets": [
     "linux-arm64",
     "linux-x86_64",

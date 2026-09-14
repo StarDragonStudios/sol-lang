@@ -275,7 +275,7 @@ def validate_selfhost_cli(
     cli_root.mkdir(parents=True)
     version = invoke(selfhost_solc, ["--version"], cwd=cli_root, environment=environment)
     assert_result(version, 0, "solc --version")
-    if version.stdout != "Sol 0.1.1\n":
+    if version.stdout != "Sol 0.2.0\n":
         fail(f"solc --version output mismatch: {version.stdout!r}")
     assert_result(invoke(selfhost_solc, [], cwd=cli_root, environment=environment), 2, "solc missing source")
     assert_result(

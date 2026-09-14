@@ -410,6 +410,9 @@ def verify_extracted_seed(archive: Path, root: Path, seed_environment: dict[str,
     if forbidden:
         fail(f"seed contains a Java compiler artifact: {forbidden[0]}")
     environment, marker = no_java_environment(root, seed_environment)
+    for key in list(environment):
+        if key.upper() in {"SOL_SELFHOST_CORE", "SOL_SELFHOST_STDLIB", "SOL_SELFHOST_NATIVE_LINK"}:
+            del environment[key]
     environment["SOL_REPRODUCIBLE_LINK"] = "1"
     solc, sol, core = package_commands(package)
     for command, name in ((solc, "solc"), (sol, "sol")):
@@ -424,13 +427,19 @@ def verify_extracted_seed(archive: Path, root: Path, seed_environment: dict[str,
     invoke(solc, [str(source), "-o", str(output)], environment=environment)
     invoke(output_executable(output), [], environment=environment, expected=23)
     invoke(sol, ["run", str(source)], environment=environment, expected=23)
+    for fixture in ("dispatch", "layout"):
+        object_source = source_root / f"object-{fixture}.sol"
+        copy_file(COMPILER / "conformance" / "fixtures" / "objects" / fixture / "main.sol", object_source)
+        object_output = source_root / f"object-{fixture}"
+        invoke(solc, [str(object_source), "-o", str(object_output)], environment=environment)
+        invoke(output_executable(object_output), [], environment=environment)
     rebuild = root / "native seed rebuild"
     rebuild_environment = dict(environment)
     rebuild_environment["SOLC"] = str(solc)
     rebuild_environment["SOL_REPEATED_BOOTSTRAP_BUILD"] = str(rebuild)
     invoke(
         Path(sys.executable),
-        [str(COMPILER / "repeated-bootstrap" / "run.py")],
+        [str(COMPILER / "repeated-bootstrap" / "run.py"), "--verified-candidate-seed"],
         environment=rebuild_environment,
     )
     if marker.exists():
@@ -493,8 +502,9 @@ def main() -> int:
         fail(f"bootstrap compiler is missing: {seed}")
     environment = dict(os.environ)
     reported = invoke(seed, ["--version"], environment=environment, capture=True).stdout.strip()
-    if reported != f"Sol {version}":
-        fail(f"seed metadata version {version} does not match compiler output {reported!r}")
+    bootstrap_version = json.loads(METADATA.read_text(encoding="utf-8"))["bootstrap_version"]
+    if reported != f"Sol {bootstrap_version}":
+        fail(f"bootstrap version {bootstrap_version} does not match compiler output {reported!r}")
     build = Path(os.environ.get("SOL_SEED_BUILD", DEFAULT_BUILD)).resolve()
     if build.exists():
         shutil.rmtree(build)
