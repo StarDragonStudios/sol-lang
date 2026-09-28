@@ -49,6 +49,11 @@ provisional manual-memory contract implemented by the development compiler.
 Release validation and publication remain separate from implementation; the
 published bootstrap seed stays at Sol 0.1.1.
 
+The [Sol 0.3.x design specification](spec/sol-0.3.md) records the proposed
+ownership, borrowing, result-handling, callable and concurrency contracts, with
+staged delivery and a conformance plan. It is documentation for review, not a
+claim that the current compiler implements those features.
+
 ## Installation
 
 Development builds now report `Sol 0.2.0`. Publication is still pending the
