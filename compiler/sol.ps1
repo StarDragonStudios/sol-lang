@@ -18,10 +18,24 @@ if ($Command -ne "run") { Exit-CommandError "Unknown Sol command '$Command'." }
 
 $Source = $null
 $PositionalOnly = $false
+$LanguageMode = "legacy"
+$ModeSeen = $false
 for ($Index = 1; $Index -lt $CliArguments.Count; $Index++) {
     $Argument = $CliArguments[$Index]
     if (-not $PositionalOnly -and $Argument -eq "--") {
         $PositionalOnly = $true
+        continue
+    }
+    if (-not $PositionalOnly -and ($Argument -ceq "--language-mode" -or $Argument.StartsWith("--language-mode="))) {
+        if ($null -ne $Source) { Exit-CommandError "Language mode must precede the run source." }
+        if ($ModeSeen) { Exit-CommandError "Language mode may only be specified once." }
+        $ModeSeen = $true
+        if ($Argument -ceq "--language-mode") {
+            if ($Index + 1 -ge $CliArguments.Count) { Exit-CommandError "Option '--language-mode' requires a value." }
+            $Index++
+            $LanguageMode = $CliArguments[$Index]
+        } else { $LanguageMode = $Argument.Substring("--language-mode=".Length) }
+        if ($LanguageMode -cne "legacy" -and $LanguageMode -cne "safe-experimental") { Exit-CommandError "Unknown language mode '$LanguageMode'." }
         continue
     }
     if (-not $PositionalOnly -and $Argument.StartsWith("-")) { Exit-CommandError "Unknown run option '$Argument'." }
@@ -34,7 +48,8 @@ $RunDirectory = Join-Path ([IO.Path]::GetTempPath()) ("sol-run-" + [Guid]::NewGu
 [IO.Directory]::CreateDirectory($RunDirectory) | Out-Null
 $RunOutput = Join-Path $RunDirectory "program"
 try {
-    & $Solc -o $RunOutput -- $Source
+    if ($ModeSeen) { & $Solc "--language-mode=$LanguageMode" -o $RunOutput -- $Source }
+    else { & $Solc -o $RunOutput -- $Source }
     $CompileStatus = $LASTEXITCODE
     if ($CompileStatus -ne 0) { exit $CompileStatus }
     $Executable = if ([IO.File]::Exists("$RunOutput.exe")) { "$RunOutput.exe" } else { $RunOutput }

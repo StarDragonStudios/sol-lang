@@ -71,6 +71,7 @@ fn lower_semantic_program(semantic: pointer<SemanticProgram>) -> IrLoweringResul
         return finish_lowering_failure(context, null, message)
     end
     let modules: pointer<Vector<LoweringModuleEntry>> = create_vector<LoweringModuleEntry>()
+    program->language_mode = semantic->language_mode
     @mut let module_index: int = 0
     while module_index < semantic_program_module_count(semantic) do
         let semantic_module: pointer<SemanticModule> = semantic_program_module_at(semantic, module_index)

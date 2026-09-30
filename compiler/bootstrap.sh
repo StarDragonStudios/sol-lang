@@ -232,4 +232,6 @@ fi
 echo "bootstrap: running released-versus-self-host conformance"
 SOLC="$SEED_SOLC" SOL_SELFHOST_CORE="$OUTPUT" "$COMPILER_DIR/conformance/run.sh"
 
+echo "bootstrap: validating candidate-only language modes"
+SOL_SELFHOST_CORE="$OUTPUT" python3 "$COMPILER_DIR/conformance/test_language_mode.py"
 echo "bootstrap: stage 1 ready at $OUTPUT"

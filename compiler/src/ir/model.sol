@@ -128,6 +128,7 @@ struct IrModule
 end
 
 struct IrProgram
+    language_mode: string
     arena: pointer<IrArena>
     modules: pointer<Vector<pointer<IrModule>>>
     entry_module: pointer<IrModule>
@@ -1975,6 +1976,7 @@ fn create_ir_program(arena: pointer<IrArena>) -> pointer<IrProgram>
         return null
     end
     program->arena = arena
+    program->language_mode = "legacy"
     program->modules = create_vector<pointer<IrModule>>()
     program->entry_module = null
     program->entry_function = null

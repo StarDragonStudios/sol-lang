@@ -17,6 +17,11 @@ struct NativeLiteralEntry
 end
 
 fn generate_native_artifacts(program: pointer<IrProgram>, module_name: string) -> NativeArtifactResult
+    if program != null then
+        if program->language_mode != "legacy" && program->language_mode != "safe-experimental" then
+            return NativeArtifactResult { llvm_ir: "", literals_c: "", error: "unsupported language mode" }
+        end
+    end
     let generated: LlvmGenerationResult = generate_llvm_ir(program, module_name)
     if !llvm_generation_succeeded(generated) then
         return NativeArtifactResult { llvm_ir: "", literals_c: "", error: generated.error }
@@ -27,6 +32,13 @@ fn generate_native_artifacts(program: pointer<IrProgram>, module_name: string) -
     end
     let literals: string = generate_native_literal_c(entries)
     destroy_native_literals(entries)
+    if program->language_mode == "safe-experimental" then
+        return NativeArtifactResult {
+            llvm_ir: "; sol-language-mode: safe-experimental; contract: literal-return-1; reusable-module: no\n" + generated.text,
+            literals_c: "/* sol-language-mode: safe-experimental; contract: literal-return-1; reusable-module: no */\n" + literals,
+            error: ""
+        }
+    end
     return NativeArtifactResult { llvm_ir: generated.text, literals_c: literals, error: "" }
 end
 

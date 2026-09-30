@@ -182,6 +182,7 @@ def package_tree(
     copy_file(stage3, root / "libexec" / stage3.name, executable=True)
     copy_tree(REPOSITORY / "runtime-c", root / "runtime-c")
     copy_tree(COMPILER / "stdlib", root / "stdlib")
+    copy_tree(COMPILER / "stdlib-safe", root / "stdlib-safe")
     copy_file(SEED / "README.md", root / "README.md")
     copy_file(REPOSITORY / "LICENSE", root / "LICENSE")
     copy_file(REPOSITORY / "docs" / "bootstrap-seeds.md", root / "BOOTSTRAP.md")
@@ -427,6 +428,9 @@ def verify_extracted_seed(archive: Path, root: Path, seed_environment: dict[str,
     invoke(solc, [str(source), "-o", str(output)], environment=environment)
     invoke(output_executable(output), [], environment=environment, expected=23)
     invoke(sol, ["run", str(source)], environment=environment, expected=23)
+    invoke(solc, ["--language-mode=safe-experimental", str(source), "-o", str(output)], environment=environment)
+    invoke(output_executable(output), [], environment=environment, expected=23)
+    invoke(sol, ["run", "--language-mode=safe-experimental", str(source)], environment=environment, expected=23)
     for fixture in ("dispatch", "layout"):
         object_source = source_root / f"object-{fixture}.sol"
         copy_file(COMPILER / "conformance" / "fixtures" / "objects" / fixture / "main.sol", object_source)
