@@ -28,6 +28,8 @@ SOURCE=
 OUTPUT=
 KEEP=0
 POSITIONAL_ONLY=0
+LANGUAGE_MODE=legacy
+MODE_SEEN=0
 while [ "$#" -gt 0 ]; do
     ARGUMENT=$1
     shift
@@ -37,6 +39,22 @@ while [ "$#" -gt 0 ]; do
     fi
     if [ "$POSITIONAL_ONLY" -eq 0 ]; then
         case "$ARGUMENT" in
+            --language-mode|--language-mode=*)
+                [ "$MODE_SEEN" -eq 0 ] || command_error "Language mode may only be specified once."
+                MODE_SEEN=1
+                if [ "$ARGUMENT" = "--language-mode" ]; then
+                    [ "$#" -gt 0 ] || command_error "Option '--language-mode' requires a value."
+                    LANGUAGE_MODE=$1
+                    shift
+                else
+                    LANGUAGE_MODE=${ARGUMENT#--language-mode=}
+                fi
+                case "$LANGUAGE_MODE" in
+                    legacy|safe-experimental) ;;
+                    *) command_error "Unknown language mode '$LANGUAGE_MODE'." ;;
+                esac
+                continue
+                ;;
             --keep-intermediates)
                 KEEP=1
                 continue
@@ -65,6 +83,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$SOURCE" ] || command_error "Compiler requires one Sol source file."
+if [ "$LANGUAGE_MODE" = safe-experimental ]; then
+    STANDARD_LIBRARY=$COMPILER_DIR/stdlib-safe
+    if [ ! -d "$STANDARD_LIBRARY" ]; then
+        STANDARD_LIBRARY=$COMPILER_DIR/../stdlib-safe
+    fi
+fi
 case "$SOURCE$OUTPUT" in
     *'
 '*) command_error "Bootstrap CLI paths must not contain newlines." ;;
@@ -125,14 +149,18 @@ cleanup_request() {
 }
 trap cleanup_request EXIT HUP INT TERM
 
+if [ "$LANGUAGE_MODE" = safe-experimental ]; then
+    printf '%s\n' SOL-SELFHOST-REQUEST-2 safe-experimental >"$REQUEST"
+else
+    printf '%s\n' SOL-SELFHOST-REQUEST-1 >"$REQUEST"
+fi
 printf '%s\n' \
-    SOL-SELFHOST-REQUEST-1 \
     "$SOURCE_PATH" \
     "$MODULE_ROOT" \
     "$MODULE_NAME" \
     "$STANDARD_LIBRARY" \
     "$LLVM_OUTPUT" \
-    "$LITERAL_OUTPUT" >"$REQUEST"
+    "$LITERAL_OUTPUT" >>"$REQUEST"
 
 rm -f -- "$LLVM_OUTPUT" "$LITERAL_OUTPUT"
 set +e

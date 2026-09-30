@@ -1,9 +1,10 @@
 # Experimental mode and compatibility boundary
 
-Status: **proposed design for review in #208**, to be implemented by #209 and
-the dependent safety issues. The options, request version and metadata described
-here are not implemented by this documentation PR. Merging this design approves
-the contract, not a claim that safe compilation is available.
+Status: compatibility design approved through #208. #209 implements selection,
+propagation, request v2 and a deliberately minimal literal-return subset.
+See the [implemented CLI subset](../../docs/compiler-cli.md#experimental-mode-isolation-subset).
+Ownership features and reusable artifact metadata remain dependent work; this
+contract is not a claim that complete safe compilation is available.
 
 This resolves the mode/migration gate in the [decision register](decisions.md).
 The [0.3 contract](../sol-0.3.md), unchanged [0.2 contract](../sol-0.2.md), and
@@ -200,8 +201,8 @@ feature availability. Seed promotion requires its own release/provenance gate.
 
 ## M09 — compatibility and executable fixture plan
 
-The following are required future executable cases, not tests claimed to run in
-this documentation PR. #209 owns mode/protocol cases; dependent issues own
+The following are required executable cases across the staged implementation.
+#209 owns mode/protocol cases; dependent issues own
 feature behavior. Record actual fixture paths and diagnostic evidence when
 implementing each row. Shared fixture text must be copied into isolated paths
 with spaces and run through Unix and Windows launchers where supported.
@@ -240,3 +241,23 @@ legacy default, whole-graph policy, initial mixed-mode prohibition, v1/v2 reques
 split, strict metadata compatibility and absence of automatic deprecation.
 Do not close downstream implementation tasks merely because this design is
 approved. Later design changes must update this matrix and their dependent tests.
+
+## Implementation evidence for #209
+
+`compiler/conformance/test_language_mode.py` is a candidate-only native gate,
+called by both bootstrap scripts. It covers option validation/terminators,
+legacy equivalence, safe compile/run and output identity, cyclic/transitive
+source checking, reserved library rejection, unsupported constructs and malformed
+v1/v2 requests (MODE-02, 04–06, 10–11, 13, 15–16). `compiler/src/cli_test.sol`
+also exercises request decoding, empty-field rejection, same-process
+legacy/safe/legacy analyses, unknown-mode rejection and semantic-to-IR propagation.
+The unchanged seed comparison and object suites cover MODE-01/03; repeated
+bootstrap continues in legacy, independently of safe candidate fixtures.
+
+MODE-07–09 depend on the actual ownership/parser features; rejecting them now
+is intentional, not implementation of their final semantics. MODE-12/14 have
+no compiled-module import/cache interface to exercise: all imports remain source
+recompilations, no arbitrary binary is admitted as a checked module, and output
+markers explicitly forbid reusable-module interpretation. Full metadata/ABI
+validation is required before adding such an interface. This implementation does
+not fabricate a module loader or claim a stale-cache test passed without one.

@@ -37,6 +37,14 @@ fn analyze_source_modules(
     sources: pointer<Vector<SourceModule>>,
     require_entry_point: boolean
 ) -> pointer<SemanticProgram>
+    return analyze_source_modules_in_mode(sources, require_entry_point, "legacy")
+end
+
+fn analyze_source_modules_in_mode(
+    sources: pointer<Vector<SourceModule>>,
+    require_entry_point: boolean,
+    language_mode: string
+) -> pointer<SemanticProgram>
     if sources == null then
         return null
     end
@@ -51,6 +59,7 @@ fn analyze_source_modules(
 
     @mut let index: int = 0
     let count: int = vector_length<SourceModule>(sources)
+    program->language_mode = language_mode
 
     while index < count do
         if create_semantic_module(program, vector_get<SourceModule>(sources, index)) == null then
@@ -61,6 +70,22 @@ fn analyze_source_modules(
         index = index + 1
     end
 
+    if language_mode != "legacy" then
+        index = 0
+        while index < semantic_program_module_count(program) do
+            let module: pointer<SemanticModule> = semantic_program_module_at(program, index)
+            if language_mode != "safe-experimental" then
+                semantic_report(program, module, "SOL-M003", "Unsupported language mode.", module->unit)
+            else
+                semantic_validate_mode_subset(program, module, module->unit)
+            end
+            index = index + 1
+        end
+        if semantic_program_diagnostic_count(program) > 0 then
+            semantic_finish_program(program)
+            return program
+        end
+    end
     semantic_predeclare_all(program, syntax_kind_class_declaration())
     semantic_predeclare_all(program, syntax_kind_struct_declaration())
     semantic_predeclare_all(program, syntax_kind_function_declaration())
@@ -81,6 +106,37 @@ fn analyze_source_modules(
     semantic_validate_generic_instantiations(program)
     semantic_finish_program(program)
     return program
+end
+
+fn semantic_validate_mode_subset(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, node: pointer<SyntaxNode>) -> void
+    let kind: int = node->kind
+    if kind == syntax_kind_injection_declaration() then
+        return
+    end
+    @mut let allowed: boolean = kind == syntax_kind_compilation_unit() || kind == syntax_kind_block() || kind == syntax_kind_return_statement() || kind == syntax_kind_name()
+    if kind == syntax_kind_function_declaration() then
+        allowed = node->variant == syntax_function_with_body()
+    end
+    if kind == syntax_kind_annotation() then
+        allowed = node->text == "init"
+    end
+    if kind == syntax_kind_type_reference() && syntax_child_count(node) == 1 then
+        let name: string = syntax_child(node, 0)->text
+        allowed = name == "int" || name == "void"
+    end
+    if kind == syntax_kind_literal_expression() then
+        allowed = node->variant == syntax_literal_integer()
+    end
+    if !allowed then
+        semantic_report(program, module, "SOL-M001", "Construct is not supported by the safe-experimental literal-return subset.", node)
+        return
+    end
+    @mut let index: int = 0
+    while index < syntax_child_count(node) do
+        semantic_validate_mode_subset(program, module, syntax_child(node, index))
+        index = index + 1
+    end
+    return
 end
 
 fn semantic_lookup_type_symbol(program: pointer<SemanticProgram>, module: pointer<SemanticModule>, reference: pointer<SyntaxNode>) -> pointer<SemanticSymbol>
