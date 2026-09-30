@@ -1,5 +1,9 @@
 # Compiler command-line interface
 
+This page documents implemented CLI behavior. The
+[Sol 0.3 experimental-mode proposal](../spec/sol-0.3/compatibility.md) describes
+future options and request v2 for review in #208; they are not yet supported.
+
 The native compiler is split across a compiler core written in Sol and small
 host launchers:
 

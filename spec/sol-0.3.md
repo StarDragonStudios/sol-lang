@@ -21,8 +21,9 @@ remain unchanged. In particular, 0.2 copyable structs and raw new/delete are not
 retroactively assigned safe ownership semantics. The experimental mode and
 legacy interoperability boundary must be designed in
 [#208](https://github.com/StarDragonStudios/sol-lang/issues/208) and enforced in
-[#209](https://github.com/StarDragonStudios/sol-lang/issues/209). No mode flag or
-interoperability conversion is invented by this documentation change.
+[#209](https://github.com/StarDragonStudios/sol-lang/issues/209). Concrete option
+spellings and the initial interoperability policy are isolated in the
+[compatibility proposal](sol-0.3/compatibility.md) for explicit #208 review.
 
 The immutable 0.1.1 bootstrap seed remains the trust root. The Sol-written
 compiler need not use new source features as soon as it can compile them.
@@ -58,6 +59,11 @@ heading. Stable IDs must not be reused for a different rule.
 The [decision register](sol-0.3/decisions.md) records superseded alternatives and
 open gates. [Complete examples](sol-0.3/examples.md) distinguish accepted and
 rejected programs under this proposed contract.
+
+The [experimental-mode compatibility proposal](sol-0.3/compatibility.md)
+addresses #208: explicit CLI selection, whole-graph propagation, legacy
+preservation, bootstrap protocol, metadata and mixed-mode rejection. It requires
+review before #209 implementation and does not enable new CLI options by itself.
 
 ## Delivery and availability
 
