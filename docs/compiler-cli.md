@@ -80,6 +80,13 @@ loader, cache, FFI bridge or safe/legacy binary import facility to bypass this
 check. Those facilities require the metadata validation described in the design
 before they may be enabled.
 
+The [experimental annotation grammar](compiler-annotations.md) additionally
+parses compact/multiline prefixes, arguments and explicit begin/end blocks.
+These syntax trees remain subject to the same semantic subset: future safety
+annotations and blocks are rejected with SOL-M001 until their checkers exist.
+Compact `@init fn ...` is supported in experimental mode; legacy keeps its
+existing newline requirement.
+
 Mode is stored per request, discovery, semantic program and IR program. Generic
 validation caches are per semantic analysis, never shared across mode contexts;
 the safe subset rejects generics before instantiation. No global mode or

@@ -247,6 +247,22 @@ fn syntax_kind_delete_statement() -> int
     return 40
 end
 
+fn syntax_kind_annotation_argument() -> int
+    return 41
+end
+
+fn syntax_kind_code_block_statement() -> int
+    return 42
+end
+
+fn syntax_annotation_bare() -> int
+    return 0
+end
+
+fn syntax_annotation_arguments() -> int
+    return 1
+end
+
 fn syntax_literal_integer() -> int
     return 1
 end

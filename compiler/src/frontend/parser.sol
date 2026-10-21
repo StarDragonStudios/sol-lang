@@ -12,6 +12,7 @@ struct ParseResult
 end
 
 struct Parser
+    experimental: boolean
     tokens: pointer<Vector<Token>>
     current: int
     successful: boolean
@@ -19,6 +20,10 @@ struct Parser
 end
 
 fn parse_tokens(tokens: pointer<Vector<Token>>) -> ParseResult
+    return parse_tokens_in_mode(tokens, "legacy")
+end
+
+fn parse_tokens_in_mode(tokens: pointer<Vector<Token>>, language_mode: string) -> ParseResult
     let parser: pointer<Parser> = memory::allocate<Parser>(1)
 
     if parser == null then
@@ -37,11 +42,15 @@ fn parse_tokens(tokens: pointer<Vector<Token>>) -> ParseResult
     end
 
     parser->tokens = tokens
+    parser->experimental = language_mode == "safe-experimental"
     parser->current = 0
     parser->successful = true
     parser->diagnostic = empty_diagnostic()
 
     validate_token_stream(parser)
+    if language_mode != "legacy" && language_mode != "safe-experimental" then
+        parser_fail_at_zero(parser, "SOL-P010", "Unsupported parser language mode.")
+    end
 
     @mut let root: pointer<SyntaxNode> = null
 
@@ -188,6 +197,9 @@ fn parse_top_level_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
 end
 
 fn parse_annotated_top_level_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    if parser->experimental then
+        return parse_experimental_annotated_declaration(parser, false)
+    end
     let declaration_start: Token = parser_peek(parser)
     let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
 
@@ -483,6 +495,9 @@ fn parse_class_member(parser: pointer<Parser>) -> pointer<SyntaxNode>
 end
 
 fn parse_annotated_class_member(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    if parser->experimental then
+        return parse_experimental_annotated_declaration(parser, true)
+    end
     let member_start: Token = parser_peek(parser)
     let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
 
@@ -664,6 +679,16 @@ fn parse_struct_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
 end
 
 fn parse_struct_field_declaration(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    if parser->experimental && parser_check(parser, token_kind_at()) then
+        let start: Token = parser_peek(parser)
+        let annotations: pointer<Vector<pointer<SyntaxNode>>> = parse_experimental_annotations(parser)
+        let field: pointer<SyntaxNode> = parse_plain_struct_field(parser)
+        return attach_experimental_annotations(parser, annotations, field, start)
+    end
+    return parse_plain_struct_field(parser)
+end
+
+fn parse_plain_struct_field(parser: pointer<Parser>) -> pointer<SyntaxNode>
     let name_token: Token = parser_consume(
         parser,
         token_kind_identifier(),
@@ -876,6 +901,16 @@ fn parse_parameter_list(parser: pointer<Parser>, declaration: pointer<SyntaxNode
 end
 
 fn parse_parameter(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    if parser->experimental && parser_check(parser, token_kind_at()) then
+        let start: Token = parser_peek(parser)
+        let annotations: pointer<Vector<pointer<SyntaxNode>>> = parse_experimental_annotations(parser)
+        let parameter: pointer<SyntaxNode> = parse_plain_parameter(parser)
+        return attach_experimental_annotations(parser, annotations, parameter, start)
+    end
+    return parse_plain_parameter(parser)
+end
+
+fn parse_plain_parameter(parser: pointer<Parser>) -> pointer<SyntaxNode>
     let name_token: Token = parser_consume(
         parser,
         token_kind_identifier(),
@@ -1250,6 +1285,16 @@ fn parse_statement_block(
 end
 
 fn parse_statement(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    if parser->experimental then
+        if parser_check(parser, token_kind_at()) then
+            return parse_experimental_annotated_statement(parser)
+        end
+        if parser_check(parser, token_kind_identifier()) then
+            if parser_peek(parser).lexeme == "begin" then
+                return parse_experimental_code_block(parser)
+            end
+        end
+    end
     if parser_check(parser, token_kind_return()) then
         return parse_return_statement(parser)
     end
@@ -2793,6 +2838,295 @@ fn describe_token(token: Token) -> string
     end
 
     return "'" + token.lexeme + "'"
+end
+
+fn experimental_annotation_known(name: string) -> boolean
+    return name == "init" || name == "public" || name == "protected" || name == "private" || name == "abstract" || name == "interface" || name == "constructor" || name == "destructor" || name == "mut" || name == "copy" || name == "unsafe" || name == "exit" || name == "lifetime" || name == "from" || name == "depends" || name == "must_resolve" || name == "resolves" || name == "pinned" || name == "returns" || name == "atomic" || name == "captures" || name == "shared" || name == "exclusive" || name == "once"
+end
+
+fn experimental_annotation_group(name: string) -> int
+    if name == "public" || name == "protected" || name == "private" then
+        return 1
+    end
+    if name == "shared" || name == "exclusive" || name == "once" then
+        return 2
+    end
+    if name == "abstract" || name == "interface" then
+        return 3
+    end
+    if name == "init" || name == "constructor" || name == "destructor" then
+        return 4
+    end
+    return 0
+end
+
+fn parse_experimental_annotations(parser: pointer<Parser>) -> pointer<Vector<pointer<SyntaxNode>>>
+    let annotations: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+    while parser->successful && parser_check(parser, token_kind_at()) do
+        if parser_check_next(parser, token_kind_fn()) then
+            return annotations
+        end
+        let annotation: pointer<SyntaxNode> = parse_experimental_annotation(parser)
+        if annotation != null then
+            @mut let index: int = 0
+            while index < vector_length<pointer<SyntaxNode>>(annotations) do
+                let previous: pointer<SyntaxNode> = vector_get<pointer<SyntaxNode>>(annotations, index)
+                if previous->text == annotation->text then
+                    parser_fail(parser, "SOL-P012", "Duplicate annotation '@" + annotation->text + "'.", annotation->span)
+                else
+                    let group: int = experimental_annotation_group(annotation->text)
+                    if group != 0 && experimental_annotation_group(previous->text) == group then
+                        parser_fail(parser, "SOL-P013", "Incompatible annotations '@" + previous->text + "' and '@" + annotation->text + "'.", annotation->span)
+                    end
+                end
+                index = index + 1
+            end
+            vector_push<pointer<SyntaxNode>>(annotations, annotation)
+        end
+        parser_skip_newlines(parser)
+    end
+    return annotations
+end
+
+fn parse_experimental_annotation(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let at: Token = parser_consume(parser, token_kind_at(), "'@'")
+    let name: Token = parser_consume(parser, token_kind_identifier(), "an annotation name after '@'")
+    if !parser->successful then
+        return null
+    end
+    if !experimental_annotation_known(name.lexeme) then
+        parser_fail(parser, "SOL-P011", "Unknown experimental annotation '@" + name.lexeme + "'.", name.span)
+        return null
+    end
+    let annotation: pointer<SyntaxNode> = parser_create_node(parser, syntax_kind_annotation(), syntax_annotation_bare(), name.lexeme, source_span(at.span.start, name.span.end_position))
+    if annotation == null then
+        return null
+    end
+    parser_add_name_child(parser, annotation, name)
+    if parser_match(parser, token_kind_left_paren()) then
+        annotation->variant = syntax_annotation_arguments()
+        parser_skip_delimited_newlines(parser)
+        @mut let named_seen: boolean = false
+        @mut let reading: boolean = true
+        while reading && parser->successful && !parser_check(parser, token_kind_right_paren()) do
+            let start: Token = parser_peek(parser)
+            @mut let alias: string = ""
+            if parser_check(parser, token_kind_identifier()) && parser_check_next(parser, token_kind_assign()) then
+                alias = parser_advance(parser).lexeme
+                parser_advance(parser)
+                named_seen = true
+            else
+                if named_seen then
+                    parser_fail(parser, "SOL-P015", "Positional annotation arguments must precede named arguments.", start.span)
+                end
+            end
+            let value: pointer<SyntaxNode> = parse_expression(parser)
+            if !parser->successful then
+                destroy_syntax_tree(value)
+                destroy_syntax_tree(annotation)
+                return null
+            end
+            if alias != "" then
+                @mut let index: int = 1
+                while index < syntax_child_count(annotation) do
+                    if syntax_child(annotation, index)->text == alias then
+                        parser_fail(parser, "SOL-P012", "Duplicate annotation argument '" + alias + "'.", start.span)
+                    end
+                    index = index + 1
+                end
+            end
+            let argument: pointer<SyntaxNode> = parser_create_node(parser, syntax_kind_annotation_argument(), syntax_variant_none(), alias, source_span(start.span.start, value->span.end_position))
+            if argument == null then
+                destroy_syntax_tree(value)
+                destroy_syntax_tree(annotation)
+                return null
+            end
+            syntax_add_child(argument, value)
+            syntax_add_child(annotation, argument)
+            parser_skip_delimited_newlines(parser)
+            if !parser_match(parser, token_kind_comma()) then
+                reading = false
+            else
+                parser_skip_delimited_newlines(parser)
+            end
+        end
+        let closing: Token = parser_consume(parser, token_kind_right_paren(), "')' after the annotation arguments")
+        annotation->span = source_span(at.span.start, closing.span.end_position)
+    end
+    let count: int = syntax_child_count(annotation) - 1
+    let required: boolean = name.lexeme == "exit" || name.lexeme == "lifetime" || name.lexeme == "from" || name.lexeme == "depends" || name.lexeme == "resolves" || name.lexeme == "returns" || name.lexeme == "captures"
+    if required then
+        if count == 0 then
+            parser_fail(parser, "SOL-P015", "Annotation '@" + name.lexeme + "' requires arguments.", annotation->span)
+        end
+    else
+        if annotation->variant == syntax_annotation_arguments() then
+            parser_fail(parser, "SOL-P015", "Annotation '@" + name.lexeme + "' does not accept arguments.", annotation->span)
+        end
+    end
+    if name.lexeme == "exit" && count > 0 then
+        let argument: pointer<SyntaxNode> = syntax_child(annotation, 1)
+        let value: pointer<SyntaxNode> = syntax_child(argument, 0)
+        if count != 1 || argument->text != "" || value->kind != syntax_kind_name_expression() then
+            parser_fail(parser, "SOL-P015", "Annotation '@exit' requires one function name.", annotation->span)
+        end
+    end
+    if name.lexeme == "captures" then
+        @mut let index: int = 1
+        while index < syntax_child_count(annotation) do
+            let argument: pointer<SyntaxNode> = syntax_child(annotation, index)
+            if argument->text == "" then
+                parser_fail(parser, "SOL-P015", "Capture arguments require an alias followed by '='.", argument->span)
+            end
+            index = index + 1
+        end
+    end
+    if !parser->successful then
+        destroy_syntax_tree(annotation)
+        return null
+    end
+    return annotation
+end
+
+fn parse_experimental_annotated_declaration(parser: pointer<Parser>, member: boolean) -> pointer<SyntaxNode>
+    let start: Token = parser_peek(parser)
+    let annotations: pointer<Vector<pointer<SyntaxNode>>> = parse_experimental_annotations(parser)
+    @mut let declaration: pointer<SyntaxNode> = null
+    if parser->successful then
+        if parser_match(parser, token_kind_at()) then
+            parser_consume(parser, token_kind_fn(), "'fn' after '@'")
+            let empty: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+            declaration = parse_function_declaration_after_marker(parser, empty, start, true)
+        else
+            if parser_check(parser, token_kind_fn()) then
+                declaration = parse_function_declaration(parser)
+            else
+                if member then
+                    let empty: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+                    declaration = parse_class_field_declaration(parser, empty, start)
+                else
+                    if parser_check(parser, token_kind_struct()) then
+                        declaration = parse_struct_declaration(parser)
+                    else
+                        if parser_check(parser, token_kind_class()) then
+                            let empty: pointer<Vector<pointer<SyntaxNode>>> = create_vector<pointer<SyntaxNode>>()
+                            declaration = parse_class_declaration_after_marker(parser, empty, start)
+                        else
+                            parser_expected(parser, "a function, struct or class after annotations")
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return attach_experimental_annotations(parser, annotations, declaration, start)
+end
+
+fn parse_experimental_annotated_statement(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let start: Token = parser_peek(parser)
+    let annotations: pointer<Vector<pointer<SyntaxNode>>> = parse_experimental_annotations(parser)
+    @mut let statement: pointer<SyntaxNode> = null
+    if parser->successful then
+        if parser_check(parser, token_kind_return()) then
+            statement = parse_return_statement(parser)
+        else
+            if parser_check(parser, token_kind_let()) || parser_check(parser, token_kind_const()) then
+                statement = parse_variable_declaration_statement(parser)
+            else
+                if parser_check(parser, token_kind_identifier()) then
+                    if parser_peek(parser).lexeme == "begin" then
+                        statement = parse_experimental_code_block(parser)
+                    end
+                end
+                if statement == null && parser->successful then
+                    parser_expected(parser, "a variable, return or begin block after annotations")
+                end
+            end
+        end
+    end
+    return attach_experimental_annotations(parser, annotations, statement, start)
+end
+
+fn parse_experimental_code_block(parser: pointer<Parser>) -> pointer<SyntaxNode>
+    let opening: Token = parser_consume_identifier_lexeme(parser, "begin", "'begin'")
+    let body: pointer<SyntaxNode> = parse_statement_block(parser, opening.span.end_position, token_kind_end(), -1, "a newline or 'end' after the block statement")
+    let closing: Token = parser_consume(parser, token_kind_end(), "'end' to close the begin block")
+    if !parser->successful then
+        destroy_syntax_tree(body)
+        return null
+    end
+    let statement: pointer<SyntaxNode> = parser_create_node(parser, syntax_kind_code_block_statement(), syntax_variant_none(), "", source_span(opening.span.start, closing.span.end_position))
+    if statement == null then
+        destroy_syntax_tree(body)
+        return null
+    end
+    syntax_add_child(statement, body)
+    return statement
+end
+
+fn experimental_annotation_target(name: string, kind: int) -> boolean
+    if name == "unsafe" then
+        return kind == syntax_kind_code_block_statement()
+    end
+    if name == "exit" then
+        return kind == syntax_kind_return_statement()
+    end
+    if kind == syntax_kind_return_statement() || kind == syntax_kind_code_block_statement() then
+        return false
+    end
+    if name == "mut" || name == "captures" then
+        return kind == syntax_kind_variable_declaration_statement()
+    end
+    if name == "copy" then
+        return kind == syntax_kind_struct_declaration()
+    end
+    if name == "lifetime" then
+        return kind == syntax_kind_struct_declaration() || kind == syntax_kind_class_declaration()
+    end
+    if name == "from" || name == "depends" then
+        return kind == syntax_kind_struct_field_declaration() || kind == syntax_kind_class_field_declaration() || kind == syntax_kind_function_declaration()
+    end
+    if name == "returns" || name == "resolves" || name == "init" || name == "constructor" || name == "destructor" then
+        return kind == syntax_kind_function_declaration()
+    end
+    if name == "abstract" || name == "interface" then
+        return kind == syntax_kind_class_declaration()
+    end
+    if name == "public" || name == "protected" || name == "private" then
+        return kind == syntax_kind_class_declaration() || kind == syntax_kind_class_field_declaration() || kind == syntax_kind_function_declaration()
+    end
+    return kind == syntax_kind_variable_declaration_statement() || kind == syntax_kind_parameter() || kind == syntax_kind_struct_declaration() || kind == syntax_kind_class_declaration() || kind == syntax_kind_struct_field_declaration() || kind == syntax_kind_class_field_declaration() || kind == syntax_kind_function_declaration()
+end
+
+fn attach_experimental_annotations(parser: pointer<Parser>, annotations: pointer<Vector<pointer<SyntaxNode>>>, node: pointer<SyntaxNode>, start: Token) -> pointer<SyntaxNode>
+    if node != null then
+        @mut let index: int = 0
+        while index < vector_length<pointer<SyntaxNode>>(annotations) do
+            let annotation: pointer<SyntaxNode> = vector_get<pointer<SyntaxNode>>(annotations, index)
+            if !experimental_annotation_target(annotation->text, node->kind) then
+                parser_fail(parser, "SOL-P014", "Annotation '@" + annotation->text + "' is not valid at this position.", annotation->span)
+            end
+            if annotation->text == "mut" then
+                if node->variant == syntax_variable_const() then
+                    parser_fail(parser, "SOL-P014", "Annotation '@mut' requires a let binding.", annotation->span)
+                else
+                    node->variant = syntax_variable_mutable_let()
+                end
+            end
+            if annotation->text == "unsafe" then
+                node->variant = 1
+            end
+            index = index + 1
+        end
+    end
+    if !parser->successful || node == null then
+        destroy_node_vector(annotations)
+        destroy_syntax_tree(node)
+        return null
+    end
+    node->span = source_span(start.span.start, node->span.end_position)
+    transfer_node_vector(node, annotations)
+    return node
 end
 
 fn parser_fail_at_zero(parser: pointer<Parser>, code: string, message: string) -> void
