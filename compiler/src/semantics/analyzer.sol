@@ -118,7 +118,7 @@ fn semantic_validate_mode_subset(program: pointer<SemanticProgram>, module: poin
         allowed = node->variant == syntax_function_with_body()
     end
     if kind == syntax_kind_annotation() then
-        allowed = node->text == "init"
+        allowed = node->text == "init" && node->variant == syntax_annotation_bare() && syntax_child_count(node) == 1
     end
     if kind == syntax_kind_type_reference() && syntax_child_count(node) == 1 then
         let name: string = syntax_child(node, 0)->text

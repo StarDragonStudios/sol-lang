@@ -132,6 +132,34 @@ class LanguageModeTests(unittest.TestCase):
         (self.root / "helper.sol").write_text("inject main\nfn helper() -> void\n    return\nend\n", encoding="utf-8")
         self.compile("safe-experimental")
 
+    def test_compact_init_and_annotation_grammar_boundary(self):
+        self.source.write_text("@init fn launch() -> int\nreturn 17\nend\n", encoding="utf-8")
+        self.compile("safe-experimental")
+        self.assertEqual(subprocess.run([self.output]).returncode, 17)
+        # A rejected compilation must leave an existing user output intact.
+        original = self.output.read_bytes()
+        result = self.compile("legacy", expected=4)
+        self.assertIn("error [SOL-P002]:", result.stderr)
+        self.assertEqual(self.output.read_bytes(), original)
+        self.source.write_text("@mystery fn launch() -> int\nreturn 17\nend\n", encoding="utf-8")
+        result = self.compile("safe-experimental", expected=4)
+        self.assertIn(":1:2: error [SOL-P011]: Unknown experimental annotation '@mystery'.", result.stderr)
+
+    def test_parsed_safety_annotations_do_not_enable_unchecked_semantics(self):
+        programs = [
+            "@copy struct Data\nvalue: int\nend\n" + MINIMAL,
+            "@init fn launch() -> int\n@unsafe begin\nreturn 17\nend\nend\n",
+            "@init fn launch() -> int\n@exit(launch) return 17\nend\n",
+            "@init fn launch() -> int\n@mut @pinned let value: int = 17\nreturn 17\nend\n",
+            "@returns(once) fn future() -> void\nend\n" + MINIMAL,
+        ]
+        for program in programs:
+            with self.subTest(program=program):
+                self.source.write_text(program, encoding="utf-8")
+                result = self.compile("safe-experimental", expected=4)
+                self.assertIn("error [SOL-M001]: " + SUBSET, result.stderr)
+                self.assertFalse(self.output.exists())
+
     def test_no_legacy_stdlib_fallback_or_impersonation(self):
         self.env["SOL_SELFHOST_STDLIB"] = str(COMPILER / "stdlib")
         (self.root / "std").mkdir()

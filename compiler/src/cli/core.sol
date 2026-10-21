@@ -5,7 +5,7 @@ inject namespace std.string as strings
 inject std.collections.vector
 inject frontend.diagnostic only Diagnostic
 inject frontend.lexer only LexResult, destroy_lex_result, scan_source
-inject frontend.parser only ParseResult, destroy_parse_result, parse_tokens
+inject frontend.parser only ParseResult, destroy_parse_result, parse_tokens, parse_tokens_in_mode
 inject frontend.syntax
 inject semantics.model
 inject semantics.analyzer only analyze_source_modules_in_mode
@@ -240,7 +240,7 @@ fn discover_compiler_module(discovery: pointer<CompilerDiscovery>, module_name: 
         discovery->failure = 4
         return
     end
-    parsed = parse_tokens(lexical.tokens)
+    parsed = parse_tokens_in_mode(lexical.tokens, discovery->language_mode)
     if !parsed.successful then
         print_source_diagnostic(source_path, parsed.diagnostic)
         destroy_parse_result(parsed)

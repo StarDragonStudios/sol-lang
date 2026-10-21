@@ -96,6 +96,12 @@ context isolation within one process and propagation to typed IR.
 The experimental gate does not assert ownership/borrowing support. Those
 features require their own candidate-only fixtures as they are implemented.
 
+The focused `annotation_test.sol` suite validates experimental annotation ASTs,
+argument/target diagnostics and explicit blocks. See the
+[grammar/AST contract](compiler-annotations.md). Legacy parser and grammar
+suites still use `parse_tokens`; the public candidate gate verifies that parsing
+new syntax does not bypass semantic subset rejection.
+
 ## Isolation and cleanup
 
 All generated content lives under `compiler/build/conformance suite/`. Catalog

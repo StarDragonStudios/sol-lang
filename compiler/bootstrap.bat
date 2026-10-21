@@ -19,6 +19,8 @@ set "PARSER_TEST_SOURCE=%COMPILER_DIR%src\parser_test.sol"
 set "PARSER_TEST_OUTPUT=%TEST_BUILD_DIR%\parser_test.exe"
 set "GRAMMAR_TEST_SOURCE=%COMPILER_DIR%src\grammar_test.sol"
 set "GRAMMAR_TEST_OUTPUT=%TEST_BUILD_DIR%\grammar_test.exe"
+set "ANNOTATION_TEST_SOURCE=%COMPILER_DIR%src\annotation_test.sol"
+set "ANNOTATION_TEST_OUTPUT=%TEST_BUILD_DIR%\annotation_test.exe"
 set "SEMANTIC_FOUNDATION_TEST_SOURCE=%COMPILER_DIR%src\semantic_foundation_test.sol"
 set "SEMANTIC_FOUNDATION_TEST_OUTPUT=%TEST_BUILD_DIR%\semantic_foundation_test.exe"
 set "SEMANTIC_ANALYSIS_TEST_SOURCE=%COMPILER_DIR%src\semantic_analysis_test.sol"
@@ -102,6 +104,12 @@ if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: validating complete self-host grammar
 "%GRAMMAR_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+
+echo bootstrap: compiling experimental annotation grammar tests
+call "%COMPILER_DIR%solc.bat" "%ANNOTATION_TEST_SOURCE%" -o "%ANNOTATION_TEST_OUTPUT%"
+if errorlevel 1 exit /b %errorlevel%
+"%ANNOTATION_TEST_OUTPUT%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo bootstrap: compiling self-host semantic foundation tests

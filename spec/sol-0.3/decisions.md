@@ -27,9 +27,13 @@ updated conformance witnesses; do not silently edit historical Sol 0.2 rules.
 
 ## Open design and implementation gates
 
-G01 now has an [explicit proposal](compatibility.md) in #208. Its CLI,
-compatibility and protocol choices remain subject to PR review; the proposal
-does not claim #209 is implemented. G03's exact safe factory API remains open.
+G01's [compatibility contract](compatibility.md) was approved in #208; #209
+implements mode isolation with the [literal-return subset](../../docs/compiler-cli.md).
+G03's exact safe factory API remains open.
+
+G02 has a candidate [grammar and AST contract](../../docs/compiler-annotations.md)
+in #210. Argument syntax and prefix positions are represented separately from
+future lifetime, callable and unsafe semantics; those checker gates remain open.
 
 These questions are deliberately not answered with invented APIs. The owning
 issue must record its reviewed decision before dependent implementation merges.
