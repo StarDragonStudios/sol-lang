@@ -53,6 +53,7 @@ jobs:
                 run: |
                     python compiler/seed/test_seed.py
                     python compiler/conformance/test_conformance.py
+                    PYTHONPATH=compiler/conformance python -m unittest test_language_mode.DiagnosticPathTests
 
     compiler-bootstrap:
         name: Compiler bootstrap (Linux)

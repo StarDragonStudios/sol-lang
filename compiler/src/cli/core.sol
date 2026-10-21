@@ -8,7 +8,7 @@ inject frontend.lexer only LexResult, destroy_lex_result, scan_source
 inject frontend.parser only ParseResult, destroy_parse_result, parse_tokens
 inject frontend.syntax
 inject semantics.model
-inject semantics.analyzer only analyze_executable_program
+inject semantics.analyzer only analyze_source_modules_in_mode
 inject lowering.model only IrLoweringResult
 inject lowering.program only lower_semantic_program
 inject ir.model only destroy_ir_program
@@ -16,6 +16,7 @@ inject ir.formatter only format_ir_int
 inject backend.native
 
 struct CompilerRequest
+    language_mode: string
     source_path: string
     module_root: string
     module_name: string
@@ -32,6 +33,7 @@ struct CompilerSource
 end
 
 struct CompilerDiscovery
+    language_mode: string
     sources: pointer<Vector<pointer<CompilerSource>>>
     failure: int
 end
@@ -60,8 +62,10 @@ fn compiler_request_fields(text: string) -> pointer<Vector<string>>
     while index < strings::length(text) do
         let scalar: char = text[index]
         if scalar == '\n' then
-            if strings::length(current) > 0 && current[strings::length(current) - 1] == '\r' then
-                current = strings::slice(current, 0, strings::length(current) - 1)
+            if strings::length(current) > 0 then
+                if current[strings::length(current) - 1] == '\r' then
+                    current = strings::slice(current, 0, strings::length(current) - 1)
+                end
             end
             vector_push<string>(fields, current)
             current = ""
@@ -73,12 +77,20 @@ fn compiler_request_fields(text: string) -> pointer<Vector<string>>
     if current != "" then
         vector_push<string>(fields, current)
     end
-    if vector_length<string>(fields) != 7 || vector_get<string>(fields, 0) != "SOL-SELFHOST-REQUEST-1" then
+    let count: int = vector_length<string>(fields)
+    @mut let valid: boolean = false
+    if count == 7 then
+        valid = vector_get<string>(fields, 0) == "SOL-SELFHOST-REQUEST-1"
+    end
+    if count == 8 then
+        valid = vector_get<string>(fields, 0) == "SOL-SELFHOST-REQUEST-2" && vector_get<string>(fields, 1) == "safe-experimental"
+    end
+    if !valid then
         destroy_vector<string>(fields)
         return null
     end
     index = 1
-    while index < 7 do
+    while index < count do
         if vector_get<string>(fields, index) == "" then
             destroy_vector<string>(fields)
             return null
@@ -89,22 +101,34 @@ fn compiler_request_fields(text: string) -> pointer<Vector<string>>
 end
 
 fn compiler_request_from_fields(fields: pointer<Vector<string>>) -> CompilerRequest
+    @mut let offset: int = 0
+    @mut let mode: string = "legacy"
+    if vector_length<string>(fields) == 8 then
+        offset = 1
+        mode = "safe-experimental"
+    end
     return CompilerRequest {
-        source_path: vector_get<string>(fields, 1),
-        module_root: vector_get<string>(fields, 2),
-        module_name: vector_get<string>(fields, 3),
-        standard_library_root: vector_get<string>(fields, 4),
-        llvm_output: vector_get<string>(fields, 5),
-        literal_output: vector_get<string>(fields, 6)
+        language_mode: mode,
+        source_path: vector_get<string>(fields, 1 + offset),
+        module_root: vector_get<string>(fields, 2 + offset),
+        module_name: vector_get<string>(fields, 3 + offset),
+        standard_library_root: vector_get<string>(fields, 4 + offset),
+        llvm_output: vector_get<string>(fields, 5 + offset),
+        literal_output: vector_get<string>(fields, 6 + offset)
     }
 end
 
 fn compile_request(request: CompilerRequest) -> int
+    if request.language_mode != "legacy" && request.language_mode != "safe-experimental" then
+        console::print_line("command-line error: unsupported language mode")
+        return 2
+    end
     let discovery: pointer<CompilerDiscovery> = create_compiler_discovery()
     if discovery == null then
         console::print_line("input error: source discovery allocation failed")
         return 3
     end
+    discovery->language_mode = request.language_mode
     discover_compiler_module(discovery, request.module_name, request.source_path, request.module_root, request.standard_library_root, true)
     if discovery->failure != 0 then
         let failure: int = discovery->failure
@@ -118,7 +142,7 @@ fn compile_request(request: CompilerRequest) -> int
         vector_push<SourceModule>(modules, source_module(source->module_name, source->parsed.root))
         index = index + 1
     end
-    let semantic: pointer<SemanticProgram> = analyze_executable_program(modules)
+    let semantic: pointer<SemanticProgram> = analyze_source_modules_in_mode(modules, true, request.language_mode)
     destroy_vector<SourceModule>(modules)
     if semantic == null then
         console::print_line("input error: semantic analysis allocation failed")
@@ -167,6 +191,7 @@ fn create_compiler_discovery() -> pointer<CompilerDiscovery>
         return null
     end
     discovery->sources = create_vector<pointer<CompilerSource>>()
+    discovery->language_mode = "legacy"
     discovery->failure = 0
     return discovery
 end
@@ -241,11 +266,26 @@ fn discover_compiler_module(discovery: pointer<CompilerDiscovery>, module_name: 
         let declaration: pointer<SyntaxNode> = syntax_child(parsed.root, index)
         if declaration->kind == syntax_kind_injection_declaration() then
             let injected: string = syntax_child(declaration, 0)->text
+            if discovery->language_mode == "safe-experimental" && compiler_reserved_standard_module(injected) then
+                console::print_line(source_path + ":" + format_ir_int(declaration->span.start.line) + ":" + format_ir_int(declaration->span.start.column) + ": error [SOL-M002]: Standard library imports are unavailable in the safe-experimental subset; legacy fallback is forbidden.")
+                discovery->failure = 4
+                return
+            end
             discover_compiler_module(discovery, injected, "", module_root, standard_library_root, false)
         end
         index = index + 1
     end
     return
+end
+
+fn compiler_reserved_standard_module(name: string) -> boolean
+    if name == "std" then
+        return true
+    end
+    if strings::length(name) >= 4 then
+        return strings::slice(name, 0, 4) == "std."
+    end
+    return false
 end
 
 fn compiler_source_for(discovery: pointer<CompilerDiscovery>, module_name: string) -> pointer<CompilerSource>

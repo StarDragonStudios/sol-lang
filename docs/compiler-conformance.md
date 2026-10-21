@@ -83,6 +83,19 @@ failure without relying on exhausting system memory. Undefined raw-pointer
 operations are not executed as tests; in particular the compiler does not track
 allocation provenance to diagnose every invalid deletion through a class view.
 
+## Candidate-only language modes
+
+After building stage 1, run `python3 compiler/conformance/test_language_mode.py`
+(`python` on Windows), optionally selecting the core with `SOL_SELFHOST_CORE`.
+Both bootstrap scripts run this gate. It checks native legacy equivalence,
+experimental subset rejection, graph/stdlib isolation, mode-marked retained
+artifacts, option parity and strict v1/v2 protocol handling. It never invokes
+the immutable seed with new options. `cli_test.sol` additionally tests mode
+context isolation within one process and propagation to typed IR.
+
+The experimental gate does not assert ownership/borrowing support. Those
+features require their own candidate-only fixtures as they are implemented.
+
 ## Isolation and cleanup
 
 All generated content lives under `compiler/build/conformance suite/`. Catalog

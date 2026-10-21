@@ -27,6 +27,8 @@ shift
 
 SOURCE=
 POSITIONAL_ONLY=0
+LANGUAGE_MODE=legacy
+MODE_SEEN=0
 while [ "$#" -gt 0 ]; do
     ARGUMENT=$1
     shift
@@ -36,6 +38,23 @@ while [ "$#" -gt 0 ]; do
     fi
     if [ "$POSITIONAL_ONLY" -eq 0 ]; then
         case "$ARGUMENT" in
+            --language-mode|--language-mode=*)
+                [ -z "$SOURCE" ] || command_error "Language mode must precede the run source."
+                [ "$MODE_SEEN" -eq 0 ] || command_error "Language mode may only be specified once."
+                MODE_SEEN=1
+                if [ "$ARGUMENT" = "--language-mode" ]; then
+                    [ "$#" -gt 0 ] || command_error "Option '--language-mode' requires a value."
+                    LANGUAGE_MODE=$1
+                    shift
+                else
+                    LANGUAGE_MODE=${ARGUMENT#--language-mode=}
+                fi
+                case "$LANGUAGE_MODE" in
+                    legacy|safe-experimental) ;;
+                    *) command_error "Unknown language mode '$LANGUAGE_MODE'." ;;
+                esac
+                continue
+                ;;
             -*) command_error "Unknown run option '$ARGUMENT'." ;;
         esac
     fi
@@ -55,7 +74,11 @@ cleanup_run() {
 trap cleanup_run EXIT HUP INT TERM
 
 set +e
-"$SOLC" -o "$RUN_OUTPUT" -- "$SOURCE"
+if [ "$MODE_SEEN" -eq 1 ]; then
+    "$SOLC" "--language-mode=$LANGUAGE_MODE" -o "$RUN_OUTPUT" -- "$SOURCE"
+else
+    "$SOLC" -o "$RUN_OUTPUT" -- "$SOURCE"
+fi
 COMPILE_STATUS=$?
 set -e
 if [ "$COMPILE_STATUS" -ne 0 ]; then

@@ -1,8 +1,9 @@
 # Compiler command-line interface
 
 This page documents implemented CLI behavior. The
-[Sol 0.3 experimental-mode proposal](../spec/sol-0.3/compatibility.md) describes
-future options and request v2 for review in #208; they are not yet supported.
+[Sol 0.3 mode contract](../spec/sol-0.3/compatibility.md) defines the compatibility
+boundary. Only the mode-isolation subset below is implemented; it is not the
+complete Sol 0.3 ownership/borrowing language.
 
 The native compiler is split across a compiler core written in Sol and small
 host launchers:
@@ -36,6 +37,8 @@ solc program.sol --output=output
 solc --keep-intermediates program.sol
 solc -- program.sol
 solc --version
+solc --language-mode=legacy program.sol
+solc --language-mode safe-experimental program.sol
 ```
 
 The default executable is the absolute source path without its `.sol` suffix.
@@ -49,6 +52,45 @@ and current working directory. Once launched, its status is returned unchanged.
 
 Compiler command failures retain the public categories: command line 2, input
 3, frontend 4, lowering 5, backend 6, toolchain 7 and execution 8.
+
+## Experimental mode-isolation subset
+
+Omitted mode is `legacy`; explicit `--language-mode=legacy` is equivalent.
+`--language-mode VALUE` and `--language-mode=VALUE` are accepted once, with
+case-sensitive values `legacy` or `safe-experimental`. Unknown, blank, missing
+and duplicate values fail with status 2. `sol run` accepts this option before
+the source/`--` and forwards it unchanged; default runs pass no new flag to
+overridden compilers. Text after `--` is a source path, not a mode option.
+
+`safe-experimental` currently allows only parameterless functions with bodies,
+int/void return types, integer-literal or void returns, `@init`, and injections
+of local source modules that satisfy the same restrictions. Ordinary entry-point
+and semantic validation still applies. Cyclic source imports remain supported.
+Structs, classes, variables, arithmetic, calls, generics, pointers and all other
+unchecked syntax fail with source-located `SOL-M001` (or existing lexer/parser
+diagnostics for syntax not yet parsed). This deliberately small allowlist is a
+mode-isolation test surface, **not a Rust-level safety checker**.
+
+All `std`/`std.*` imports fail with `SOL-M002`. The safe library root is the
+separate, currently empty `stdlib-safe` shipped with the compiler. Neither the
+legacy library override nor filesystem impersonation can provide a fallback.
+Legacy sources are not mixed in as trusted compiled modules: reachable local
+source is rechecked in the selected mode. There is no precompiled Sol module
+loader, cache, FFI bridge or safe/legacy binary import facility to bypass this
+check. Those facilities require the metadata validation described in the design
+before they may be enabled.
+
+Mode is stored per request, discovery, semantic program and IR program. Generic
+validation caches are per semantic analysis, never shared across mode contexts;
+the safe subset rejects generics before instantiation. No global mode or
+environment-driven mode default exists. Unknown internal modes are rejected.
+
+Retained safe LLVM/C outputs record `safe-experimental`, the implementation
+contract `literal-return-1`, and `reusable-module: no`. This marker identifies
+output, not authenticated reusable module metadata. No artifact with missing or
+stale metadata is accepted as a safe module because no such import path exists.
+Legacy artifact contents remain unchanged. Tool version and immutable input seed
+are unchanged; the new flag does not publish a Sol 0.3 release.
 
 ## Source discovery
 
@@ -92,6 +134,13 @@ by this protocol; spaces are supported throughout.
 
 The request pipe is independent of the launcher's own stdin. Consequently,
 `sol run` does not consume input intended for the compiled program.
+
+Version 1 always selects legacy. Safe requests instead have eight lines: header
+`SOL-SELFHOST-REQUEST-2`, mode `safe-experimental`, then the same six fields (with
+the separate safe library root). No other mode is valid in v2. The core validates
+mode and count independently of the launcher. Unsupported versions, empty fields
+and malformed mode values return status 2; launchers never retry using v1.
+Existing seven-line requests and old launchers keep their legacy behavior.
 
 ## Artifact ownership
 

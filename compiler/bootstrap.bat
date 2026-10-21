@@ -277,5 +277,8 @@ echo bootstrap: running released-versus-self-host conformance
 call "%COMPILER_DIR%conformance\run.bat"
 if errorlevel 1 exit /b %errorlevel%
 
+echo bootstrap: validating candidate-only language modes
+python "%COMPILER_DIR%conformance\test_language_mode.py"
+if errorlevel 1 exit /b %errorlevel%
 echo bootstrap: stage 1 ready at %OUTPUT%
 exit /b 0

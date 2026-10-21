@@ -23,6 +23,8 @@ $Source = $null
 $Output = $null
 $Keep = $false
 $PositionalOnly = $false
+$LanguageMode = "legacy"
+$ModeSeen = $false
 for ($Index = 0; $Index -lt $CliArguments.Count; $Index++) {
     $Argument = $CliArguments[$Index]
     if (-not $PositionalOnly -and $Argument -eq "--") {
@@ -30,6 +32,17 @@ for ($Index = 0; $Index -lt $CliArguments.Count; $Index++) {
         continue
     }
     if (-not $PositionalOnly) {
+        if ($Argument -ceq "--language-mode" -or $Argument.StartsWith("--language-mode=")) {
+            if ($ModeSeen) { Exit-CommandError "Language mode may only be specified once." }
+            $ModeSeen = $true
+            if ($Argument -ceq "--language-mode") {
+                if ($Index + 1 -ge $CliArguments.Count) { Exit-CommandError "Option '--language-mode' requires a value." }
+                $Index++
+                $LanguageMode = $CliArguments[$Index]
+            } else { $LanguageMode = $Argument.Substring("--language-mode=".Length) }
+            if ($LanguageMode -cne "legacy" -and $LanguageMode -cne "safe-experimental") { Exit-CommandError "Unknown language mode '$LanguageMode'." }
+            continue
+        }
         if ($Argument -eq "--keep-intermediates") {
             $Keep = $true
             continue
@@ -55,6 +68,10 @@ for ($Index = 0; $Index -lt $CliArguments.Count; $Index++) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Source)) { Exit-CommandError "Compiler requires one Sol source file." }
+if ($LanguageMode -ceq "safe-experimental") {
+    $SafeLibrary = Join-Path $SelfhostDirectory "stdlib-safe"
+    $StandardLibrary = if ([IO.Directory]::Exists($SafeLibrary)) { $SafeLibrary } else { Join-Path $SelfhostDirectory "..\stdlib-safe" }
+}
 if ($Source -match "[\r\n]" -or ($null -ne $Output -and $Output -match "[\r\n]")) {
     Exit-CommandError "Bootstrap CLI paths must not contain newlines."
 }
@@ -112,15 +129,15 @@ $Utf8NoBom = [Text.UTF8Encoding]::new($false)
 $LlvmOutput = "$Output.sol-selfhost.ll"
 $LiteralOutput = "$Output.sol-selfhost-literals.c"
 try {
-    [IO.File]::WriteAllLines($Request, [string[]] @(
-        "SOL-SELFHOST-REQUEST-1",
+    [string[]] $Header = if ($LanguageMode -ceq "safe-experimental") { @("SOL-SELFHOST-REQUEST-2", "safe-experimental") } else { @("SOL-SELFHOST-REQUEST-1") }
+    [IO.File]::WriteAllLines($Request, [string[]] ($Header + @(
         $SourcePath,
         $ModuleRoot,
         $ModuleName,
         [IO.Path]::GetFullPath($StandardLibrary),
         $LlvmOutput,
         $LiteralOutput
-    ), $Utf8NoBom)
+    )), $Utf8NoBom)
     [IO.File]::WriteAllText($CoreInput, "$Request`n", $Utf8NoBom)
     Remove-Item -LiteralPath $LlvmOutput, $LiteralOutput -Force -ErrorAction SilentlyContinue
 

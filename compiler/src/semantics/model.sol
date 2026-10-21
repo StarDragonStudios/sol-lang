@@ -35,6 +35,7 @@ struct SemanticDiagnostic
 end
 
 struct SemanticProgram
+    language_mode: string
     catalog: pointer<TypeCatalog>
     modules: pointer<Vector<pointer<SemanticModule>>>
     scopes: pointer<Vector<pointer<Scope>>>
@@ -64,6 +65,7 @@ fn create_semantic_program(require_entry_point: boolean) -> pointer<SemanticProg
     end
 
     program->catalog = create_type_catalog()
+    program->language_mode = "legacy"
     program->modules = create_vector<pointer<SemanticModule>>()
     program->scopes = create_vector<pointer<Scope>>()
     program->owned_symbols = create_vector<pointer<SemanticSymbol>>()

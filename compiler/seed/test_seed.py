@@ -56,6 +56,10 @@ class SeedArchiveTest(unittest.TestCase):
             executable.write_bytes(b"#!/bin/sh\nexit 0\n")
             executable.chmod(0o755)
             (root / "README.md").write_text("Sol 🐉\n", encoding="utf-8")
+            # Prefix siblings sort differently before/after directory '/' suffixes.
+            for directory in ("stdlib", "stdlib-safe", "stdlib.safe"):
+                (root / directory).mkdir()
+                (root / directory / "README.md").write_text(directory, encoding="utf-8")
             (root / "SHA256SUMS").write_bytes(seed.file_manifest(root))
 
             for extension in ("tar.gz", "zip"):
