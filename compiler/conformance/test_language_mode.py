@@ -13,6 +13,46 @@ MINIMAL = "@init\nfn launch() -> int\n    return 17\nend\n"
 SUBSET = "Construct is not supported by the safe-experimental literal-return subset."
 
 
+def assert_source_diagnostic(test, actual, source, code, message):
+    # Compare physical file identity, not spelling: Windows expands 8.3 temp
+    # paths and discovery can join native roots with POSIX separators. Keep the
+    # complete location, severity, code and message comparison exact.
+    path, separator, diagnostic = actual.strip().partition(":1:1: ")
+    test.assertEqual(separator, ":1:1: ", actual)
+    test.assertEqual(diagnostic, f"error [{code}]: {message}")
+    test.assertTrue(Path(path).samefile(source), f"wrong diagnostic source: {path}")
+
+
+class DiagnosticPathTests(unittest.TestCase):
+    def test_equivalent_path_and_exact_diagnostic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "main.sol"
+            source.touch()
+            (root / "nested").mkdir()
+            alias = root / "nested" / ".." / "main.sol"
+            assert_source_diagnostic(self, f"{alias.as_posix()}:1:1: error [SOL-M001]: {SUBSET}", source, "SOL-M001", SUBSET)
+
+    def test_wrong_file_position_code_message_or_extra_output_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "main.sol"
+            other = Path(directory) / "other.sol"
+            source.touch()
+            other.touch()
+            valid = f"{source}:1:1: error [SOL-M001]: {SUBSET}"
+            for actual in (
+                valid.replace(str(source), str(other)),
+                valid.replace(":1:1: ", ":2:1: "),
+                valid.replace(":1:1: ", ":1:2: "),
+                valid.replace("SOL-M001", "SOL-M002"),
+                valid.replace("error [", "warning ["),
+                valid + " changed",
+                valid + "\nextra diagnostic",
+            ):
+                with self.subTest(actual=actual), self.assertRaises(AssertionError):
+                    assert_source_diagnostic(self, actual, source, "SOL-M001", SUBSET)
+
+
 class LanguageModeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="sol mode fixtures ")
@@ -82,7 +122,7 @@ class LanguageModeTests(unittest.TestCase):
         helper = self.root / "helper.sol"
         helper.write_text("struct Data\n    value: int\nend\n", encoding="utf-8")
         result = self.compile("safe-experimental", expected=4)
-        self.assertEqual(result.stderr.strip(), f"{helper}:1:1: error [SOL-M001]: {SUBSET}")
+        assert_source_diagnostic(self, result.stderr, helper, "SOL-M001", SUBSET)
         self.assertFalse(self.output.exists())
         self.assertFalse(Path(str(self.output) + ".sol-selfhost.ll").exists())
         self.compile("legacy")
@@ -100,7 +140,7 @@ class LanguageModeTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.source.write_text(f"inject {module}\n" + MINIMAL, encoding="utf-8")
                 result = self.compile("safe-experimental", expected=4)
-                self.assertEqual(result.stderr.strip(), f"{self.source}:1:1: error [SOL-M002]: Standard library imports are unavailable in the safe-experimental subset; legacy fallback is forbidden.")
+                assert_source_diagnostic(self, result.stderr, self.source, "SOL-M002", "Standard library imports are unavailable in the safe-experimental subset; legacy fallback is forbidden.")
         self.assertFalse(self.output.exists())
 
     def test_unsupported_raw_and_unchecked_features_fail_closed(self):

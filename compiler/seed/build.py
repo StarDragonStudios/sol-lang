@@ -217,7 +217,9 @@ def archive_entries(root: Path) -> list[tuple[Path, str]]:
         (path, f"{root.name}/{path.relative_to(root).as_posix()}")
         for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix())
     )
-    return entries
+    # Sort the serialized member names, including the directory suffix used by
+    # both archive readers. Otherwise 'stdlib' incorrectly precedes 'stdlib-safe/'.
+    return sorted(entries, key=lambda entry: entry[1] + ("/" if entry[0].is_dir() else ""))
 
 
 def archive_mode(path: Path, name: str) -> int:
